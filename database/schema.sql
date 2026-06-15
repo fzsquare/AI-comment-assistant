@@ -1,0 +1,138 @@
+CREATE DATABASE IF NOT EXISTS ppk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE ppk;
+
+CREATE TABLE IF NOT EXISTS admin_users (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  account VARCHAR(64) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  name VARCHAR(128) NOT NULL,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS merchant_users (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  account VARCHAR(64) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  merchant_name VARCHAR(128) NOT NULL,
+  contact_name VARCHAR(128) NOT NULL,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS stores (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  merchant_user_id BIGINT UNSIGNED NOT NULL UNIQUE,
+  store_name VARCHAR(128) NOT NULL,
+  industry_type VARCHAR(64) DEFAULT '',
+  store_intro TEXT,
+  address VARCHAR(255) DEFAULT '',
+  primary_platform_style VARCHAR(64) NOT NULL,
+  brand_tone VARCHAR(255) DEFAULT '',
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_store_merchant FOREIGN KEY (merchant_user_id) REFERENCES merchant_users(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_keywords (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  keyword VARCHAR(128) NOT NULL,
+  sort_no INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_store_keywords_store_id (store_id),
+  CONSTRAINT fk_keyword_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_images (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  image_url VARCHAR(500) NOT NULL,
+  thumbnail_url VARCHAR(500) DEFAULT '',
+  status TINYINT NOT NULL DEFAULT 1,
+  sort_no INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_store_images_store_id (store_id),
+  CONSTRAINT fk_image_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_platform_links (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_code VARCHAR(64) NOT NULL,
+  platform_name VARCHAR(128) NOT NULL,
+  button_text VARCHAR(128) NOT NULL,
+  target_url VARCHAR(500) NOT NULL,
+  backup_url VARCHAR(500) DEFAULT '',
+  sort_no INT NOT NULL DEFAULT 0,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_store_platform_code (store_id, platform_code),
+  CONSTRAINT fk_platform_link_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS review_items (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_style VARCHAR(64) NOT NULL,
+  content TEXT NOT NULL,
+  source_type VARCHAR(32) NOT NULL,
+  generation_batch_no VARCHAR(64) NOT NULL,
+  is_dispatched TINYINT(1) NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'available',
+  dispatched_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_review_items_store_id (store_id),
+  INDEX idx_review_items_dispatch (store_id, status, is_dispatched),
+  CONSTRAINT fk_review_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS review_display_logs (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  review_item_id BIGINT UNSIGNED NULL,
+  nfc_tag_id BIGINT UNSIGNED NULL,
+  session_id VARCHAR(128) NOT NULL,
+  action_type VARCHAR(64) NOT NULL,
+  platform_code VARCHAR(64) DEFAULT '',
+  client_ip VARCHAR(64) DEFAULT '',
+  user_agent VARCHAR(255) DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_review_logs_store_id (store_id),
+  INDEX idx_review_logs_session_id (session_id),
+  CONSTRAINT fk_log_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS review_generation_tasks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_style VARCHAR(64) NOT NULL,
+  trigger_type VARCHAR(32) NOT NULL,
+  target_count INT NOT NULL,
+  success_count INT NOT NULL DEFAULT 0,
+  failed_count INT NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'pending',
+  error_message TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_generation_tasks_store_id (store_id),
+  CONSTRAINT fk_task_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS nfc_tags (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  tag_code VARCHAR(128) NOT NULL UNIQUE,
+  store_id BIGINT UNSIGNED NULL,
+  landing_token VARCHAR(128) NOT NULL UNIQUE,
+  status VARCHAR(32) NOT NULL DEFAULT 'unbound',
+  remark VARCHAR(255) DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_nfc_tags_store_id (store_id),
+  CONSTRAINT fk_nfc_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
