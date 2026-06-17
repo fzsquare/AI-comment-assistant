@@ -17,7 +17,17 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	r.Use(middleware.CORS())
 
 	authService := &service.AuthService{DB: db, Config: cfg}
-	reviewPoolService := &service.ReviewPoolService{DB: db, Generator: &service.MockReviewGenerator{}}
+
+	// 主生成器：有 agent 服务地址就走 Python 文案 agent，否则回退内置 Mock。
+	var generator service.ReviewGenerator = &service.MockReviewGenerator{}
+	if cfg.AgentServiceURL != "" {
+		generator = service.NewAgentReviewGenerator(cfg.AgentServiceURL, cfg.AgentMinGrade)
+	}
+	reviewPoolService := &service.ReviewPoolService{
+		DB:        db,
+		Generator: generator,
+		Fallback:  &service.MockReviewGenerator{}, // 池空且 agent 不可用时即时兜底，避免白屏
+	}
 
 	merchant := merchantHandler.NewHandler(db, cfg, authService, reviewPoolService)
 	admin := adminHandler.NewHandler(db, cfg, authService, reviewPoolService)

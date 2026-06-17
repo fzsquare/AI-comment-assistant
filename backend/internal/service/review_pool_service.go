@@ -14,16 +14,20 @@ import (
 type ReviewPoolService struct {
 	DB        *gorm.DB
 	Generator ReviewGenerator
+	// Fallback 在评价池为空且主生成器（agent）不可用时，即时产出一条兜底文案，
+	// 保证落地页不白屏。通常注入内置 MockReviewGenerator。
+	Fallback ReviewGenerator
 }
 
 type LandingPayload struct {
-	SessionID                 string                    `json:"sessionId"`
-	StoreName                 string                    `json:"storeName"`
-	PrimaryPlatformStyle      string                    `json:"primaryPlatformStyle"`
-	Review                    model.ReviewItem          `json:"review"`
-	Images                    []model.StoreImage        `json:"images"`
-	PlatformLinks             []model.StorePlatformLink `json:"platformLinks"`
-	RemainingDispatchableCount int64                    `json:"remainingDispatchableCount"`
+	SessionID                  string                    `json:"sessionId"`
+	StoreName                  string                    `json:"storeName"`
+	PrimaryPlatformStyle       string                    `json:"primaryPlatformStyle"`
+	Review                     model.ReviewItem          `json:"review"`
+	Keywords                   []model.StoreKeyword      `json:"keywords"` // 顾客可选的菜品/场景 chips
+	Images                     []model.StoreImage        `json:"images"`
+	PlatformLinks              []model.StorePlatformLink `json:"platformLinks"`
+	RemainingDispatchableCount int64                     `json:"remainingDispatchableCount"`
 }
 
 func (s *ReviewPoolService) GenerateForStore(storeID uint, triggerType string, targetCount int) error {
@@ -101,6 +105,91 @@ func (s *ReviewPoolService) EnsureDispatchableStock(storeID uint) error {
 	return s.GenerateForStore(storeID, model.TriggerAutoRefill, target)
 }
 
+// dispatchOne 从池中取一条可发放评价并标记已发放。
+// tag 非空时优先取带该标签的评价，无匹配则回退取任意一条。
+//
+// 并发安全：用「条件更新 + 重试」而非 select-then-save，避免两个并发请求
+// 选中同一行后双双发放（双发）。UPDATE ... WHERE is_dispatched=false 是原子的，
+// RowsAffected==0 说明被别的请求抢先发放了，重新选一条。
+func (s *ReviewPoolService) dispatchOne(storeID uint, tag string) (*model.ReviewItem, error) {
+	const maxAttempts = 5
+	// base 每次重建：GORM 会就地改写 *gorm.DB，链式条件不能复用
+	base := func() *gorm.DB {
+		return s.DB.Where("store_id = ? AND status = ? AND is_dispatched = ?",
+			storeID, model.ReviewStatusAvailable, false)
+	}
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		var review model.ReviewItem
+		found := false
+		if tag != "" {
+			e := base().Where("tags LIKE ?", "%"+tag+"%").Order("RAND()").First(&review).Error
+			if e == nil {
+				found = true
+			} else if !errors.Is(e, gorm.ErrRecordNotFound) {
+				return nil, e // 真实 DB 错误，不当作“无匹配”吞掉
+			}
+		}
+		if !found {
+			if e := base().Order("RAND()").First(&review).Error; e != nil {
+				return nil, e // 含 ErrRecordNotFound（池空），交由上层兜底
+			}
+		}
+
+		now := time.Now()
+		res := s.DB.Model(&model.ReviewItem{}).
+			Where("id = ? AND is_dispatched = ?", review.ID, false).
+			Updates(map[string]any{"is_dispatched": true, "dispatched_at": now})
+		if res.Error != nil {
+			return nil, res.Error
+		}
+		if res.RowsAffected == 1 {
+			review.IsDispatched = true
+			review.DispatchedAt = &now
+			return &review, nil
+		}
+		// RowsAffected==0：被并发抢走，重试
+	}
+	// 高并发下连续抢空，等价于暂时取不到，交由上层兜底
+	return nil, gorm.ErrRecordNotFound
+}
+
+// ensureViaFallback 在池为空时用 Mock 即时补 1 条可发放文案，保证不白屏。
+func (s *ReviewPoolService) ensureViaFallback(store model.Store) error {
+	if s.Fallback == nil {
+		return errors.New("无兜底生成器")
+	}
+	var keywords []model.StoreKeyword
+	s.DB.Where("store_id = ?", store.ID).Find(&keywords)
+	// 只补 1 条：仅为不白屏兜底，避免把低质 Mock 文案大量混入池子
+	reviews, err := s.Fallback.Generate(store, keywords, 1)
+	if err != nil || len(reviews) == 0 {
+		return errors.New("兜底生成失败")
+	}
+	for i := range reviews {
+		reviews[i].StoreID = store.ID
+		reviews[i].PlatformStyle = store.PrimaryPlatformStyle
+		reviews[i].SourceType = "fallback"
+		reviews[i].GenerationBatchNo = "fallback_" + utils.RandomString(8)
+		reviews[i].Status = model.ReviewStatusAvailable
+	}
+	return s.DB.Create(&reviews).Error
+}
+
+// dispatchWithFallback 先正常取；池空则兜底补一条再取一次。
+func (s *ReviewPoolService) dispatchWithFallback(store model.Store, tag string) (*model.ReviewItem, error) {
+	review, err := s.dispatchOne(store.ID, tag)
+	if err == nil {
+		return review, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if fbErr := s.ensureViaFallback(store); fbErr == nil {
+			return s.dispatchOne(store.ID, tag)
+		}
+	}
+	return nil, errors.New("暂无推荐文案，请稍后再试")
+}
+
 func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayload, error) {
 	var tag model.NFCTag
 	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tag).Error; err != nil {
@@ -112,20 +201,13 @@ func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayloa
 		return nil, errors.New("商家服务已暂停")
 	}
 
-	var review model.ReviewItem
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("store_id = ? AND status = ? AND is_dispatched = ?", store.ID, model.ReviewStatusAvailable, false).
-			Order("RAND()").First(&review).Error; err != nil {
-			return err
-		}
-		now := time.Now()
-		review.IsDispatched = true
-		review.DispatchedAt = &now
-		return tx.Save(&review).Error
-	})
+	review, err := s.dispatchWithFallback(store, "")
 	if err != nil {
-		return nil, errors.New("暂无推荐文案，请稍后再试")
+		return nil, err
 	}
+
+	var keywords []model.StoreKeyword
+	s.DB.Where("store_id = ?", store.ID).Order("sort_no asc, id asc").Find(&keywords)
 
 	var images []model.StoreImage
 	s.DB.Where("store_id = ? AND status = ?", store.ID, model.StatusEnabled).Order("sort_no asc, id asc").Limit(3).Find(&images)
@@ -142,41 +224,38 @@ func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayloa
 	_ = s.EnsureDispatchableStock(store.ID)
 
 	return &LandingPayload{
-		SessionID:                 utils.RandomString(16),
-		StoreName:                 store.StoreName,
-		PrimaryPlatformStyle:      store.PrimaryPlatformStyle,
-		Review:                    review,
-		Images:                    images,
-		PlatformLinks:             links,
+		SessionID:                  utils.RandomString(16),
+		StoreName:                  store.StoreName,
+		PrimaryPlatformStyle:       store.PrimaryPlatformStyle,
+		Review:                     *review,
+		Keywords:                   keywords,
+		Images:                     images,
+		PlatformLinks:              links,
 		RemainingDispatchableCount: remaining,
 	}, nil
 }
 
-func (s *ReviewPoolService) SwitchReview(token string) (*model.ReviewItem, int64, error) {
-	var tag model.NFCTag
-	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tag).Error; err != nil {
+// SwitchReview 换一换；tag 非空时按顾客选择的菜品/场景标签取。
+func (s *ReviewPoolService) SwitchReview(token string, tag string) (*model.ReviewItem, int64, error) {
+	var tagRow model.NFCTag
+	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tagRow).Error; err != nil {
 		return nil, 0, errors.New("页面暂不可用")
 	}
 
-	var review model.ReviewItem
-	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("store_id = ? AND status = ? AND is_dispatched = ?", tag.StoreID, model.ReviewStatusAvailable, false).
-			Order("RAND()").First(&review).Error; err != nil {
-			return err
-		}
-		now := time.Now()
-		review.IsDispatched = true
-		review.DispatchedAt = &now
-		return tx.Save(&review).Error
-	})
+	var store model.Store
+	if err := s.DB.Where("id = ? AND status = ?", tagRow.StoreID, model.StatusEnabled).First(&store).Error; err != nil {
+		return nil, 0, errors.New("商家服务已暂停")
+	}
+
+	review, err := s.dispatchWithFallback(store, tag)
 	if err != nil {
-		return nil, 0, errors.New("暂无推荐文案，请稍后再试")
+		return nil, 0, err
 	}
 
 	var remaining int64
 	s.DB.Model(&model.ReviewItem{}).
-		Where("store_id = ? AND status = ? AND is_dispatched = ?", tag.StoreID, model.ReviewStatusAvailable, false).
+		Where("store_id = ? AND status = ? AND is_dispatched = ?", store.ID, model.ReviewStatusAvailable, false).
 		Count(&remaining)
-	_ = s.EnsureDispatchableStock(tag.StoreID)
-	return &review, remaining, nil
+	_ = s.EnsureDispatchableStock(store.ID)
+	return review, remaining, nil
 }

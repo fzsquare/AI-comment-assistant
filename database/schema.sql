@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS review_items (
   store_id BIGINT UNSIGNED NOT NULL,
   platform_style VARCHAR(64) NOT NULL,
   content TEXT NOT NULL,
+  tags VARCHAR(255) NOT NULL DEFAULT '',
   source_type VARCHAR(32) NOT NULL,
   generation_batch_no VARCHAR(64) NOT NULL,
   is_dispatched TINYINT(1) NOT NULL DEFAULT 0,

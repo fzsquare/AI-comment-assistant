@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# 编译产物（源是 .ts/.vue，由 vite/vue-tsc 生成，不入库）
+src/**/*.js
+src/**/*.vue.js
+src/*.js
+src/*.vue.js
