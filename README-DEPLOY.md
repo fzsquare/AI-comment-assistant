@@ -85,7 +85,7 @@ scripts/      # 一键部署脚本与 public gateway
 
 ```bash
 cp .env.deploy.example .env.deploy
-# 编辑 .env.deploy，至少确认 MYSQL_DSN 与 LLM_API_KEY
+# 编辑 .env.deploy，至少确认 MYSQL_DSN 可连接、LLM_API_KEY 已填写
 scripts/deploy.sh start
 ```
 
@@ -109,6 +109,8 @@ scripts/deploy.sh stop
 
 `scripts/deploy.sh start` 会执行：
 
+- 启动前预检 `LLM_API_KEY`
+- 从 `MYSQL_DSN` 解析 MySQL host/port 并预检 TCP 连通性
 - `go mod download`
 - `npm ci`
 - `python3 -m venv agent-service/.venv`
@@ -118,6 +120,12 @@ scripts/deploy.sh stop
 - 后台启动 agent-service、backend、public gateway
 
 运行日志和 PID 文件位于 `.deploy/`。`JWT_SECRET` 与 `AGENT_INTERNAL_TOKEN` 未配置时会自动生成到 `.deploy/runtime.env`。
+
+如果 `LLM_API_KEY` 为空，脚本默认会停止，因为 agent-service 虽可探活但生成会返回 503。仅在需要先启动 UI/API、不启用 AI 生成时，才设置：
+
+```bash
+ALLOW_EMPTY_LLM_KEY=true
+```
 
 如果希望脚本初始化 MySQL，可在 `.env.deploy` 中设置：
 

@@ -438,7 +438,7 @@ Browser
 
 ```bash
 cp .env.deploy.example .env.deploy
-# 编辑 .env.deploy，至少确认 MYSQL_DSN 与 LLM_API_KEY
+# 编辑 .env.deploy，至少确认 MYSQL_DSN 可连接、LLM_API_KEY 已填写
 scripts/deploy.sh start
 ```
 
@@ -470,6 +470,8 @@ MYSQL_ROOT_PASSWORD=<root-password>
 ```
 
 `JWT_SECRET` 与 `AGENT_INTERNAL_TOKEN` 不填时，脚本会自动生成并保存到 `.deploy/runtime.env`。`.env.deploy` 与 `.deploy/` 已被 git 忽略，不应提交。
+
+脚本启动前会先检查 MySQL host/port 是否能从服务器连通，并默认要求 `LLM_API_KEY` 不为空。若只想先启动 UI/API 而暂不启用 AI 生成，可在 `.env.deploy` 中设置 `ALLOW_EMPTY_LLM_KEY=true`。
 
 ## 7.3 手动单机部署流程
 

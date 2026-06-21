@@ -37,6 +37,7 @@ Useful env:
   ENV_FILE=.env.deploy        Optional deployment env file
   FRONTEND_PORT=8989          Public gateway/frontend port
   BACKEND_PORT=18989          Local-only Go backend port
+  ALLOW_EMPTY_LLM_KEY=true    Allow UI/API startup without AI generation
   INIT_DB=true                Optionally create/import MySQL schema
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
   SKIP_INSTALL=true           Reuse installed dependencies
@@ -140,6 +141,7 @@ configure_defaults() {
   fi
 
   LLM_API_KEY="${LLM_API_KEY:-}"
+  ALLOW_EMPTY_LLM_KEY="${ALLOW_EMPTY_LLM_KEY:-false}"
   LLM_BASE_URL="${LLM_BASE_URL:-https://api.openai.com/v1}"
   LLM_MODEL="${LLM_MODEL:-gpt-5.4}"
   MIN_PASS_SCORE="${MIN_PASS_SCORE:-80}"
@@ -148,7 +150,9 @@ configure_defaults() {
   AGENT_MIN_GRADE="${AGENT_MIN_GRADE:-B}"
   MAX_REVIEW_GENERATE_COUNT="${MAX_REVIEW_GENERATE_COUNT:-50}"
   DEFAULT_REVIEW_TARGET_COUNT="${DEFAULT_REVIEW_TARGET_COUNT:-10}"
+}
 
+ensure_runtime_secrets() {
   touch "$RUNTIME_ENV"
   chmod 600 "$RUNTIME_ENV"
   ensure_secret JWT_SECRET
@@ -186,6 +190,80 @@ validate_config() {
       die "MYSQL_DSN still contains a placeholder; edit $ENV_FILE or unset MYSQL_DSN to use local defaults"
       ;;
   esac
+}
+
+mysql_dsn_endpoint() {
+  MYSQL_DSN="$MYSQL_DSN" python3 - <<'PY'
+import os
+import re
+import sys
+
+dsn = os.environ.get("MYSQL_DSN", "")
+match = re.search(r"@tcp\(([^)]*)\)", dsn)
+if not match:
+    sys.exit(2)
+
+address = match.group(1).strip()
+if address.startswith("["):
+    end = address.find("]")
+    if end == -1:
+        sys.exit(2)
+    host = address[1:end]
+    rest = address[end + 1 :]
+    port = rest[1:] if rest.startswith(":") else "3306"
+elif ":" in address:
+    host, port = address.rsplit(":", 1)
+else:
+    host, port = address, "3306"
+
+print((host or "127.0.0.1") + " " + (port or "3306"))
+PY
+}
+
+check_mysql_reachable() {
+  local endpoint host port
+
+  if ! endpoint="$(mysql_dsn_endpoint)"; then
+    printf '[deploy] ERROR: MYSQL_DSN must use tcp(host:port), got: %s\n' "$MYSQL_DSN" >&2
+    return 1
+  fi
+
+  read -r host port <<< "$endpoint"
+  if port_open "$host" "$port"; then
+    log "MySQL TCP endpoint is reachable at $host:$port"
+    return 0
+  fi
+
+  cat >&2 <<EOF
+[deploy] ERROR: MySQL is not reachable at $host:$port from MYSQL_DSN.
+[deploy]        Fix one of these before starting backend:
+[deploy]        - start MySQL on this server, for example: sudo systemctl enable --now mysql
+[deploy]        - install MySQL first if this is a fresh server
+[deploy]        - change MYSQL_DSN in $ENV_FILE to a reachable MySQL host
+[deploy]        - if the server is running but schema/user are missing, set INIT_DB=true and DB_APP_PASSWORD
+EOF
+  return 1
+}
+
+validate_runtime_config() {
+  local failed=0
+
+  if [[ -z "$LLM_API_KEY" ]] && ! truthy "$ALLOW_EMPTY_LLM_KEY"; then
+    cat >&2 <<EOF
+[deploy] ERROR: LLM_API_KEY is empty.
+[deploy]        agent-service can start without it, but AI generation will return 503.
+[deploy]        Set LLM_API_KEY in $ENV_FILE, or set ALLOW_EMPTY_LLM_KEY=true for UI/API-only startup.
+EOF
+    failed=1
+  fi
+
+  if ! check_mysql_reachable; then
+    failed=1
+  fi
+
+  if ((failed != 0)); then
+    die "preflight failed; fix $ENV_FILE or server dependencies, then rerun scripts/deploy.sh start"
+  fi
 }
 
 init_db_if_requested() {
@@ -406,23 +484,35 @@ tail_logs() {
   tail -n 120 -f "${files[@]}"
 }
 
+case "$COMMAND" in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+esac
+
 load_env_files
 
 case "$COMMAND" in
   start|restart)
+    require_base_commands
     configure_defaults
     validate_config
+    validate_runtime_config
+    ensure_runtime_secrets
     install_dependencies
     init_db_if_requested
     build_project
     start_services
     ;;
   install)
+    require_base_commands
     configure_defaults
     validate_config
     install_dependencies
     ;;
   build)
+    require_base_commands
     configure_defaults
     validate_config
     install_dependencies
