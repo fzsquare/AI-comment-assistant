@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-type Role = 'merchant' | 'admin' | ''
+export type Role = 'merchant' | 'admin' | ''
 
 export const useAuthStore = defineStore('auth', {
   state: () => ({

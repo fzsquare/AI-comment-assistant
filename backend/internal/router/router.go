@@ -14,14 +14,14 @@ import (
 
 func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	r := gin.Default()
-	r.Use(middleware.CORS())
+	r.Use(middleware.CORS(cfg.AllowedOrigins))
 
 	authService := &service.AuthService{DB: db, Config: cfg}
 
 	// 主生成器：有 agent 服务地址就走 Python 文案 agent，否则回退内置 Mock。
 	var generator service.ReviewGenerator = &service.MockReviewGenerator{}
 	if cfg.AgentServiceURL != "" {
-		generator = service.NewAgentReviewGenerator(cfg.AgentServiceURL, cfg.AgentMinGrade)
+		generator = service.NewAgentReviewGenerator(cfg.AgentServiceURL, cfg.AgentMinGrade, cfg.AgentInternalToken)
 	}
 	reviewPoolService := &service.ReviewPoolService{
 		DB:        db,

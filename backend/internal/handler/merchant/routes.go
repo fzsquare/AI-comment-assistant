@@ -1,21 +1,24 @@
 package merchant
 
 import (
+	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
+	"strings"
 
+	"ppk/backend/internal/middleware"
 	"ppk/backend/internal/model"
 	"ppk/backend/internal/pkg/response"
 
 	"github.com/gin-gonic/gin"
-	"ppk/backend/internal/middleware"
 )
 
 func (h *Handler) Register(api *gin.RouterGroup) {
 	api.POST("/merchant/auth/login", h.login)
 
 	merchant := api.Group("/merchant")
-	merchant.Use(middleware.AuthRequired(h.Config.JWTSecret, "merchant"))
+	merchant.Use(middleware.AuthRequired(h.Config.JWTSecret, middleware.DBStatusChecker(h.DB), "merchant"))
 	{
 		merchant.GET("/store/detail", h.getStoreDetail)
 		merchant.PUT("/store/detail", h.updateStoreDetail)
@@ -59,6 +62,40 @@ func (h *Handler) currentStore(c *gin.Context) (*model.Store, error) {
 func parseUintParam(c *gin.Context, key string) uint {
 	id, _ := strconv.ParseUint(c.Param(key), 10, 64)
 	return uint(id)
+}
+
+func validateHTTPURL(raw string, required bool) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if required {
+			return errors.New("url is required")
+		}
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return err
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return errors.New("url scheme must be http or https")
+	}
+	if u.Host == "" {
+		return errors.New("url host is required")
+	}
+	return nil
+}
+
+func normalizeTargetCount(value, defaultValue, maxValue int) (int, error) {
+	if value == 0 {
+		value = defaultValue
+	}
+	if value < 0 {
+		return 0, errors.New("targetCount must be greater than 0")
+	}
+	if value > maxValue {
+		return 0, errors.New("targetCount exceeds maximum")
+	}
+	return value, nil
 }
 
 type loginRequest struct {
@@ -223,6 +260,10 @@ func (h *Handler) createImage(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
+	if err := validateHTTPURL(req.ImageURL, true); err != nil || validateHTTPURL(req.ThumbnailURL, false) != nil {
+		response.Error(c, http.StatusBadRequest, "URL 协议不支持")
+		return
+	}
 	item := model.StoreImage{StoreID: store.ID, ImageURL: req.ImageURL, ThumbnailURL: req.ThumbnailURL, SortNo: req.SortNo, Status: model.StatusEnabled}
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "创建失败")
@@ -276,6 +317,10 @@ func (h *Handler) createPlatformLink(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
+	if err := validateHTTPURL(req.TargetURL, true); err != nil || validateHTTPURL(req.BackupURL, false) != nil {
+		response.Error(c, http.StatusBadRequest, "URL 协议不支持")
+		return
+	}
 	item := model.StorePlatformLink{StoreID: store.ID, PlatformCode: req.PlatformCode, PlatformName: req.PlatformName, ButtonText: req.ButtonText, TargetURL: req.TargetURL, BackupURL: req.BackupURL, SortNo: req.SortNo, Status: req.Status}
 	if item.Status == 0 {
 		item.Status = model.StatusEnabled
@@ -299,8 +344,12 @@ func (h *Handler) updatePlatformLink(c *gin.Context) {
 		return
 	}
 	var req platformLinkRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil || req.TargetURL == "" || req.PlatformCode == "" {
 		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	if err := validateHTTPURL(req.TargetURL, true); err != nil || validateHTTPURL(req.BackupURL, false) != nil {
+		response.Error(c, http.StatusBadRequest, "URL 协议不支持")
 		return
 	}
 	item.PlatformCode = req.PlatformCode
@@ -343,7 +392,9 @@ func (h *Handler) updatePlatformLinkStatus(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "平台链接不存在")
 		return
 	}
-	var req struct{ Status int `json:"status"` }
+	var req struct {
+		Status int `json:"status"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
@@ -384,7 +435,9 @@ func (h *Handler) createReview(c *gin.Context) {
 		return
 	}
 	status := req.Status
-	if status == "" { status = model.ReviewStatusAvailable }
+	if status == "" {
+		status = model.ReviewStatusAvailable
+	}
 	item := model.ReviewItem{StoreID: store.ID, PlatformStyle: store.PrimaryPlatformStyle, Content: req.Content, SourceType: "manual", GenerationBatchNo: "manual", Status: status}
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "创建失败")
@@ -410,7 +463,9 @@ func (h *Handler) updateReview(c *gin.Context) {
 		return
 	}
 	item.Content = req.Content
-	if req.Status != "" { item.Status = req.Status }
+	if req.Status != "" {
+		item.Status = req.Status
+	}
 	if err := h.DB.Save(&item).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "更新失败")
 		return
@@ -444,14 +499,23 @@ func (h *Handler) generateReviews(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "门店不存在")
 		return
 	}
-	var req struct{ TargetCount int `json:"targetCount"` }
-	_ = c.ShouldBindJSON(&req)
-	if req.TargetCount <= 0 { req.TargetCount = 10 }
-	if err := h.ReviewPool.GenerateForStore(store.ID, model.TriggerManual, req.TargetCount); err != nil {
+	var req struct {
+		TargetCount int `json:"targetCount"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+	targetCount, err := normalizeTargetCount(req.TargetCount, h.Config.DefaultReviewTargetCount, h.Config.MaxReviewGenerateCount)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "targetCount 超出允许范围")
+		return
+	}
+	if err := h.ReviewPool.GenerateForStore(store.ID, model.TriggerManual, targetCount); err != nil {
 		response.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	response.Success(c, gin.H{"generated": req.TargetCount})
+	response.Success(c, gin.H{"generated": targetCount})
 }
 
 func (h *Handler) listGenerationTasks(c *gin.Context) {

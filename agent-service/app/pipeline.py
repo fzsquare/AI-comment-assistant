@@ -18,6 +18,7 @@ from .constraints.registry import get_spec
 from .jsonutil import extract_json
 from .prompts.reviewer import build_reviewer_user
 from .prompts.writer import build_revise_user, build_writer_user
+from .reviewer_logic import clamp_score, reviewer_passes
 from .schemas import GenerateRequest, GenerateResponse, ReviewItem
 
 
@@ -60,9 +61,10 @@ async def _run_reviewer(
     result = await Runner.run(agent, user)
     try:
         data = extract_json(result.final_output or "")
-        score = int(data.get("score", 0))
-        grade = (str(data.get("grade", "")).strip().upper()[:1]) or _grade_from_score(score)
-        passed = bool(data.get("pass", score >= settings.min_pass_score))
+        score = clamp_score(data.get("score", 0))
+        raw_grade = str(data.get("grade", "")).strip().upper()[:1]
+        grade = raw_grade if raw_grade in {"S", "A", "B", "C", "D"} else _grade_from_score(score)
+        passed = reviewer_passes(data.get("pass"), score, settings.min_pass_score)
         issues = [str(i).strip() for i in (data.get("issues") or []) if str(i).strip()]
         return score, grade, passed, issues
     except (ValueError, TypeError):
@@ -130,6 +132,8 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
         else:
             # 单条失败不影响整批；记录原因便于排查（填池可由 Go 侧后续补量）
             logging.warning("第 %d 条生成失败：%r", i, r)
+    if not items:
+        raise RuntimeError("本批次未生成任何评价，请检查模型服务或输入约束。")
     return GenerateResponse(
         platform=req.platform,
         requested=req.count,

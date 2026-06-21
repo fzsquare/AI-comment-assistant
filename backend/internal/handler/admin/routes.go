@@ -16,7 +16,7 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 	api.POST("/admin/auth/login", h.login)
 
 	admin := api.Group("/admin")
-	admin.Use(middleware.AuthRequired(h.Config.JWTSecret, "admin"))
+	admin.Use(middleware.AuthRequired(h.Config.JWTSecret, middleware.DBStatusChecker(h.DB), "admin"))
 	{
 		admin.GET("/merchants", h.listMerchants)
 		admin.PUT("/merchants/:id/status", h.updateMerchantStatus)
@@ -38,7 +38,7 @@ func uintParam(c *gin.Context) uint {
 
 func (h *Handler) login(c *gin.Context) {
 	var req struct {
-		Account string `json:"account"`
+		Account  string `json:"account"`
 		Password string `json:"password"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -65,7 +65,9 @@ func (h *Handler) updateMerchantStatus(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "商家不存在")
 		return
 	}
-	var req struct { Status int `json:"status"` }
+	var req struct {
+		Status int `json:"status"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
@@ -90,7 +92,9 @@ func (h *Handler) updateStoreStatus(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "门店不存在")
 		return
 	}
-	var req struct { Status int `json:"status"` }
+	var req struct {
+		Status int `json:"status"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
@@ -110,9 +114,11 @@ func (h *Handler) listTags(c *gin.Context) {
 }
 
 func (h *Handler) createTag(c *gin.Context) {
-	var req struct { TagCode, Remark string }
+	var req struct{ TagCode, Remark string }
 	_ = c.ShouldBindJSON(&req)
-	if req.TagCode == "" { req.TagCode = "TAG-" + utils.RandomString(8) }
+	if req.TagCode == "" {
+		req.TagCode = "TAG-" + utils.RandomString(8)
+	}
 	item := model.NFCTag{TagCode: req.TagCode, LandingToken: utils.RandomString(16), Status: model.TagStatusUnbound, Remark: req.Remark}
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "创建失败")
@@ -127,7 +133,9 @@ func (h *Handler) bindTag(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "标签不存在")
 		return
 	}
-	var req struct { StoreID uint `json:"storeId"` }
+	var req struct {
+		StoreID uint `json:"storeId"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil || req.StoreID == 0 {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
@@ -147,7 +155,9 @@ func (h *Handler) updateTagStatus(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "标签不存在")
 		return
 	}
-	var req struct { Status string `json:"status"` }
+	var req struct {
+		Status string `json:"status"`
+	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
@@ -174,8 +184,8 @@ func (h *Handler) stats(c *gin.Context) {
 	h.DB.Model(&model.ReviewGenerationTask{}).Count(&taskCount)
 	response.Success(c, gin.H{
 		"merchantCount": merchantCount,
-		"storeCount": storeCount,
-		"tagCount": tagCount,
-		"taskCount": taskCount,
+		"storeCount":    storeCount,
+		"tagCount":      tagCount,
+		"taskCount":     taskCount,
 	})
 }

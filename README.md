@@ -7,9 +7,22 @@
 当前仓库包含：
 
 - 后端服务：Gin + Gorm + JWT
+- 内部 AI agent-service：Python 服务，仅供后端在服务器本机或私有网络调用
 - 前端应用：Vue 3 + Vite + Pinia + Axios
 - 数据库脚本：MySQL schema / seed
-- 产品与开发文档：位于 `docs/`
+- 部署与运维文档：`README.md`、`README-DEPLOY.md`、`agent-service/README.md`
+
+云端访问边界：
+
+```text
+Browser
+  -> Frontend provider / static hosting
+  -> Go backend public API (/api)
+  -> local/private MySQL
+  -> local/private agent-service
+```
+
+浏览器只访问前端静态资源与 Go backend 的公开 `/api`。数据库和 agent-service 不开放公网，也不配置到前端环境变量中；前端只允许使用 `VITE_API_BASE_URL` 指向 Go backend API。
 
 ---
 
@@ -54,9 +67,7 @@ ppk/
 ├── database/                   # MySQL 初始化脚本
 │   ├── schema.sql
 │   └── seed.sql
-├── docs/                       # 产品与开发文档
-│   ├── nfc-review-card-prd.md
-│   └── development/
+├── agent-service/              # 内部 Python agent 服务，不直接暴露给浏览器
 └── README.md
 ```
 
@@ -76,8 +87,15 @@ ppk/
 ### `internal/config`
 读取运行配置，当前主要支持：
 - `APP_PORT`
+- `APP_ENV`
 - `MYSQL_DSN`
 - `JWT_SECRET`
+- `ALLOWED_ORIGINS`
+- `AGENT_SERVICE_URL`
+- `AGENT_INTERNAL_TOKEN`
+- `AGENT_MIN_GRADE`
+- `MAX_REVIEW_GENERATE_COUNT`
+- `DEFAULT_REVIEW_TARGET_COUNT`
 
 ### `internal/database`
 负责数据库连接初始化。
@@ -114,9 +132,14 @@ ppk/
   - 可发放库存检查
   - 自动补货逻辑
 
+- `review_generator_agent.go`
+  - 主生成器，通过 HTTP 调用内部 Python `agent-service`
+  - 请求 `/generate-reviews` 时携带 `X-Agent-Internal-Token`
+  - 默认只将 B 级及以上文案写入评价池
+
 - `review_generator_mock.go`
-  - 当前使用 mock 文案生成器
-  - 后续可替换成真实 AI 服务实现
+  - 仅作为兜底生成器
+  - 当评价池为空且 agent-service 不可用时即时补 1 条，避免落地页白屏
 
 ### `internal/handler`
 HTTP 接口层，按角色拆分：
@@ -207,6 +230,37 @@ Pinia 状态管理，当前主要是：
 
 ---
 
+## 2.4 agent-service 模块
+
+内部 Python AI 文案生成服务，默认监听 `127.0.0.1:8090`，只允许 Go backend 在服务器本机或私有网络调用。
+
+关键文件：
+
+- `app/main.py`
+  - FastAPI 入口
+  - `GET /health` 本机探活
+  - `POST /generate-reviews` 生成多平台评价文案
+  - 校验 `X-Agent-Internal-Token`
+
+- `app/pipeline.py`
+  - 选择平台 writer agent
+  - 生成 JSON 文案
+  - 禁用词硬过滤
+  - reviewer agent 打分
+  - 不达标时重写
+
+- `app/client.py`
+  - 使用 OpenAI Agents SDK
+  - 通过 `OpenAIChatCompletionsModel` 调用任意 OpenAI 兼容端点
+
+- `app/config.py`
+  - 读取 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`
+  - 读取 `AGENT_HOST`、`AGENT_PORT`、`AGENT_INTERNAL_TOKEN`
+
+浏览器和前端构建产物不应包含 agent-service 地址或任何 LLM key。
+
+---
+
 ## 3. 当前实现范围（MVP）
 
 当前实现的是可运行 MVP，不是完整 V1。
@@ -244,12 +298,18 @@ Pinia 状态管理，当前主要是：
 #### 核心领域逻辑
 - 可发放库存定义：`status=available AND is_dispatched=0`
 - 低于阈值自动补货
-- mock AI 自动生成评价
+- Python agent-service 作为主 AI 文案生成器
+- Go backend 调用 agent-service 时使用内部 token
+- 默认只将 B 级及以上 AI 文案写入评价池
+- mock 生成器仅保留为空池兜底，不作为主生成路径
 - JWT 鉴权
+- CORS 白名单
+- 生产环境关键配置校验
 
 ### 尚未完善
-- 真正的 AI 服务接入
 - 对象存储上传
+- AI 生成成本、限流、监控与告警
+- agent-service 进程守护、日志落盘与失败重试策略
 - 更细粒度权限控制
 - 审核流
 - 完整统计后台
@@ -304,41 +364,262 @@ Pinia 状态管理，当前主要是：
 
 | 变量名 | 说明 | 默认值 |
 |---|---|---|
+| `APP_HOST` | 后端监听地址，生产建议只绑定本机 | `127.0.0.1` |
 | `APP_PORT` | 后端监听端口 | `8080` |
-| `MYSQL_DSN` | MySQL 连接串 | `root:root@tcp(127.0.0.1:3306)/ppk?...` |
-| `JWT_SECRET` | JWT 密钥 | `ppk-dev-secret` |
+| `APP_ENV` | 运行环境，生产使用 `production` | `development` |
+| `MYSQL_DSN` | MySQL 连接串，生产使用最小权限账号 | 本地开发 DSN |
+| `JWT_SECRET` | JWT 密钥，生产至少 32 字符 | 本地开发密钥 |
+| `ALLOWED_ORIGINS` | 允许访问 API 的前端 origin | 本地开发 origin |
+| `AGENT_SERVICE_URL` | backend 内部调用 agent-service 的地址 | `http://127.0.0.1:8090` |
+| `AGENT_INTERNAL_TOKEN` | backend 与 agent-service 共享的内部令牌 | 本地开发令牌 |
 
 建议启动时显式传入：
 
 ```bash
-APP_PORT=8080
-MYSQL_DSN="root:111111@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
-JWT_SECRET="ppk-dev-secret"
+APP_ENV=production
+APP_HOST=127.0.0.1
+APP_PORT=18989
+MYSQL_DSN="ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
+JWT_SECRET="<random-32-plus-char-secret>"
+ALLOWED_ORIGINS="https://app.example.com"
+AGENT_SERVICE_URL="http://127.0.0.1:8090"
+AGENT_INTERNAL_TOKEN="<random-32-plus-char-token>"
 ```
+
+## 6.2 frontend 环境变量
+
+前端只允许配置浏览器可见的 API 入口：
+
+```bash
+cd frontend
+cp .env.example .env.local
+```
+
+`frontend/.env.example` 内容：
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:8080/api
+```
+
+生产构建未配置 `VITE_API_BASE_URL` 时，Axios 默认使用同源 `/api`。如果前端静态托管与 API 不同域，只能把它设置为 Go backend 的公开 API，例如 `https://api.example.com/api`。不要在前端 `.env` 中配置 MySQL、agent-service、JWT 密钥或任何服务端 secret。
 
 ---
 
-## 7. 使用说明
+## 7. 部署指南
 
-## 7.1 初始化数据库
+## 7.1 云端访问边界
+
+生产环境建议采用以下链路：
+
+```text
+Browser
+  -> public gateway :8989
+  -> local Go backend 127.0.0.1:18989 (/api)
+  -> local/private MySQL
+  -> local/private agent-service
+```
+
+默认部署脚本会在 `8989` 上提供前端静态资源，并把 `/api` 反向代理到本机 backend `127.0.0.1:18989`。客户资源信息、门店数据、评价池与生成任务都通过 Go backend 鉴权后读取；浏览器不直接访问 MySQL 或 agent-service。
+
+脚本部署时生产环境只应对公网开放：
+
+- `8989`：前端页面和同源 `/api`
+
+必须保持本机或私有网络访问：
+
+- MySQL：只允许 backend 使用 `MYSQL_DSN` 连接
+- Go backend：默认监听 `127.0.0.1:18989`
+- agent-service：默认监听 `127.0.0.1:8090`，只允许 backend 使用 `AGENT_INTERNAL_TOKEN` 调用
+- `MYSQL_DSN`、`JWT_SECRET`、`AGENT_SERVICE_URL`、`AGENT_INTERNAL_TOKEN`、`LLM_API_KEY` 等服务端变量
+
+## 7.2 一键脚本部署
+
+推荐云服务器单机部署使用：
+
+```bash
+cp .env.deploy.example .env.deploy
+# 编辑 .env.deploy，至少确认 MYSQL_DSN 与 LLM_API_KEY
+scripts/deploy.sh start
+```
+
+脚本会完成：
+
+- 安装 Go / npm / Python 项目依赖
+- 构建 frontend，并强制前端使用同源 `/api`
+- 构建 backend
+- 启动 agent-service：`127.0.0.1:8090`
+- 启动 backend：`127.0.0.1:18989`
+- 启动 public gateway：`0.0.0.0:8989`
+
+常用命令：
+
+```bash
+scripts/deploy.sh status
+scripts/deploy.sh logs
+scripts/deploy.sh restart
+scripts/deploy.sh stop
+```
+
+如果本机 MySQL 已创建并导入 schema，只需要在 `.env.deploy` 中设置 `MYSQL_DSN`。如果希望脚本尝试初始化 MySQL，可设置：
+
+```bash
+INIT_DB=true
+DB_APP_PASSWORD=<strong-db-password>
+MYSQL_ROOT_USER=root
+MYSQL_ROOT_PASSWORD=<root-password>
+```
+
+`JWT_SECRET` 与 `AGENT_INTERNAL_TOKEN` 不填时，脚本会自动生成并保存到 `.deploy/runtime.env`。`.env.deploy` 与 `.deploy/` 已被 git 忽略，不应提交。
+
+## 7.3 手动单机部署流程
+
+适合需要接入 Nginx / systemd 的环境。公网入口仍建议只暴露统一入口，backend、MySQL、agent-service 都绑定在本机或内网。
+
+### 1. 初始化 MySQL
+
+```bash
+mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS ppk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -u root -p -e "CREATE USER IF NOT EXISTS 'ppk_app'@'127.0.0.1' IDENTIFIED BY '<strong-password>'; GRANT SELECT, INSERT, UPDATE, DELETE ON ppk.* TO 'ppk_app'@'127.0.0.1'; FLUSH PRIVILEGES;"
+mysql -u root -p ppk < database/schema.sql
+
+# 仅演示环境导入
+mysql -u root -p ppk < database/seed.sql
+```
+
+### 2. 启动 agent-service
+
+```bash
+cd agent-service
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+```
+
+编辑 `agent-service/.env`：
+
+```bash
+LLM_API_KEY=<your-llm-api-key>
+AGENT_HOST=127.0.0.1
+AGENT_PORT=8090
+AGENT_INTERNAL_TOKEN=<random-32-plus-char-token>
+```
+
+启动服务并检查：
+
+```bash
+python -m app.main
+curl http://127.0.0.1:8090/health
+```
+
+### 3. 启动 backend
+
+```bash
+cd backend
+go build -o ppk-server ./cmd/server
+
+APP_ENV=production \
+APP_HOST=127.0.0.1 \
+APP_PORT=18989 \
+MYSQL_DSN="ppk_app:<strong-password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local" \
+JWT_SECRET="<random-32-plus-char-secret>" \
+ALLOWED_ORIGINS="https://app.example.com" \
+AGENT_SERVICE_URL="http://127.0.0.1:8090" \
+AGENT_INTERNAL_TOKEN="<same-token-as-agent-service>" \
+./ppk-server
+```
+
+### 4. 构建 frontend
+
+```bash
+cd frontend
+npm ci
+VITE_API_BASE_URL=/api npm run build
+```
+
+同域反向代理部署时可以不配置 `VITE_API_BASE_URL`，前端默认请求 `/api`。如果前端托管商和 API 域名不同，只在前端构建环境配置：
+
+```bash
+VITE_API_BASE_URL=https://api.example.com/api
+```
+
+生产构建前确认没有把 `localhost`、MySQL、agent-service 或任何服务端 secret 写入前端 `.env.production` / `.env.local`。
+
+### 5. Nginx 同域反向代理示例
+
+```nginx
+server {
+    listen 80;
+    server_name app.example.com;
+
+    root /opt/ppk/frontend/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:18989;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+## 7.4 前后端分离部署
+
+如果前端由服务商托管，backend 使用独立 API 域名：
+
+- frontend 构建环境只设置 `VITE_API_BASE_URL=https://api.example.com/api`
+- backend 设置 `ALLOWED_ORIGINS=https://app.example.com`
+- DNS / 网关只把 API 流量转到 Go backend
+- MySQL 与 agent-service 仍只能由 backend 在本机或私有网络访问
+
+## 7.5 上线前检查
+
+部署前至少确认：
+
+- `go test ./...` 通过
+- `agent-service` 约束测试通过，且 `/health` 只在本机或内网可访问
+- `npx vue-tsc -b --noEmit` 和 `npm run build` 通过
+- `APP_ENV=production` 下 `JWT_SECRET`、`MYSQL_DSN`、`ALLOWED_ORIGINS`、`AGENT_INTERNAL_TOKEN` 都已替换
+- 脚本部署时云服务器安全组 / 防火墙只对公网开放 `8989`，MySQL、backend `18989` 和 agent-service 不开放公网
+- 前端构建产物中没有 `MYSQL_DSN`、`AGENT_SERVICE_URL`、`AGENT_INTERNAL_TOKEN`、`LLM_API_KEY`
+- 如果历史 `.env` 中出现过真实 `LLM_API_KEY`，上线前必须在供应商侧轮换该 key
+
+更完整的部署说明见 `README-DEPLOY.md`。
+
+---
+
+## 8. 本地开发启动
+
+## 8.1 初始化数据库
 
 先创建并导入数据库：
 
 ```bash
 mysql -h 127.0.0.1 -P 3306 -u root -p111111 -e "CREATE DATABASE IF NOT EXISTS ppk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+mysql -h 127.0.0.1 -P 3306 -u root -p111111 -e "CREATE USER IF NOT EXISTS 'ppk_dev'@'127.0.0.1' IDENTIFIED BY 'ppk_dev_password'; GRANT SELECT, INSERT, UPDATE, DELETE ON ppk.* TO 'ppk_dev'@'127.0.0.1'; FLUSH PRIVILEGES;"
 mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/schema.sql
 mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/seed.sql
 ```
 
-## 7.2 启动 backend
+## 8.2 启动 backend
 
 建议在 WSL 内执行：
 
 ```bash
 cd backend
+APP_ENV=development \
 APP_PORT=8080 \
-MYSQL_DSN="root:111111@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local" \
-JWT_SECRET="ppk-dev-secret" \
+MYSQL_DSN="ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local" \
+JWT_SECRET="dev-jwt-secret-change-me-32-bytes" \
+ALLOWED_ORIGINS="http://127.0.0.1:5173,http://localhost:5173" \
+AGENT_SERVICE_URL="http://127.0.0.1:8090" \
+AGENT_INTERNAL_TOKEN="dev-agent-internal-token-change-me" \
 go run ./cmd/server
 ```
 
@@ -346,21 +627,23 @@ go run ./cmd/server
 
 - backend API：`http://127.0.0.1:8080`
 
-## 7.3 启动 frontend
+## 8.3 启动 frontend
 
 建议在 WSL 内执行：
 
 ```bash
 cd frontend
 npm install
+cp .env.example .env.local
 npm run dev -- --host 0.0.0.0 --port 5173
 ```
 
 启动成功后：
 
 - frontend：`http://127.0.0.1:5173`
+- API：由 `VITE_API_BASE_URL` 指向本地 backend；生产默认同源 `/api`
 
-## 7.4 演示账号
+## 8.4 演示账号
 
 ### 管理员
 - 账号：`admin`
@@ -375,9 +658,9 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 ---
 
-## 8. 主要接口说明
+## 9. 主要接口说明
 
-## 8.1 商家端
+## 9.1 商家端
 - `POST /api/merchant/auth/login`
 - `GET /api/merchant/store/detail`
 - `PUT /api/merchant/store/detail`
@@ -392,7 +675,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - `POST /api/merchant/reviews/generate`
 - `GET /api/merchant/review-generation-tasks`
 
-## 8.2 管理员端
+## 9.2 管理员端
 - `POST /api/admin/auth/login`
 - `GET /api/admin/merchants`
 - `GET /api/admin/stores`
@@ -402,52 +685,47 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - `GET /api/admin/review-generation-tasks`
 - `GET /api/admin/stats`
 
-## 8.3 消费者端
+## 9.3 消费者端
 - `GET /api/public/landing/:token/init`
 - `POST /api/public/landing/:token/switch-review`
 - `POST /api/public/landing/:token/events`
 
 ---
 
-## 9. 文档说明
+## 10. 文档说明
 
-### 产品文档
-- `docs/nfc-review-card-prd.md`
+当前仓库内可用文档：
 
-### 开发文档拆分
-- `docs/development/README.md`
-- `docs/development/01-consumer-h5.md`
-- `docs/development/02-merchant-console.md`
-- `docs/development/03-admin-console.md`
-- `docs/development/04-review-pool-and-ai.md`
-- `docs/development/05-data-model-and-api.md`
-- `docs/development/06-nonfunctional-and-ops.md`
+- `README.md`：项目结构、当前能力、本地启动与部署主线
+- `README-DEPLOY.md`：更完整的生产部署、systemd、Nginx、上线检查与排查
+- `agent-service/README.md`：内部 AI 文案生成服务的运行、调用与接入说明
+
+历史 README 中曾引用 `docs/` 产品与开发文档目录；当前仓库未包含该目录，部署时以以上三份文档为准。
 
 ---
 
-## 10. 当前验证结论
+## 11. 当前验证结论
 
 当前已验证通过：
 
-- backend 可构建并可启动
-- frontend 可安装依赖并可构建 / 可启动 dev server
-- MySQL 可初始化并导入演示数据
-- 商家登录 API 可用
-- 管理员登录 API 可用
-- 消费者初始化 API 可用
-- `switch-review` API 可用
-- `events` API 可用
-- frontend 与 backend 已联通，页面能返回真实 HTML / JS 资源
+- `backend` 的 `go test ./...` 通过
+- `agent-service` 约束测试通过
+- `agent-service` 可编译检查，`/health` 返回最小健康信息
+- `frontend` 的 `npx vue-tsc -b --noEmit` 通过
+- `frontend` 已改为只通过 `VITE_API_BASE_URL` 访问 Go backend `/api`
+- 当前工作区已移除被误提交的 `frontend/node_modules`、`frontend/dist` 与编译产物
+
+部署前仍需在目标服务器或干净构建环境执行完整启动联调：MySQL 初始化、agent-service 启动、backend 启动、frontend `npm ci && npm run build`、商家/管理员/消费者主流程验证。
 
 ---
 
-## 11. 后续建议
+## 12. 后续建议
 
 建议下一步继续完善：
 
 1. 为 `seed.sql` 增加幂等控制，避免重复导入时图片/关键词/评价重复堆积
 2. 为 frontend 增加更完整的页面交互与错误提示
-3. 接入真实 AI 服务，替换 mock 评价生成器
+3. 为 agent-service 增加生产日志、指标、告警、限流与失败重试策略
 4. 增加对象存储上传能力
 5. 增加自动化浏览器验证（如 Playwright）
 6. 增加更完整的管理员审核与统计能力

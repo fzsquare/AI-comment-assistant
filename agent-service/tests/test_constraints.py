@@ -12,7 +12,18 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.constraints.banned_words import find_hard_violations  # noqa: E402
+from app.config import Settings, load_settings  # noqa: E402
+from app.internal_auth import check_internal_token  # noqa: E402
 from app.jsonutil import extract_json  # noqa: E402
+from app.reviewer_logic import reviewer_passes  # noqa: E402
+
+try:
+    from app.schemas import GenerateRequest, ReviewItem  # noqa: E402
+except ModuleNotFoundError as exc:
+    if exc.name != "pydantic":
+        raise
+    GenerateRequest = None
+    ReviewItem = None
 
 
 def test_hard_violations_catches_real_banned():
@@ -60,6 +71,104 @@ def test_extract_json_raises_on_garbage():
     except ValueError:
         return
     raise AssertionError("应抛 ValueError")
+
+
+def test_internal_token_missing_configuration_returns_503():
+    settings = Settings(internal_token="")
+    ok, status, detail = check_internal_token("anything", settings)
+    assert ok is False
+    assert status == 503
+    assert "AGENT_INTERNAL_TOKEN" in detail
+
+
+def test_internal_token_rejects_missing_or_wrong_header():
+    settings = Settings(internal_token="expected-token")
+    assert check_internal_token(None, settings)[:2] == (False, 401)
+    assert check_internal_token("wrong-token", settings)[:2] == (False, 401)
+
+
+def test_internal_token_accepts_exact_match():
+    settings = Settings(internal_token="expected-token")
+    assert check_internal_token("expected-token", settings) == (True, 200, "ok")
+
+
+def test_load_settings_defaults_to_loopback_host():
+    settings = load_settings({})
+    assert settings.host == "127.0.0.1"
+
+
+def test_load_settings_rejects_invalid_ranges_with_context():
+    bad_env = {
+        "MIN_PASS_SCORE": "101",
+        "MAX_REVISE_ROUNDS": "-1",
+        "MAX_CONCURRENCY": "0",
+    }
+    try:
+        load_settings(bad_env)
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert "MIN_PASS_SCORE" in msg
+        assert "MAX_REVISE_ROUNDS" in msg
+        assert "MAX_CONCURRENCY" in msg
+        return
+    raise AssertionError("应抛 RuntimeError")
+
+
+def test_reviewer_pass_string_false_is_false_even_with_good_score():
+    assert reviewer_passes("false", 95, 80) is False
+
+
+def test_reviewer_pass_true_requires_minimum_score():
+    assert reviewer_passes(True, 79, 80) is False
+    assert reviewer_passes("true", 80, 80) is True
+
+
+def test_reviewer_pass_missing_uses_score_threshold():
+    assert reviewer_passes(None, 79, 80) is False
+    assert reviewer_passes(None, 80, 80) is True
+
+
+def test_generate_request_rejects_oversized_keywords():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 schema 边界测试")
+        return
+    try:
+        GenerateRequest(
+            store={"store_name": "测试店"},
+            keywords=["标签"] * 21,
+        )
+    except Exception:
+        return
+    raise AssertionError("应拒绝过多 keywords")
+
+
+def test_generate_request_rejects_long_store_name():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 schema 边界测试")
+        return
+    try:
+        GenerateRequest(
+            store={"store_name": "店" * 121},
+            keywords=[],
+        )
+    except Exception:
+        return
+    raise AssertionError("应拒绝过长 store_name")
+
+
+def test_review_item_rejects_invalid_score_and_grade():
+    if ReviewItem is None:
+        print("SKIP  pydantic 未安装，跳过 schema 边界测试")
+        return
+    for kwargs in (
+        {"content": "内容", "score": 101, "grade": "A"},
+        {"content": "内容", "score": 90, "grade": "Z"},
+    ):
+        try:
+            ReviewItem(**kwargs)
+        except Exception:
+            continue
+        raise AssertionError(f"应拒绝非法输出边界：{kwargs!r}")
 
 
 def _run_all() -> int:
