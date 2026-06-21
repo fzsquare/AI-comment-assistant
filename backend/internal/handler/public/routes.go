@@ -36,7 +36,11 @@ func (h *Handler) initLanding(c *gin.Context) {
 }
 
 func (h *Handler) switchReview(c *gin.Context) {
-	item, remaining, err := h.ReviewPool.SwitchReview(c.Param("token"))
+	var req struct {
+		Tag string `json:"tag"` // 顾客选的菜品/场景标签，空则随机换一条
+	}
+	_ = c.ShouldBindJSON(&req)
+	item, remaining, err := h.ReviewPool.SwitchReview(c.Param("token"), req.Tag)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return

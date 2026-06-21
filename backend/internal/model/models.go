@@ -106,6 +106,7 @@ type ReviewItem struct {
 	StoreID           uint       `gorm:"index;not null" json:"storeId"`
 	PlatformStyle     string     `gorm:"size:64;not null" json:"platformStyle"`
 	Content           string     `gorm:"type:text;not null" json:"content"`
+	Tags              string     `gorm:"size:255;default:''" json:"tags"`
 	SourceType        string     `gorm:"size:32;not null" json:"sourceType"`
 	GenerationBatchNo string     `gorm:"size:64;not null" json:"generationBatchNo"`
 	IsDispatched      bool       `gorm:"default:false;not null" json:"isDispatched"`
