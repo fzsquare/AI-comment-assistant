@@ -9,7 +9,7 @@ type LandingData = {
   sessionId: string
   storeName: string
   primaryPlatformStyle: string
-  review: { id: number; content: string }
+  review?: { id: number; content: string; platformStyle?: string } | null
   keywords: Keyword[]
   images: Array<{ id: number; imageUrl?: string; url?: string; thumbnailUrl?: string }>
   platformLinks: Array<{ id: number; platformCode: string; platformName: string; buttonText: string; targetUrl: string; backupUrl?: string }>
@@ -22,6 +22,7 @@ const switching = ref(false)
 const error = ref('')
 const payload = ref<LandingData | null>(null)
 const selectedTag = ref('')
+const selectedPlatform = ref<LandingData['platformLinks'][number] | null>(null)
 // 顾客可在发布前编辑成自己的话
 const editedContent = ref('')
 
@@ -35,9 +36,9 @@ async function trackEvent(payloadData: Record<string, unknown>) {
 
 // 文案变化时，把可编辑框同步成最新文案
 watch(
-  () => payload.value?.review.content,
+  () => payload.value?.review?.content,
   (v) => {
-    if (v != null) editedContent.value = v
+    editedContent.value = v || ''
   }
 )
 
@@ -48,10 +49,11 @@ async function load() {
     const { data } = await publicApi.initLanding(String(route.params.token))
     payload.value = data.data
     if (payload.value) {
-      editedContent.value = payload.value.review.content
+      selectedPlatform.value = null
+      selectedTag.value = ''
+      editedContent.value = ''
       await trackEvent({
         sessionId: payload.value.sessionId,
-        reviewItemId: payload.value.review.id,
         actionType: 'page_view'
       })
     }
@@ -64,31 +66,43 @@ async function load() {
 
 // 顾客点“我点了什么”→ 取一条对应标签的文案
 async function pickByTag(keyword: string) {
-  if (!payload.value || switching.value) return
+  if (!payload.value || !selectedPlatform.value || switching.value) return
   selectedTag.value = keyword
   await fetchReview(keyword, 'review_pick_by_tag')
 }
 
 async function switchReview() {
-  if (!payload.value || switching.value) return
+  if (!payload.value || !selectedPlatform.value || switching.value) return
   await fetchReview(selectedTag.value, 'review_switch')
 }
 
+async function choosePlatform(link: LandingData['platformLinks'][number]) {
+  if (!payload.value || switching.value) return
+  if (selectedPlatform.value?.platformCode === link.platformCode && payload.value.review) return
+  selectedPlatform.value = link
+  selectedTag.value = ''
+  payload.value.review = null
+  editedContent.value = ''
+  await fetchReview('', 'platform_select')
+}
+
 async function fetchReview(tag: string, action: string) {
-  if (!payload.value) return
+  if (!payload.value || !selectedPlatform.value) return
   switching.value = true
   try {
     const { data } = await publicApi.switchReview(String(route.params.token), {
+      platformCode: selectedPlatform.value.platformCode,
       tag: tag || undefined,
       sessionId: payload.value.sessionId
     })
-    payload.value.review = data.data.review
+    const review = data.data.review
+    payload.value.review = review
     payload.value.remainingDispatchableCount = data.data.remainingDispatchableCount
     await trackEvent({
       sessionId: payload.value.sessionId,
-      reviewItemId: payload.value.review.id,
-      actionType: action
-      // 不把关键词标签塞进 platformCode（那是给平台跳转事件用的），避免污染分析
+      reviewItemId: review.id,
+      actionType: action,
+      platformCode: selectedPlatform.value.platformCode
     })
   } catch (err: any) {
     alert(err?.response?.data?.message || '暂无推荐文案，请稍后再试')
@@ -99,7 +113,7 @@ async function fetchReview(tag: string, action: string) {
 
 async function copyReview() {
   const text = editedContent.value.trim()
-  if (!payload.value || !text) return
+  if (!payload.value || !payload.value.review || !text) return
   try {
     await navigator.clipboard.writeText(text)
     await trackEvent({
@@ -115,7 +129,7 @@ async function copyReview() {
 
 async function jump(link: { platformCode: string; targetUrl: string; backupUrl?: string }) {
   const text = editedContent.value.trim()
-  if (!payload.value || !text) return
+  if (!payload.value || !payload.value.review || !text) return
   try {
     await navigator.clipboard.writeText(text)
   } catch {
@@ -148,8 +162,24 @@ onMounted(load)
     <template v-else-if="payload">
       <div class="card">
         <h1>{{ payload.storeName }}</h1>
-        <p class="muted">主平台风格：{{ payload.primaryPlatformStyle }}</p>
+        <p class="muted">请选择你要发布评价的平台</p>
 
+        <div v-if="payload.platformLinks.length" class="platform-grid">
+          <button
+            v-for="link in payload.platformLinks"
+            :key="link.id"
+            :class="{ secondary: selectedPlatform?.platformCode !== link.platformCode }"
+            :disabled="switching"
+            @click="choosePlatform(link)"
+          >
+            {{ link.platformName || link.buttonText }}
+          </button>
+        </div>
+        <p v-else class="muted">当前门店还没有配置可用平台，请联系商家。</p>
+      </div>
+
+      <div class="card" v-if="selectedPlatform && payload.review">
+        <h2>{{ selectedPlatform.platformName }}评价文案</h2>
         <div v-if="payload.keywords && payload.keywords.length" style="margin: 12px 0;">
           <p class="muted" style="margin-bottom: 8px;">你点了什么 / 体验如何？选一个，帮你生成更贴合的评价：</p>
           <div class="row" style="flex-wrap: wrap; gap: 8px;">
@@ -174,7 +204,7 @@ onMounted(load)
           <button :disabled="!editedContent.trim()" @click="copyReview">复制文案</button>
           <button class="secondary" :disabled="switching" @click="switchReview">换一换</button>
         </div>
-        <p class="muted" style="margin-top: 12px">剩余可发放文案：{{ payload.remainingDispatchableCount }}</p>
+        <p class="muted" style="margin-top: 12px">{{ selectedPlatform.platformName }}剩余可发放文案：{{ payload.remainingDispatchableCount }}</p>
       </div>
 
       <div class="card" v-if="payload.images.length">
@@ -186,10 +216,10 @@ onMounted(load)
         </div>
       </div>
 
-      <div class="card" v-if="payload.platformLinks.length">
+      <div class="card" v-if="selectedPlatform && payload.review">
         <h2>去平台发布</h2>
         <div class="row">
-          <button v-for="link in payload.platformLinks" :key="link.id" :disabled="!editedContent.trim()" @click="jump(link)">{{ link.buttonText }}</button>
+          <button :disabled="!editedContent.trim()" @click="jump(selectedPlatform)">{{ selectedPlatform.buttonText }}</button>
         </div>
       </div>
     </template>

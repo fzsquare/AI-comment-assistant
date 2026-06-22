@@ -5,7 +5,7 @@ from typing import Annotated, List, Literal
 
 from pydantic import BaseModel, Field
 
-PlatformCode = Literal["dianping", "xiaohongshu", "douyin"]
+PlatformCode = Literal["dianping", "meituan", "xiaohongshu", "douyin"]
 SatisfactionLevel = Literal["非常满意", "比较满意", "一般", "有点失望", "非常失望"]
 Grade = Literal["", "S", "A", "B", "C", "D"]
 Keyword = Annotated[str, Field(min_length=1, max_length=40)]

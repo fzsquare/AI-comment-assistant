@@ -66,7 +66,7 @@ type agentResponse struct {
 	Items    []agentItem `json:"items"`
 }
 
-var validPlatforms = map[string]bool{"dianping": true, "xiaohongshu": true, "douyin": true}
+var validPlatforms = map[string]bool{"dianping": true, "meituan": true, "xiaohongshu": true, "douyin": true}
 var gradeRank = map[string]int{"D": 0, "C": 1, "B": 2, "A": 3, "S": 4}
 
 func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.StoreKeyword, targetCount int) ([]model.ReviewItem, error) {

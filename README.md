@@ -66,7 +66,8 @@ ppk/
 │   └── tsconfig.json
 ├── database/                   # MySQL 初始化脚本
 │   ├── schema.sql
-│   └── seed.sql
+│   ├── seed.sql
+│   └── migration-2026-platform-review-pool.sql
 ├── agent-service/              # 内部 Python agent 服务，不直接暴露给浏览器
 └── README.md
 ```
@@ -189,7 +190,7 @@ Pinia 状态管理，当前主要是：
 
 - `landing/`
   - 消费者落地页
-  - 文案展示、复制、换一换、平台入口跳转
+  - 先选择评价平台，再按平台展示文案、复制、换一换、平台入口跳转
 
 - `merchant/`
   - 商家登录页
@@ -227,6 +228,7 @@ Pinia 状态管理，当前主要是：
 - 平台入口
 - NFC 标签
 - 初始评价数据
+  - 默认按 `meituan`、`dianping` 两个平台写入评价池，便于演示平台隔离发放
 
 ---
 
@@ -325,10 +327,13 @@ Pinia 状态管理，当前主要是：
 - 自动补货阈值：可发放库存 `< 20`
 - 自动补货目标：补足到 50
 - 发放后设置 `is_dispatched = true`
+- 评价池按 `store_id + platform_style` 隔离发放；消费者选择平台后，只会领取该平台的可用评价
+- 商家手工添加评价和 AI 生成评价都必须绑定到一个已启用的平台入口
 
 ### 4.2 平台入口
 - 平台入口由商家配置
-- 消费者点击入口后可跳转到目标平台
+- 消费者打开 NFC 落地页后先选择平台；选择后后端才通过 `platformCode` 发放对应平台的评价文案
+- 消费者点击发布按钮后跳转到所选平台，页面不会同时展示多个平台跳转按钮
 - 事件会记录到 `review_display_logs`
 
 ### 4.3 数据库初始化策略
@@ -706,8 +711,8 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - `GET /api/admin/stats`
 
 ## 9.3 消费者端
-- `GET /api/public/landing/:token/init`
-- `POST /api/public/landing/:token/switch-review`
+- `GET /api/public/landing/:token/init`：返回门店、图片、关键词、可用平台入口，不发放评价
+- `POST /api/public/landing/:token/switch-review`：请求体必须包含 `platformCode`，按所选平台发放或更换评价
 - `POST /api/public/landing/:token/events`
 
 ---
@@ -734,6 +739,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - `frontend` 的 `npx vue-tsc -b --noEmit` 通过
 - `frontend` 已改为只通过 `VITE_API_BASE_URL` 访问 Go backend `/api`
 - 管理员后台已接入商家、门店、NFC 标签状态操作；商家后台已接入关键词、图片、平台入口与评价的删除/启停操作
+- 消费者落地页已改为先选择平台，再按 `platformCode` 从平台隔离的评价池领取文案
 - 一键部署脚本会在启动后通过 `8989` 入口运行后台接口 smoke test
 - 当前工作区已移除被误提交的 `frontend/node_modules`、`frontend/dist` 与编译产物
 

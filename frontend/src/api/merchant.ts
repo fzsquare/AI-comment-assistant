@@ -43,14 +43,14 @@ export const merchantApi = {
   listReviews() {
     return http.get('/merchant/reviews')
   },
-  createReview(payload: { content: string; status: string }) {
+  createReview(payload: { content: string; status: string; platformCode: string }) {
     return http.post('/merchant/reviews', payload)
   },
   deleteReview(id: number) {
     return http.delete(`/merchant/reviews/${id}`)
   },
-  generateReviews(targetCount = 10) {
-    return http.post('/merchant/reviews/generate', { targetCount }, { timeout: 180000 })
+  generateReviews(platformCode: string, targetCount = 10) {
+    return http.post('/merchant/reviews/generate', { targetCount, platformCode }, { timeout: 180000 })
   },
   listTasks() {
     return http.get('/merchant/review-generation-tasks')

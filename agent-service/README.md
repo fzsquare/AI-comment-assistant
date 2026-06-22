@@ -2,7 +2,7 @@
 
 独立的 Python 服务，用 **OpenAI Agents SDK + 任意 OpenAI 兼容端点**（OpenAI、GPT 代理、
 DeepSeek 等），按《多平台文案生成约束手册》
-为大众点评 / 小红书 / 抖音评论生成**优质、合规、拟人化**的真实评价文案。Go 后端通过
+为大众点评 / 美团 / 小红书 / 抖音评论生成**优质、合规、拟人化**的真实评价文案。Go 后端通过
 HTTP 调用本服务来填充评价池；当前项目的主 AI 生成路径已经切到本服务。
 
 本服务是内部服务，默认监听 `127.0.0.1:8090`。生产环境只允许 Go backend 通过
@@ -25,6 +25,7 @@ Go backend ──POST /generate-reviews + X-Agent-Internal-Token──▶ 本服
 
 约束手册的落点：
 - `constraints/platforms/*.py` —— 各平台结构/风格/标签(手册第一、二、三部分)
+- `meituan` 当前复用大众点评约束，平台编码仍会原样返回给 Go backend 写入评价池
 - `constraints/personas.py` —— 拟人化:身份/情感↔满意度/缺点↔满意度/口语化(第四部分)
 - `constraints/banned_words.py` —— 禁用词硬过滤 + 软约束(第五部分)
 - `prompts/reviewer.py` —— 100 分评分表 + 15 项自检(第六部分)
@@ -61,6 +62,7 @@ curl -X POST http://127.0.0.1:8090/generate-reviews \
 ## 接入 Go
 
 - Go 侧只认这个 HTTP 契约,不含任何 provider 字眼;换模型/换 OpenAI 只改本服务内部。
+- Go 侧会把商家/消费者选择的 `platformCode` 传入本服务，并用同一个平台编码写入 `review_items.platform_style`。
 - Go backend 的 `AGENT_SERVICE_URL` 指向本机或私有网络地址,并通过
   `X-Agent-Internal-Token` 传入与本服务一致的 `AGENT_INTERNAL_TOKEN`。
 - 前端只请求 Go backend 的 `/api`,不要配置或调用本服务地址。

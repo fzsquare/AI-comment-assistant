@@ -46,14 +46,26 @@ FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account
 ON DUPLICATE KEY UPDATE store_id = VALUES(store_id), status = VALUES(status), remark = VALUES(remark);
 
 INSERT INTO review_items (store_id, platform_style, content, source_type, generation_batch_no, is_dispatched, status)
-SELECT s.id, s.primary_platform_style, '这家店环境很舒服，服务也很自然，整体体验挺不错，下次还会再来。', 'seed', 'seed_batch_001', 0, 'available'
+SELECT s.id, 'meituan', '这家店环境很舒服，服务也很自然，整体体验挺不错，下次还会再来。', 'seed', 'seed_batch_meituan', 0, 'available'
 FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'
-AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.generation_batch_no = 'seed_batch_001' AND existing.content = '这家店环境很舒服，服务也很自然，整体体验挺不错，下次还会再来。')
+AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.platform_style = 'meituan' AND existing.generation_batch_no = 'seed_batch_meituan' AND existing.content = '这家店环境很舒服，服务也很自然，整体体验挺不错，下次还会再来。')
 UNION ALL
-SELECT s.id, s.primary_platform_style, '和朋友一起过来用餐，出品稳定，环境轻松，适合聚餐聊天。', 'seed', 'seed_batch_001', 0, 'available'
+SELECT s.id, 'meituan', '和朋友一起过来用餐，出品稳定，环境轻松，适合聚餐聊天。', 'seed', 'seed_batch_meituan', 0, 'available'
 FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'
-AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.generation_batch_no = 'seed_batch_001' AND existing.content = '和朋友一起过来用餐，出品稳定，环境轻松，适合聚餐聊天。')
+AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.platform_style = 'meituan' AND existing.generation_batch_no = 'seed_batch_meituan' AND existing.content = '和朋友一起过来用餐，出品稳定，环境轻松，适合聚餐聊天。')
 UNION ALL
-SELECT s.id, s.primary_platform_style, '店里整体氛围不错，服务挺热情，第一次来体验就感觉很好。', 'seed', 'seed_batch_001', 0, 'available'
+SELECT s.id, 'meituan', '店里整体氛围不错，服务挺热情，第一次来体验就感觉很好。', 'seed', 'seed_batch_meituan', 0, 'available'
 FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'
-AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.generation_batch_no = 'seed_batch_001' AND existing.content = '店里整体氛围不错，服务挺热情，第一次来体验就感觉很好。');
+AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.platform_style = 'meituan' AND existing.generation_batch_no = 'seed_batch_meituan' AND existing.content = '店里整体氛围不错，服务挺热情，第一次来体验就感觉很好。')
+UNION ALL
+SELECT s.id, 'dianping', '环境和服务都很在线，点评过来体验没有踩雷，整体挺满意。', 'seed', 'seed_batch_dianping', 0, 'available'
+FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'
+AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.platform_style = 'dianping' AND existing.generation_batch_no = 'seed_batch_dianping' AND existing.content = '环境和服务都很在线，点评过来体验没有踩雷，整体挺满意。')
+UNION ALL
+SELECT s.id, 'dianping', '朋友推荐来的，菜品和环境都比较稳定，适合周末聚餐。', 'seed', 'seed_batch_dianping', 0, 'available'
+FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'
+AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.platform_style = 'dianping' AND existing.generation_batch_no = 'seed_batch_dianping' AND existing.content = '朋友推荐来的，菜品和环境都比较稳定，适合周末聚餐。')
+UNION ALL
+SELECT s.id, 'dianping', '店员服务挺热情，整体体验自然舒服，之后还会考虑再来。', 'seed', 'seed_batch_dianping', 0, 'available'
+FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'
+AND NOT EXISTS (SELECT 1 FROM review_items existing WHERE existing.store_id = s.id AND existing.platform_style = 'dianping' AND existing.generation_batch_no = 'seed_batch_dianping' AND existing.content = '店员服务挺热情，整体体验自然舒服，之后还会考虑再来。');

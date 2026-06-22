@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,14 +21,14 @@ type ReviewPoolService struct {
 	Fallback ReviewGenerator
 
 	refillMu       sync.Mutex
-	refillInFlight map[uint]struct{}
+	refillInFlight map[string]struct{}
 }
 
 type LandingPayload struct {
 	SessionID                  string                    `json:"sessionId"`
 	StoreName                  string                    `json:"storeName"`
 	PrimaryPlatformStyle       string                    `json:"primaryPlatformStyle"`
-	Review                     model.ReviewItem          `json:"review"`
+	Review                     *model.ReviewItem         `json:"review,omitempty"`
 	Keywords                   []model.StoreKeyword      `json:"keywords"` // 顾客可选的菜品/场景 chips
 	Images                     []model.StoreImage        `json:"images"`
 	PlatformLinks              []model.StorePlatformLink `json:"platformLinks"`
@@ -35,17 +36,23 @@ type LandingPayload struct {
 }
 
 func (s *ReviewPoolService) GenerateForStore(storeID uint, triggerType string, targetCount int) error {
+	return s.GenerateForStorePlatform(storeID, "", triggerType, targetCount)
+}
+
+func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode string, triggerType string, targetCount int) error {
 	var store model.Store
 	if err := s.DB.First(&store, storeID).Error; err != nil {
 		return err
 	}
+	platformCode = normalizePlatformCode(platformCode, store.PrimaryPlatformStyle)
+	store.PrimaryPlatformStyle = platformCode
 
 	var keywords []model.StoreKeyword
 	s.DB.Where("store_id = ?", storeID).Order("sort_no asc, id asc").Find(&keywords)
 
 	task := model.ReviewGenerationTask{
 		StoreID:       storeID,
-		PlatformStyle: store.PrimaryPlatformStyle,
+		PlatformStyle: platformCode,
 		TriggerType:   triggerType,
 		TargetCount:   targetCount,
 		Status:        model.TaskStatusRunning,
@@ -71,7 +78,7 @@ func (s *ReviewPoolService) GenerateForStore(storeID uint, triggerType string, t
 
 	for i := range reviews {
 		reviews[i].StoreID = storeID
-		reviews[i].PlatformStyle = store.PrimaryPlatformStyle
+		reviews[i].PlatformStyle = platformCode
 		if reviews[i].GenerationBatchNo == "" {
 			reviews[i].GenerationBatchNo = fmt.Sprintf("batch_%s", utils.RandomString(12))
 		}
@@ -92,10 +99,13 @@ func (s *ReviewPoolService) GenerateForStore(storeID uint, triggerType string, t
 	return s.DB.Save(&task).Error
 }
 
-func (s *ReviewPoolService) EnsureDispatchableStock(storeID uint) error {
+func (s *ReviewPoolService) EnsureDispatchableStock(storeID uint, platformCode string) error {
+	if platformCode == "" {
+		return errors.New("platformCode is required")
+	}
 	var count int64
 	if err := s.DB.Model(&model.ReviewItem{}).
-		Where("store_id = ? AND status = ? AND is_dispatched = ?", storeID, model.ReviewStatusAvailable, false).
+		Where("store_id = ? AND platform_style = ? AND status = ? AND is_dispatched = ?", storeID, platformCode, model.ReviewStatusAvailable, false).
 		Count(&count).Error; err != nil {
 		return err
 	}
@@ -106,32 +116,33 @@ func (s *ReviewPoolService) EnsureDispatchableStock(storeID uint) error {
 	if target <= 0 {
 		return nil
 	}
-	return s.GenerateForStore(storeID, model.TriggerAutoRefill, target)
+	return s.GenerateForStorePlatform(storeID, platformCode, model.TriggerAutoRefill, target)
 }
 
-func (s *ReviewPoolService) EnsureDispatchableStockAsync(storeID uint) {
-	if storeID == 0 {
+func (s *ReviewPoolService) EnsureDispatchableStockAsync(storeID uint, platformCode string) {
+	if storeID == 0 || platformCode == "" {
 		return
 	}
+	key := refillKey(storeID, platformCode)
 
 	s.refillMu.Lock()
 	if s.refillInFlight == nil {
-		s.refillInFlight = make(map[uint]struct{})
+		s.refillInFlight = make(map[string]struct{})
 	}
-	if _, ok := s.refillInFlight[storeID]; ok {
+	if _, ok := s.refillInFlight[key]; ok {
 		s.refillMu.Unlock()
 		return
 	}
-	s.refillInFlight[storeID] = struct{}{}
+	s.refillInFlight[key] = struct{}{}
 	s.refillMu.Unlock()
 
 	go func() {
 		defer func() {
 			s.refillMu.Lock()
-			delete(s.refillInFlight, storeID)
+			delete(s.refillInFlight, key)
 			s.refillMu.Unlock()
 		}()
-		_ = s.EnsureDispatchableStock(storeID)
+		_ = s.EnsureDispatchableStock(storeID, platformCode)
 	}()
 }
 
@@ -141,12 +152,12 @@ func (s *ReviewPoolService) EnsureDispatchableStockAsync(storeID uint) {
 // 并发安全：用「条件更新 + 重试」而非 select-then-save，避免两个并发请求
 // 选中同一行后双双发放（双发）。UPDATE ... WHERE is_dispatched=false 是原子的，
 // RowsAffected==0 说明被别的请求抢先发放了，重新选一条。
-func (s *ReviewPoolService) dispatchOne(storeID uint, tag string) (*model.ReviewItem, error) {
+func (s *ReviewPoolService) dispatchOne(storeID uint, platformCode string, tag string) (*model.ReviewItem, error) {
 	const maxAttempts = 5
 	// base 每次重建：GORM 会就地改写 *gorm.DB，链式条件不能复用
 	base := func() *gorm.DB {
-		return s.DB.Where("store_id = ? AND status = ? AND is_dispatched = ?",
-			storeID, model.ReviewStatusAvailable, false)
+		return s.DB.Where("store_id = ? AND platform_style = ? AND status = ? AND is_dispatched = ?",
+			storeID, platformCode, model.ReviewStatusAvailable, false)
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -185,10 +196,11 @@ func (s *ReviewPoolService) dispatchOne(storeID uint, tag string) (*model.Review
 }
 
 // ensureViaFallback 在池为空时用 Mock 即时补 1 条可发放文案，保证不白屏。
-func (s *ReviewPoolService) ensureViaFallback(store model.Store) error {
+func (s *ReviewPoolService) ensureViaFallback(store model.Store, platformCode string) error {
 	if s.Fallback == nil {
 		return errors.New("无兜底生成器")
 	}
+	store.PrimaryPlatformStyle = platformCode
 	var keywords []model.StoreKeyword
 	s.DB.Where("store_id = ?", store.ID).Find(&keywords)
 	// 只补 1 条：仅为不白屏兜底，避免把低质 Mock 文案大量混入池子
@@ -198,7 +210,7 @@ func (s *ReviewPoolService) ensureViaFallback(store model.Store) error {
 	}
 	for i := range reviews {
 		reviews[i].StoreID = store.ID
-		reviews[i].PlatformStyle = store.PrimaryPlatformStyle
+		reviews[i].PlatformStyle = platformCode
 		reviews[i].SourceType = "fallback"
 		reviews[i].GenerationBatchNo = "fallback_" + utils.RandomString(8)
 		reviews[i].Status = model.ReviewStatusAvailable
@@ -207,14 +219,14 @@ func (s *ReviewPoolService) ensureViaFallback(store model.Store) error {
 }
 
 // dispatchWithFallback 先正常取；池空则兜底补一条再取一次。
-func (s *ReviewPoolService) dispatchWithFallback(store model.Store, tag string) (*model.ReviewItem, error) {
-	review, err := s.dispatchOne(store.ID, tag)
+func (s *ReviewPoolService) dispatchWithFallback(store model.Store, platformCode string, tag string) (*model.ReviewItem, error) {
+	review, err := s.dispatchOne(store.ID, platformCode, tag)
 	if err == nil {
 		return review, nil
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if fbErr := s.ensureViaFallback(store); fbErr == nil {
-			return s.dispatchOne(store.ID, tag)
+		if fbErr := s.ensureViaFallback(store, platformCode); fbErr == nil {
+			return s.dispatchOne(store.ID, platformCode, tag)
 		}
 	}
 	return nil, errors.New("暂无推荐文案，请稍后再试")
@@ -231,6 +243,10 @@ func (s *ReviewPoolService) activeStoreByID(storeID uint) (*model.Store, error) 
 }
 
 func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayload, error) {
+	return s.InitLandingByToken(token)
+}
+
+func (s *ReviewPoolService) InitLandingByToken(token string) (*LandingPayload, error) {
 	var tag model.NFCTag
 	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tag).Error; err != nil {
 		return nil, errors.New("页面暂不可用")
@@ -239,11 +255,6 @@ func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayloa
 	store, err := s.activeStoreByID(tag.StoreID)
 	if err != nil {
 		return nil, errors.New("商家服务已暂停")
-	}
-
-	review, err := s.dispatchWithFallback(*store, "")
-	if err != nil {
-		return nil, err
 	}
 
 	var keywords []model.StoreKeyword
@@ -255,28 +266,19 @@ func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayloa
 	var links []model.StorePlatformLink
 	s.DB.Where("store_id = ? AND status = ?", store.ID, model.StatusEnabled).Order("sort_no asc, id asc").Find(&links)
 
-	var remaining int64
-	s.DB.Model(&model.ReviewItem{}).
-		Where("store_id = ? AND status = ? AND is_dispatched = ?", store.ID, model.ReviewStatusAvailable, false).
-		Count(&remaining)
-
-	_ = s.DB.Create(&model.ReviewDisplayLog{StoreID: store.ID, ReviewItemID: review.ID, NFCTagID: tag.ID, SessionID: utils.RandomString(16), ActionType: "review_show"}).Error
-	s.EnsureDispatchableStockAsync(store.ID)
-
 	return &LandingPayload{
 		SessionID:                  utils.RandomString(16),
 		StoreName:                  store.StoreName,
 		PrimaryPlatformStyle:       store.PrimaryPlatformStyle,
-		Review:                     *review,
 		Keywords:                   keywords,
 		Images:                     images,
 		PlatformLinks:              links,
-		RemainingDispatchableCount: remaining,
+		RemainingDispatchableCount: 0,
 	}, nil
 }
 
 // SwitchReview 换一换；tag 非空时按顾客选择的菜品/场景标签取。
-func (s *ReviewPoolService) SwitchReview(token string, tag string) (*model.ReviewItem, int64, error) {
+func (s *ReviewPoolService) SwitchReview(token string, platformCode string, tag string) (*model.ReviewItem, int64, error) {
 	var tagRow model.NFCTag
 	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tagRow).Error; err != nil {
 		return nil, 0, errors.New("页面暂不可用")
@@ -286,16 +288,43 @@ func (s *ReviewPoolService) SwitchReview(token string, tag string) (*model.Revie
 	if err != nil {
 		return nil, 0, errors.New("商家服务已暂停")
 	}
+	platformCode = normalizePlatformCode(platformCode, "")
+	if err := s.ensureActivePlatformLink(store.ID, platformCode); err != nil {
+		return nil, 0, err
+	}
 
-	review, err := s.dispatchWithFallback(*store, tag)
+	review, err := s.dispatchWithFallback(*store, platformCode, tag)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	var remaining int64
 	s.DB.Model(&model.ReviewItem{}).
-		Where("store_id = ? AND status = ? AND is_dispatched = ?", store.ID, model.ReviewStatusAvailable, false).
+		Where("store_id = ? AND platform_style = ? AND status = ? AND is_dispatched = ?", store.ID, platformCode, model.ReviewStatusAvailable, false).
 		Count(&remaining)
-	s.EnsureDispatchableStockAsync(store.ID)
+	s.EnsureDispatchableStockAsync(store.ID, platformCode)
 	return review, remaining, nil
+}
+
+func (s *ReviewPoolService) ensureActivePlatformLink(storeID uint, platformCode string) error {
+	if platformCode == "" {
+		return errors.New("请选择评价平台")
+	}
+	var link model.StorePlatformLink
+	if err := s.DB.Where("store_id = ? AND platform_code = ? AND status = ?", storeID, platformCode, model.StatusEnabled).First(&link).Error; err != nil {
+		return errors.New("评价平台不可用")
+	}
+	return nil
+}
+
+func normalizePlatformCode(platformCode string, fallback string) string {
+	platformCode = strings.TrimSpace(platformCode)
+	if platformCode == "" {
+		return strings.TrimSpace(fallback)
+	}
+	return platformCode
+}
+
+func refillKey(storeID uint, platformCode string) string {
+	return fmt.Sprintf("%d:%s", storeID, platformCode)
 }

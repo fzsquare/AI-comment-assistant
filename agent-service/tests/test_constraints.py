@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.constraints.banned_words import find_hard_violations  # noqa: E402
+from app.constraints.registry import get_spec  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
 from app.internal_auth import check_internal_token  # noqa: E402
 from app.jsonutil import extract_json  # noqa: E402
@@ -45,6 +46,19 @@ def test_platform_specific_medical_word():
     assert "祛痘" in find_hard_violations("这个能祛痘", "xiaohongshu")
     # 点评平台不带小红书的医疗词表
     assert find_hard_violations("这个能祛痘", "dianping") == []
+
+
+def test_meituan_platform_uses_dianping_constraints():
+    if GenerateRequest is None:
+        return
+    req = GenerateRequest(
+        store={"store_name": "示例餐厅"},
+        keywords=[],
+        platform="meituan",
+        count=1,
+    )
+    assert req.platform == "meituan"
+    assert get_spec("meituan").display_name == "大众点评"
 
 
 def test_extract_json_plain():

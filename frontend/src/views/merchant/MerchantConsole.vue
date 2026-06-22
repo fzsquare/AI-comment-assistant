@@ -16,6 +16,7 @@ const keyword = ref('')
 const imageUrl = ref('')
 const platformForm = reactive({ platformCode: '', platformName: '', buttonText: '', targetUrl: '', backupUrl: '', sortNo: 1, status: 1 })
 const reviewText = ref('')
+const reviewPlatformCode = ref('')
 const keywords = ref<any[]>([])
 const images = ref<any[]>([])
 const links = ref<any[]>([])
@@ -47,6 +48,9 @@ async function loadAll() {
     links.value = linkRes.data.data
     reviews.value = reviewRes.data.data
     tasks.value = taskRes.data.data
+    if (!reviewPlatformCode.value && links.value.length > 0) {
+      reviewPlatformCode.value = links.value[0].platformCode
+    }
   } catch (err: any) {
     error.value = messageFrom(err, '商家后台数据加载失败')
   } finally {
@@ -109,13 +113,21 @@ async function addPlatformLink() {
 async function addReview() {
   const value = reviewText.value.trim()
   if (!value) return
-  if (await runAction(() => merchantApi.createReview({ content: value, status: 'available' }), '评价已添加')) {
+  if (!reviewPlatformCode.value) {
+    error.value = '请先选择评价平台'
+    return
+  }
+  if (await runAction(() => merchantApi.createReview({ content: value, status: 'available', platformCode: reviewPlatformCode.value }), '评价已添加')) {
     reviewText.value = ''
   }
 }
 
 async function generateReviews() {
-  await runAction(() => merchantApi.generateReviews(10), '评价生成任务已完成')
+  if (!reviewPlatformCode.value) {
+    error.value = '请先选择评价平台'
+    return
+  }
+  await runAction(() => merchantApi.generateReviews(reviewPlatformCode.value, 10), '评价生成任务已完成')
 }
 
 async function deleteKeyword(id: number) {
@@ -187,6 +199,13 @@ onMounted(loadAll)
 
       <div class="card">
         <h2>AI 生成任务</h2>
+        <select v-model="reviewPlatformCode">
+          <option value="" disabled>选择评价平台</option>
+          <option v-for="item in links" :key="item.id" :value="item.platformCode">
+            {{ item.platformName || item.platformCode }}
+          </option>
+        </select>
+        <div style="height: 8px"></div>
         <button :disabled="loading" @click="generateReviews">生成 10 条评价</button>
         <table>
           <thead><tr><th>ID</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
@@ -261,12 +280,19 @@ onMounted(loadAll)
 
       <div class="card">
         <h2>评价管理</h2>
+        <select v-model="reviewPlatformCode">
+          <option value="" disabled>选择评价平台</option>
+          <option v-for="item in links" :key="item.id" :value="item.platformCode">
+            {{ item.platformName || item.platformCode }}
+          </option>
+        </select>
+        <div style="height: 8px"></div>
         <textarea v-model="reviewText" placeholder="新增手工评价"></textarea>
         <div style="height: 8px"></div>
         <button :disabled="loading" @click="addReview">添加评价</button>
         <ul>
           <li v-for="item in reviews.slice(0, 8)" :key="item.id" class="list-action">
-            <span>{{ item.content }}</span>
+            <span>{{ item.platformStyle }} - {{ item.content }}</span>
             <button class="danger" :disabled="loading" @click="deleteReview(item.id)">删除</button>
           </li>
         </ul>

@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS review_items (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_review_items_store_id (store_id),
   INDEX idx_review_items_dispatch (store_id, status, is_dispatched),
+  INDEX idx_review_items_dispatch_platform (store_id, platform_style, status, is_dispatched),
   CONSTRAINT fk_review_store FOREIGN KEY (store_id) REFERENCES stores(id)
 );
 

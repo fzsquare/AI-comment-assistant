@@ -172,9 +172,19 @@ mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/schema.sql
 mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/seed.sql
 ```
 
-`database/seed.sql` 同样由调用方选择数据库。默认 seed 会创建演示管理员、演示商家、示例门店、NFC 标签、平台入口与评价池数据。
+`database/seed.sql` 同样由调用方选择数据库。默认 seed 会创建演示管理员、演示商家、示例门店、NFC 标签、平台入口与评价池数据；演示评价会分别写入 `meituan`、`dianping`，消费者选择平台后只领取对应平台的评价。
 
-## 4.4 导入后检查
+## 4.4 已有数据库升级
+
+如果是从旧版本升级，而不是全新导入 `schema.sql`，需要补充执行平台评价池索引：
+
+```bash
+mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/migration-2026-platform-review-pool.sql
+```
+
+旧库中已有的评价不会自动改平台；如果需要演示数据，请重新执行 `database/seed.sql`，或在商家后台按平台手工添加/AI 生成评价。
+
+## 4.5 导入后检查
 
 建议执行：
 
@@ -503,7 +513,7 @@ server {
 
 - `http://127.0.0.1:5173/landing/landing-demo-001`
 
-如果走 Nginx 托管，则替换为你的正式域名。
+如果走 Nginx 托管，则替换为你的正式域名。消费者页面会先展示平台列表；点击平台后才会调用 `switch-review`，并按请求中的 `platformCode` 发放该平台的评价。
 
 ---
 
@@ -515,6 +525,8 @@ server {
 - [ ] `ppk` 数据库已创建
 - [ ] `schema.sql` 已执行
 - [ ] `seed.sql` 已执行（仅演示环境）
+- [ ] 旧库升级时已执行 `database/migration-2026-platform-review-pool.sql`
+- [ ] 商家至少有一个启用的平台入口，且对应平台有可用评价或可触发 AI/兜底生成
 - [ ] MySQL 账号有读写权限
 
 ### 10.2 backend
@@ -548,7 +560,7 @@ server {
 - [ ] 管理员登录可用
 - [ ] `python3 scripts/check_frontend_flows.py --base-url http://127.0.0.1:8989` 通过
 - [ ] 消费者落地页初始化可用
-- [ ] `switch-review` 可用
+- [ ] 消费者选择平台后 `switch-review` 可用，且请求体带有 `platformCode`
 - [ ] `events` 可用
 
 ---
