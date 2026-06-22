@@ -50,7 +50,7 @@ export const merchantApi = {
     return http.delete(`/merchant/reviews/${id}`)
   },
   generateReviews(targetCount = 10) {
-    return http.post('/merchant/reviews/generate', { targetCount })
+    return http.post('/merchant/reviews/generate', { targetCount }, { timeout: 180000 })
   },
   listTasks() {
     return http.get('/merchant/review-generation-tasks')

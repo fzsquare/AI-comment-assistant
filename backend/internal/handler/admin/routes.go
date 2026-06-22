@@ -140,6 +140,13 @@ func (h *Handler) bindTag(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
+
+	var store model.Store
+	if err := h.DB.Where("id = ? AND status = ?", req.StoreID, model.StatusEnabled).First(&store).Error; err != nil {
+		response.Error(c, http.StatusBadRequest, "只能绑定启用中的门店")
+		return
+	}
+
 	item.StoreID = req.StoreID
 	item.Status = model.TagStatusBound
 	if err := h.DB.Save(&item).Error; err != nil {

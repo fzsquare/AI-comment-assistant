@@ -346,7 +346,7 @@ Pinia 状态管理，当前主要是：
 
 建议环境：
 
-- Go：`1.18+`
+- Go：`1.26+`（需满足 `backend/go.mod` 中的 `go 1.26`）
 - Node.js：建议 `18+`
 - npm：建议 `9+`
 - MySQL：`8.0+`
@@ -398,10 +398,11 @@ cp .env.example .env.local
 `frontend/.env.example` 内容：
 
 ```bash
-VITE_API_BASE_URL=http://127.0.0.1:8080/api
+VITE_API_BASE_URL=/api
+VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8080
 ```
 
-生产构建未配置 `VITE_API_BASE_URL` 时，Axios 默认使用同源 `/api`。如果前端静态托管与 API 不同域，只能把它设置为 Go backend 的公开 API，例如 `https://api.example.com/api`。不要在前端 `.env` 中配置 MySQL、agent-service、JWT 密钥或任何服务端 secret。
+开发环境默认通过 Vite proxy 把 `/api` 转发到 `VITE_DEV_API_PROXY_TARGET`。生产构建未配置 `VITE_API_BASE_URL` 时，Axios 默认使用同源 `/api`；如果前端静态托管与 API 不同域，只能把它设置为 Go backend 的公开 API，例如 `https://api.example.com/api`。不要在前端 `.env` 中配置 MySQL、agent-service、JWT 密钥或任何服务端 secret。
 
 ---
 
@@ -438,9 +439,11 @@ Browser
 
 ```bash
 cp .env.deploy.example .env.deploy
-# 编辑 .env.deploy，至少确认 MYSQL_DSN 可连接、LLM_API_KEY 已填写
+# 编辑 .env.deploy，至少确认 MYSQL_DSN 或 DB_APP_PASSWORD、LLM_API_KEY 已填写
 scripts/deploy.sh start
 ```
+
+新服务器如果希望直接使用默认管理员/商家账号，需要在 `.env.deploy` 中同时设置 `INIT_DB=true` 与 `LOAD_SEED=true`；否则脚本只建表，不会导入 `admin / 123456` 和 `merchant / 123456`。
 
 脚本会完成：
 
@@ -450,6 +453,7 @@ scripts/deploy.sh start
 - 启动 agent-service：`127.0.0.1:8090`
 - 启动 backend：`127.0.0.1:18989`
 - 启动 public gateway：`0.0.0.0:8989`
+- 通过 public gateway 自检前端页面、`/api` 代理与后台管理接口
 
 常用命令：
 
@@ -464,14 +468,17 @@ scripts/deploy.sh stop
 
 ```bash
 INIT_DB=true
+LOAD_SEED=true
 DB_APP_PASSWORD=<strong-db-password>
+# 如果 MySQL 看到的 backend 来源不是 127.0.0.1，按实际来源调整
+DB_APP_HOST=127.0.0.1
 MYSQL_ROOT_USER=root
 MYSQL_ROOT_PASSWORD=<root-password>
 ```
 
 `JWT_SECRET` 与 `AGENT_INTERNAL_TOKEN` 不填时，脚本会自动生成并保存到 `.deploy/runtime.env`。`.env.deploy` 与 `.deploy/` 已被 git 忽略，不应提交。
 
-脚本启动前会先检查 MySQL host/port 是否能从服务器连通，并默认要求 `LLM_API_KEY` 不为空。若只想先启动 UI/API 而暂不启用 AI 生成，可在 `.env.deploy` 中设置 `ALLOW_EMPTY_LLM_KEY=true`。
+脚本启动前会先检查 MySQL host/port 是否能从服务器连通，并默认要求 `LLM_API_KEY` 不为空。启动后会运行 `scripts/check_frontend_flows.py`，从 `http://127.0.0.1:8989` 检查 SPA 页面、同源 `/api` 代理、管理员与商家后台接口；`LOAD_SEED=false` 时会跳过默认账号登录检查。若只想先启动 UI/API 而暂不启用 AI 生成，可在 `.env.deploy` 中设置 `ALLOW_EMPTY_LLM_KEY=true`。
 
 ## 7.3 手动单机部署流程
 
@@ -643,7 +650,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 启动成功后：
 
 - frontend：`http://127.0.0.1:5173`
-- API：由 `VITE_API_BASE_URL` 指向本地 backend；生产默认同源 `/api`
+- API：默认同源 `/api`，由 Vite proxy 转发到 `VITE_DEV_API_PROXY_TARGET`
 
 ## 8.4 演示账号
 
@@ -668,22 +675,33 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - `PUT /api/merchant/store/detail`
 - `GET /api/merchant/store/keywords`
 - `POST /api/merchant/store/keywords`
+- `PUT /api/merchant/store/keywords/:id`
+- `DELETE /api/merchant/store/keywords/:id`
 - `GET /api/merchant/store/images`
 - `POST /api/merchant/store/images/upload`
+- `DELETE /api/merchant/store/images/:id`
 - `GET /api/merchant/store/platform-links`
 - `POST /api/merchant/store/platform-links`
+- `PUT /api/merchant/store/platform-links/:id`
+- `PUT /api/merchant/store/platform-links/:id/status`
+- `DELETE /api/merchant/store/platform-links/:id`
 - `GET /api/merchant/reviews`
 - `POST /api/merchant/reviews`
+- `PUT /api/merchant/reviews/:id`
+- `DELETE /api/merchant/reviews/:id`
 - `POST /api/merchant/reviews/generate`
 - `GET /api/merchant/review-generation-tasks`
 
 ## 9.2 管理员端
 - `POST /api/admin/auth/login`
 - `GET /api/admin/merchants`
+- `PUT /api/admin/merchants/:id/status`
 - `GET /api/admin/stores`
+- `PUT /api/admin/stores/:id/status`
 - `GET /api/admin/nfc-tags`
 - `POST /api/admin/nfc-tags`
 - `PUT /api/admin/nfc-tags/:id/bind`
+- `PUT /api/admin/nfc-tags/:id/status`
 - `GET /api/admin/review-generation-tasks`
 - `GET /api/admin/stats`
 
@@ -715,6 +733,8 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - `agent-service` 可编译检查，`/health` 返回最小健康信息
 - `frontend` 的 `npx vue-tsc -b --noEmit` 通过
 - `frontend` 已改为只通过 `VITE_API_BASE_URL` 访问 Go backend `/api`
+- 管理员后台已接入商家、门店、NFC 标签状态操作；商家后台已接入关键词、图片、平台入口与评价的删除/启停操作
+- 一键部署脚本会在启动后通过 `8989` 入口运行后台接口 smoke test
 - 当前工作区已移除被误提交的 `frontend/node_modules`、`frontend/dist` 与编译产物
 
 部署前仍需在目标服务器或干净构建环境执行完整启动联调：MySQL 初始化、agent-service 启动、backend 启动、frontend `npm ci && npm run build`、商家/管理员/消费者主流程验证。
@@ -726,8 +746,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 建议下一步继续完善：
 
 1. 为 `seed.sql` 增加幂等控制，避免重复导入时图片/关键词/评价重复堆积
-2. 为 frontend 增加更完整的页面交互与错误提示
-3. 为 agent-service 增加生产日志、指标、告警、限流与失败重试策略
-4. 增加对象存储上传能力
-5. 增加自动化浏览器验证（如 Playwright）
-6. 增加更完整的管理员审核与统计能力
+2. 为 agent-service 增加生产日志、指标、告警、限流与失败重试策略
+3. 增加对象存储上传能力
+4. 增加自动化浏览器验证（如 Playwright）
+5. 增加更完整的管理员审核与统计能力

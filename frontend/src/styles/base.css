@@ -59,6 +59,11 @@ button.danger {
   background: #ef4444;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
@@ -83,4 +88,48 @@ h1, h2, h3 {
 
 .muted {
   color: #667085;
+}
+
+.alert,
+.notice {
+  border-radius: 10px;
+  margin: 0 0 16px;
+  padding: 10px 12px;
+}
+
+.alert {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.notice {
+  background: #ecfdf3;
+  color: #027a48;
+}
+
+.list-action {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin: 8px 0;
+}
+
+.list-action button {
+  flex: 0 0 auto;
+}
+
+.image-item {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 120px;
+}
+
+.image-item img {
+  border-radius: 10px;
+  height: 80px;
+  object-fit: cover;
+  width: 120px;
 }

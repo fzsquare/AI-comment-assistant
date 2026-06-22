@@ -190,18 +190,28 @@ func (s *ReviewPoolService) dispatchWithFallback(store model.Store, tag string) 
 	return nil, errors.New("暂无推荐文案，请稍后再试")
 }
 
+func (s *ReviewPoolService) activeStoreByID(storeID uint) (*model.Store, error) {
+	var store model.Store
+	err := s.DB.Table("stores").
+		Select("stores.*").
+		Joins("JOIN merchant_users ON merchant_users.id = stores.merchant_user_id").
+		Where("stores.id = ? AND stores.status = ? AND merchant_users.status = ?", storeID, model.StatusEnabled, model.StatusEnabled).
+		First(&store).Error
+	return &store, err
+}
+
 func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayload, error) {
 	var tag model.NFCTag
 	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tag).Error; err != nil {
 		return nil, errors.New("页面暂不可用")
 	}
 
-	var store model.Store
-	if err := s.DB.Where("id = ? AND status = ?", tag.StoreID, model.StatusEnabled).First(&store).Error; err != nil {
+	store, err := s.activeStoreByID(tag.StoreID)
+	if err != nil {
 		return nil, errors.New("商家服务已暂停")
 	}
 
-	review, err := s.dispatchWithFallback(store, "")
+	review, err := s.dispatchWithFallback(*store, "")
 	if err != nil {
 		return nil, err
 	}
@@ -242,12 +252,12 @@ func (s *ReviewPoolService) SwitchReview(token string, tag string) (*model.Revie
 		return nil, 0, errors.New("页面暂不可用")
 	}
 
-	var store model.Store
-	if err := s.DB.Where("id = ? AND status = ?", tagRow.StoreID, model.StatusEnabled).First(&store).Error; err != nil {
+	store, err := s.activeStoreByID(tagRow.StoreID)
+	if err != nil {
 		return nil, 0, errors.New("商家服务已暂停")
 	}
 
-	review, err := s.dispatchWithFallback(store, tag)
+	review, err := s.dispatchWithFallback(*store, tag)
 	if err != nil {
 		return nil, 0, err
 	}

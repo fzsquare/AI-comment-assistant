@@ -419,7 +419,7 @@ func (h *Handler) listReviews(c *gin.Context) {
 		return
 	}
 	var items []model.ReviewItem
-	h.DB.Where("store_id = ?", store.ID).Order("id desc").Find(&items)
+	h.DB.Where("store_id = ? AND status <> ?", store.ID, model.ReviewStatusDeleted).Order("id desc").Find(&items)
 	response.Success(c, items)
 }
 

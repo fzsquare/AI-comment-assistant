@@ -40,6 +40,8 @@ Useful env:
   ALLOW_EMPTY_LLM_KEY=true    Allow UI/API startup without AI generation
   INIT_DB=true                Optionally create/import MySQL schema
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
+  SMOKE_TEST=true             Check frontend gateway and management APIs after start
+  SMOKE_TEST_AUTH=true        Force default/custom admin and merchant login checks
   SKIP_INSTALL=true           Reuse installed dependencies
 EOF
 }
@@ -121,15 +123,21 @@ configure_defaults() {
   MYSQL_HOST="${MYSQL_HOST:-127.0.0.1}"
   MYSQL_PORT="${MYSQL_PORT:-3306}"
   DB_APP_USER="${DB_APP_USER:-ppk_app}"
+  DB_APP_HOST="${DB_APP_HOST:-127.0.0.1}"
   DB_APP_PASSWORD="${DB_APP_PASSWORD:-}"
   MYSQL_ROOT_USER="${MYSQL_ROOT_USER:-root}"
   MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
 
+  case "${MYSQL_DSN:-}" in
+    *replace-with*|*CHANGE_ME*|*change-me*)
+      if [[ -n "$DB_APP_PASSWORD" ]]; then
+        MYSQL_DSN=""
+      fi
+      ;;
+  esac
   if [[ -z "${MYSQL_DSN:-}" ]]; then
     if [[ -n "$DB_APP_PASSWORD" ]]; then
       MYSQL_DSN="$DB_APP_USER:$DB_APP_PASSWORD@tcp($MYSQL_HOST:$MYSQL_PORT)/$DB_NAME?charset=utf8mb4&parseTime=True&loc=Local"
-    else
-      MYSQL_DSN="ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
     fi
   fi
 
@@ -150,6 +158,12 @@ configure_defaults() {
   AGENT_MIN_GRADE="${AGENT_MIN_GRADE:-B}"
   MAX_REVIEW_GENERATE_COUNT="${MAX_REVIEW_GENERATE_COUNT:-50}"
   DEFAULT_REVIEW_TARGET_COUNT="${DEFAULT_REVIEW_TARGET_COUNT:-10}"
+  SMOKE_TEST="${SMOKE_TEST:-true}"
+  SMOKE_TEST_AUTH="${SMOKE_TEST_AUTH:-auto}"
+  SMOKE_ADMIN_ACCOUNT="${SMOKE_ADMIN_ACCOUNT:-admin}"
+  SMOKE_ADMIN_PASSWORD="${SMOKE_ADMIN_PASSWORD:-123456}"
+  SMOKE_MERCHANT_ACCOUNT="${SMOKE_MERCHANT_ACCOUNT:-merchant}"
+  SMOKE_MERCHANT_PASSWORD="${SMOKE_MERCHANT_PASSWORD:-123456}"
 }
 
 ensure_runtime_secrets() {
@@ -184,10 +198,20 @@ validate_mysql_identifier() {
   [[ "$value" =~ ^[A-Za-z0-9_]+$ ]] || die "$label must contain only letters, numbers, and underscore"
 }
 
+validate_mysql_host_pattern() {
+  local label="$1"
+  local value="$2"
+  [[ "$value" =~ ^[A-Za-z0-9_.:%-]+$ ]] || die "$label must contain only letters, numbers, dot, underscore, percent, colon, and hyphen"
+}
+
 validate_config() {
+  if [[ -z "${MYSQL_DSN:-}" ]]; then
+    die "MYSQL_DSN is empty; set MYSQL_DSN, or set DB_APP_PASSWORD so the deploy script can build one from DB_* values"
+  fi
+
   case "$MYSQL_DSN" in
     *replace-with*|*CHANGE_ME*|*change-me*)
-      die "MYSQL_DSN still contains a placeholder; edit $ENV_FILE or unset MYSQL_DSN to use local defaults"
+      die "MYSQL_DSN still contains a placeholder; edit $ENV_FILE, leave MYSQL_DSN empty, or set DB_APP_PASSWORD for generated DSN"
       ;;
   esac
 }
@@ -218,6 +242,51 @@ else:
 
 print((host or "127.0.0.1") + " " + (port or "3306"))
 PY
+}
+
+mysql_dsn_info() {
+  MYSQL_DSN="$MYSQL_DSN" python3 - <<'PY'
+import os
+import re
+import sys
+import urllib.parse
+
+dsn = os.environ.get("MYSQL_DSN", "")
+match = re.match(r"([^:@/]+)(?::.*)?@tcp\(([^)]*)\)/([^?]+)", dsn)
+if not match:
+    sys.exit(2)
+
+user = urllib.parse.unquote(match.group(1))
+address = match.group(2).strip()
+database = urllib.parse.unquote(match.group(3))
+if address.startswith("["):
+    end = address.find("]")
+    if end == -1:
+        sys.exit(2)
+    host = address[1:end]
+    rest = address[end + 1 :]
+    port = rest[1:] if rest.startswith(":") else "3306"
+elif ":" in address:
+    host, port = address.rsplit(":", 1)
+else:
+    host, port = address, "3306"
+
+print(" ".join([user, host or "127.0.0.1", port or "3306", database]))
+PY
+}
+
+validate_init_db_consistency() {
+  local info dsn_user dsn_host dsn_port dsn_db
+
+  if ! info="$(mysql_dsn_info)"; then
+    die "MYSQL_DSN must use user:password@tcp(host:port)/database when INIT_DB=true"
+  fi
+  read -r dsn_user dsn_host dsn_port dsn_db <<< "$info"
+
+  [[ "$dsn_user" == "$DB_APP_USER" ]] || die "MYSQL_DSN user ($dsn_user) must match DB_APP_USER ($DB_APP_USER) when INIT_DB=true"
+  [[ "$dsn_db" == "$DB_NAME" ]] || die "MYSQL_DSN database ($dsn_db) must match DB_NAME ($DB_NAME) when INIT_DB=true"
+  [[ "$dsn_host" == "$MYSQL_HOST" ]] || die "MYSQL_DSN host ($dsn_host) must match MYSQL_HOST ($MYSQL_HOST) when INIT_DB=true"
+  [[ "$dsn_port" == "$MYSQL_PORT" ]] || die "MYSQL_DSN port ($dsn_port) must match MYSQL_PORT ($MYSQL_PORT) when INIT_DB=true"
 }
 
 check_mysql_reachable() {
@@ -275,13 +344,17 @@ init_db_if_requested() {
   [[ "$DB_APP_PASSWORD" != *"'"* ]] || die "DB_APP_PASSWORD must not contain a single quote when INIT_DB=true"
   validate_mysql_identifier DB_NAME "$DB_NAME"
   validate_mysql_identifier DB_APP_USER "$DB_APP_USER"
+  validate_mysql_host_pattern DB_APP_HOST "$DB_APP_HOST"
+  validate_init_db_consistency
 
   log "initializing MySQL database $DB_NAME"
   mysql_cmd -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-  mysql_cmd -e "CREATE USER IF NOT EXISTS '$DB_APP_USER'@'127.0.0.1' IDENTIFIED BY '$DB_APP_PASSWORD'; GRANT SELECT, INSERT, UPDATE, DELETE ON \`$DB_NAME\`.* TO '$DB_APP_USER'@'127.0.0.1'; FLUSH PRIVILEGES;"
+  mysql_cmd -e "CREATE USER IF NOT EXISTS '$DB_APP_USER'@'$DB_APP_HOST' IDENTIFIED BY '$DB_APP_PASSWORD'; ALTER USER '$DB_APP_USER'@'$DB_APP_HOST' IDENTIFIED BY '$DB_APP_PASSWORD'; GRANT SELECT, INSERT, UPDATE, DELETE ON \`$DB_NAME\`.* TO '$DB_APP_USER'@'$DB_APP_HOST'; FLUSH PRIVILEGES;"
   mysql_cmd "$DB_NAME" < "$ROOT_DIR/database/schema.sql"
   if truthy "${LOAD_SEED:-false}"; then
     mysql_cmd "$DB_NAME" < "$ROOT_DIR/database/seed.sql"
+  else
+    log "LOAD_SEED=false; demo admin/merchant accounts are not imported"
   fi
 }
 
@@ -384,6 +457,43 @@ wait_for_port() {
   die "$name did not open $host:$port"
 }
 
+run_smoke_tests() {
+  if ! truthy "$SMOKE_TEST"; then
+    log "SMOKE_TEST=false; deployment smoke tests skipped"
+    return
+  fi
+
+  local base_url args
+  base_url="http://127.0.0.1:$FRONTEND_PORT"
+  args=(
+    --base-url "$base_url"
+    --admin-account "$SMOKE_ADMIN_ACCOUNT"
+    --admin-password "$SMOKE_ADMIN_PASSWORD"
+    --merchant-account "$SMOKE_MERCHANT_ACCOUNT"
+    --merchant-password "$SMOKE_MERCHANT_PASSWORD"
+  )
+
+  case "$SMOKE_TEST_AUTH" in
+    true|TRUE|1|yes|YES|on|ON)
+      ;;
+    false|FALSE|0|no|NO|off|OFF)
+      args+=(--skip-authenticated)
+      ;;
+    auto|"")
+      if ! truthy "${LOAD_SEED:-false}"; then
+        args+=(--skip-authenticated)
+        log "authenticated smoke tests skipped; set LOAD_SEED=true or SMOKE_TEST_AUTH=true to verify default/custom logins"
+      fi
+      ;;
+    *)
+      die "SMOKE_TEST_AUTH must be auto, true, or false"
+      ;;
+  esac
+
+  log "running smoke tests against $base_url"
+  python3 "$ROOT_DIR/scripts/check_frontend_flows.py" "${args[@]}"
+}
+
 ensure_port_free() {
   local name="$1"
   local host="$2"
@@ -456,6 +566,8 @@ start_services() {
   echo $! > "$(pid_file_for gateway)"
   wait_for_port gateway "127.0.0.1" "$FRONTEND_PORT" "$(pid_file_for gateway)"
 
+  run_smoke_tests
+
   log "deployment is up: http://127.0.0.1:$FRONTEND_PORT"
   log "public port: $FRONTEND_PORT; local backend: $BACKEND_HOST:$BACKEND_PORT; local agent: $AGENT_HOST:$AGENT_PORT"
 }
@@ -508,13 +620,11 @@ case "$COMMAND" in
   install)
     require_base_commands
     configure_defaults
-    validate_config
     install_dependencies
     ;;
   build)
     require_base_commands
     configure_defaults
-    validate_config
     install_dependencies
     build_project
     ;;

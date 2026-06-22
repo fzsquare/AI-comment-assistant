@@ -59,12 +59,12 @@ Browser
 建议环境：
 
 - Linux / WSL / macOS
-- Go `1.18+`
+- Go `1.26+`（需满足 `backend/go.mod` 中的 `go 1.26`）
 - Node.js `18+`
 - npm `9+`
 - MySQL `8.0+`
 
-> 当前项目已在 WSL + MySQL 8.0 + Go 1.18 + Node 22 环境下完成基础验证。
+> 当前项目要求 Go 版本满足 `backend/go.mod`；部署前建议执行 `go version` 确认。
 
 ## 3.2 目录说明
 
@@ -85,7 +85,7 @@ scripts/      # 一键部署脚本与 public gateway
 
 ```bash
 cp .env.deploy.example .env.deploy
-# 编辑 .env.deploy，至少确认 MYSQL_DSN 可连接、LLM_API_KEY 已填写
+# 编辑 .env.deploy，至少确认 MYSQL_DSN 或 DB_APP_PASSWORD、LLM_API_KEY 已填写
 scripts/deploy.sh start
 ```
 
@@ -118,6 +118,7 @@ scripts/deploy.sh stop
 - `VITE_API_BASE_URL=/api npm run build`
 - `go build -o .deploy/bin/ppk-server ./cmd/server`
 - 后台启动 agent-service、backend、public gateway
+- 启动后从 `http://127.0.0.1:8989` 自检前端页面、同源 `/api` 代理与后台管理接口
 
 运行日志和 PID 文件位于 `.deploy/`。`JWT_SECRET` 与 `AGENT_INTERNAL_TOKEN` 未配置时会自动生成到 `.deploy/runtime.env`。
 
@@ -131,11 +132,14 @@ ALLOW_EMPTY_LLM_KEY=true
 
 ```bash
 INIT_DB=true
-LOAD_SEED=false
+LOAD_SEED=true
 MYSQL_ROOT_USER=root
 MYSQL_ROOT_PASSWORD=<root-password>
+DB_APP_HOST=127.0.0.1
 DB_APP_PASSWORD=<strong-db-password>
 ```
+
+`MYSQL_DSN` 可以直接填写完整连接串；也可以留空，让脚本用 `DB_APP_USER`、`DB_APP_PASSWORD`、`MYSQL_HOST`、`MYSQL_PORT`、`DB_NAME` 自动生成。`DB_APP_HOST` 是 MySQL 账户 host，单机部署通常是 `127.0.0.1`；托管/内网 MySQL 要填数据库看到的 backend 来源地址或授权模式。`LOAD_SEED=true` 会导入默认管理员 `admin / 123456` 与默认商家 `merchant / 123456`，适合新服务器首次验证。生产环境如果不导入演示数据，需要自行准备可登录的管理员与商家数据，或设置 `SMOKE_TEST_AUTH=false` 跳过默认账号自检。
 
 生产环境防火墙只需要开放 `8989`。不要开放 `18989`、`8090` 或 MySQL 端口。
 
@@ -160,11 +164,15 @@ mysql -h 127.0.0.1 -P 3306 -u root -p111111 -e "CREATE USER IF NOT EXISTS 'ppk_d
 mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/schema.sql
 ```
 
+`database/schema.sql` 不再写死 `USE ppk`；导入到哪个库由命令行中的数据库名决定。
+
 ## 4.3 导入初始化数据
 
 ```bash
 mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/seed.sql
 ```
+
+`database/seed.sql` 同样由调用方选择数据库。默认 seed 会创建演示管理员、演示商家、示例门店、NFC 标签、平台入口与评价池数据。
 
 ## 4.4 导入后检查
 
@@ -368,10 +376,11 @@ npm run dev -- --host 0.0.0.0 --port 5173
 `frontend/.env.example` 只包含允许暴露给浏览器的变量：
 
 ```bash
-VITE_API_BASE_URL=http://127.0.0.1:8080/api
+VITE_API_BASE_URL=/api
+VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8080
 ```
 
-生产环境不配置时，前端默认请求同源 `/api`。脚本部署时会用 `VITE_API_BASE_URL=/api` 构建前端，并由 `8989` public gateway 转发到本机 backend `127.0.0.1:18989`。不要把 MySQL、agent-service 或任何服务端密钥写入前端环境变量。
+开发环境默认通过 Vite proxy 把 `/api` 转发到 `VITE_DEV_API_PROXY_TARGET`。生产环境不配置时，前端默认请求同源 `/api`。脚本部署时会用 `VITE_API_BASE_URL=/api` 构建前端，并由 `8989` public gateway 转发到本机 backend `127.0.0.1:18989`。不要把 MySQL、agent-service 或任何服务端密钥写入前端环境变量。
 
 ## 6.3 生产构建
 
@@ -398,6 +407,14 @@ server {
 
     location / {
         try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:18989;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
@@ -480,6 +497,8 @@ server {
 - 账号：`merchant`
 - 密码：`123456`
 
+以上账号只有在导入 `database/seed.sql` 或一键脚本设置 `LOAD_SEED=true` 后才存在。
+
 ## 9.3 消费者演示页面
 
 - `http://127.0.0.1:5173/landing/landing-demo-001`
@@ -527,6 +546,7 @@ server {
 ### 10.5 联通性
 - [ ] 商家登录可用
 - [ ] 管理员登录可用
+- [ ] `python3 scripts/check_frontend_flows.py --base-url http://127.0.0.1:8989` 通过
 - [ ] 消费者落地页初始化可用
 - [ ] `switch-review` 可用
 - [ ] `events` 可用
@@ -573,6 +593,8 @@ Access denied for user 'root'@'localhost'
 - frontend 的 `VITE_API_BASE_URL` 是否指向 Go backend 公开 `/api`，未配置时是否有同源 `/api` 反向代理
 - 是否存在跨域问题
 - Nginx 是否正确代理 `/api/`
+- 如果是新服务器，是否导入了 `database/seed.sql`，或一键脚本是否设置了 `INIT_DB=true LOAD_SEED=true`
+- 浏览器访问的是 `8989` 统一入口，而不是直接访问 `18989`
 - 不要尝试从浏览器直接请求 MySQL 或 agent-service
 
 ## 11.5 backend 调用 agent-service 返回 401
@@ -624,5 +646,6 @@ Access denied for user 'root'@'localhost'
 - frontend 只配置 `VITE_API_BASE_URL`，不会把 MySQL、agent-service 或服务端 secret 暴露到浏览器
 - Go backend 主生成器通过 `AGENT_SERVICE_URL` 调用内部 agent-service，mock 只保留为空池兜底
 - frontend 被误提交的 `node_modules`、`dist` 与编译产物已从 git 跟踪中移除
+- 一键部署脚本会在启动后通过 public gateway 运行后台管理 smoke test
 
 部署到云服务器前，还需要在目标环境完成一次端到端联调：MySQL 导入、agent-service 携真实 `LLM_API_KEY` 启动、backend 携生产环境变量启动、frontend 在干净依赖环境执行 `npm ci && npm run build`，再验证商家、管理员与消费者主流程。
