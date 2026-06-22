@@ -25,6 +25,14 @@ const selectedTag = ref('')
 // 顾客可在发布前编辑成自己的话
 const editedContent = ref('')
 
+async function trackEvent(payloadData: Record<string, unknown>) {
+  try {
+    await publicApi.createEvent(String(route.params.token), payloadData)
+  } catch (err) {
+    console.warn('event tracking failed', err)
+  }
+}
+
 // 文案变化时，把可编辑框同步成最新文案
 watch(
   () => payload.value?.review.content,
@@ -41,7 +49,7 @@ async function load() {
     payload.value = data.data
     if (payload.value) {
       editedContent.value = payload.value.review.content
-      await publicApi.createEvent(String(route.params.token), {
+      await trackEvent({
         sessionId: payload.value.sessionId,
         reviewItemId: payload.value.review.id,
         actionType: 'page_view'
@@ -76,7 +84,7 @@ async function fetchReview(tag: string, action: string) {
     })
     payload.value.review = data.data.review
     payload.value.remainingDispatchableCount = data.data.remainingDispatchableCount
-    await publicApi.createEvent(String(route.params.token), {
+    await trackEvent({
       sessionId: payload.value.sessionId,
       reviewItemId: payload.value.review.id,
       actionType: action
@@ -94,7 +102,7 @@ async function copyReview() {
   if (!payload.value || !text) return
   try {
     await navigator.clipboard.writeText(text)
-    await publicApi.createEvent(String(route.params.token), {
+    await trackEvent({
       sessionId: payload.value.sessionId,
       reviewItemId: payload.value.review.id,
       actionType: 'review_copy'
@@ -113,7 +121,7 @@ async function jump(link: { platformCode: string; targetUrl: string; backupUrl?:
   } catch {
     alert('文案未自动复制，请手动复制后发布')
   }
-  await publicApi.createEvent(String(route.params.token), {
+  await trackEvent({
     sessionId: payload.value.sessionId,
     reviewItemId: payload.value.review.id,
     actionType: 'platform_link_click',
