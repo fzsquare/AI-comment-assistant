@@ -489,7 +489,7 @@ func (h *Handler) deleteReview(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "删除失败")
 		return
 	}
-	_ = h.ReviewPool.EnsureDispatchableStock(store.ID)
+	h.ReviewPool.EnsureDispatchableStockAsync(store.ID)
 	response.Success(c, item)
 }
 

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"ppk/backend/internal/model"
@@ -17,6 +18,9 @@ type ReviewPoolService struct {
 	// Fallback 在评价池为空且主生成器（agent）不可用时，即时产出一条兜底文案，
 	// 保证落地页不白屏。通常注入内置 MockReviewGenerator。
 	Fallback ReviewGenerator
+
+	refillMu       sync.Mutex
+	refillInFlight map[uint]struct{}
 }
 
 type LandingPayload struct {
@@ -103,6 +107,32 @@ func (s *ReviewPoolService) EnsureDispatchableStock(storeID uint) error {
 		return nil
 	}
 	return s.GenerateForStore(storeID, model.TriggerAutoRefill, target)
+}
+
+func (s *ReviewPoolService) EnsureDispatchableStockAsync(storeID uint) {
+	if storeID == 0 {
+		return
+	}
+
+	s.refillMu.Lock()
+	if s.refillInFlight == nil {
+		s.refillInFlight = make(map[uint]struct{})
+	}
+	if _, ok := s.refillInFlight[storeID]; ok {
+		s.refillMu.Unlock()
+		return
+	}
+	s.refillInFlight[storeID] = struct{}{}
+	s.refillMu.Unlock()
+
+	go func() {
+		defer func() {
+			s.refillMu.Lock()
+			delete(s.refillInFlight, storeID)
+			s.refillMu.Unlock()
+		}()
+		_ = s.EnsureDispatchableStock(storeID)
+	}()
 }
 
 // dispatchOne 从池中取一条可发放评价并标记已发放。
@@ -231,7 +261,7 @@ func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayloa
 		Count(&remaining)
 
 	_ = s.DB.Create(&model.ReviewDisplayLog{StoreID: store.ID, ReviewItemID: review.ID, NFCTagID: tag.ID, SessionID: utils.RandomString(16), ActionType: "review_show"}).Error
-	_ = s.EnsureDispatchableStock(store.ID)
+	s.EnsureDispatchableStockAsync(store.ID)
 
 	return &LandingPayload{
 		SessionID:                  utils.RandomString(16),
@@ -266,6 +296,6 @@ func (s *ReviewPoolService) SwitchReview(token string, tag string) (*model.Revie
 	s.DB.Model(&model.ReviewItem{}).
 		Where("store_id = ? AND status = ? AND is_dispatched = ?", store.ID, model.ReviewStatusAvailable, false).
 		Count(&remaining)
-	_ = s.EnsureDispatchableStock(store.ID)
+	s.EnsureDispatchableStockAsync(store.ID)
 	return review, remaining, nil
 }
