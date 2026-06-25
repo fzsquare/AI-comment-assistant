@@ -12,11 +12,17 @@ from ..schemas import StoreContext
 
 def build_writer_system(spec: PlatformSpec, satisfaction: str) -> str:
     fewshots = "\n\n".join(f"范例{i + 1}：\n{s}" for i, s in enumerate(spec.few_shots))
+    title_rule = (
+        "【标题规则】小红书允许标题：content 第一行写标题本身，不要写“标题：”前缀。\n"
+        if spec.code == "xiaohongshu"
+        else "【标题规则】本平台评论没有标题。content 必须直接从评价正文开始，严禁输出“标题：”、题目、小标题或单独标题行。\n"
+    )
     return (
         f"你是「{spec.display_name}」资深真实用户文案写手。\n"
         "任务：站在一个真实到店顾客的角度，帮 TA 写出一条 TA 本人真愿意发布的真实评价。"
         "这不是广告、不是刷量，是真实体验的自然表达——读起来要像真人随手写的，不能像 AI 拼的。\n\n"
         f"{spec.writer_rules}\n\n"
+        f"{title_rule}\n"
         f"{persona_block(satisfaction)}\n\n"
         f"{banned_words_block(spec.code)}\n\n"
         f"【高质量范例（学习其真实感与细节密度，不要照抄内容）】\n{fewshots}\n\n"

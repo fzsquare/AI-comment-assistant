@@ -66,6 +66,8 @@ curl -X POST http://127.0.0.1:8090/generate-reviews \
 - Go backend 的 `AGENT_SERVICE_URL` 指向本机或私有网络地址,并通过
   `X-Agent-Internal-Token` 传入与本服务一致的 `AGENT_INTERNAL_TOKEN`。
 - 前端只请求 Go backend 的 `/api`,不要配置或调用本服务地址。
+- 标题规则：大众点评 / 美团 / 抖音等普通评论不保留标题；只有小红书允许标题，
+  并放在 `content` 第一行，不带“标题：”前缀。
 - **入池阈值:** 本服务返回每条的 `score`/`grade`。Go backend 默认只保留
   `grade ∈ {S, A, B}`(即 score ≥ 70),C/D 丢弃；阈值可通过 `AGENT_MIN_GRADE` 调整。
 - 内置 mock 生成器只在评价池为空且 agent-service 不可用时兜底补 1 条,避免消费者落地页白屏。

@@ -12,6 +12,7 @@ from agents import Agent, Runner
 
 from .agents_setup import make_reviewer_agent, make_writer_agent
 from .config import settings
+from .content_normalizer import normalize_generated_content
 from .constraints.banned_words import find_hard_violations
 from .constraints.platforms.base import PlatformSpec
 from .constraints.registry import get_spec
@@ -34,19 +35,21 @@ def _grade_from_score(score: int) -> str:
     return "D"
 
 
-async def _run_writer(agent: Agent, user_input: str) -> Tuple[str, List[str]]:
+async def _run_writer(agent: Agent, user_input: str, platform: str) -> Tuple[str, List[str]]:
     result = await Runner.run(agent, user_input)
     out = result.final_output or ""
     try:
         data = extract_json(out)
+        title = str(data.get("title", "")).strip()
         content = str(data.get("content", "")).strip()
         tags = [str(t).strip() for t in (data.get("tags") or []) if str(t).strip()]
+        content = normalize_generated_content(platform, content, title=title)
         if content:
             return content, tags
     except ValueError:
         pass
     # 解析失败兜底：把整段当正文，tags 留空
-    return out.strip(), []
+    return normalize_generated_content(platform, out), []
 
 
 async def _run_reviewer(
@@ -79,7 +82,7 @@ async def _generate_one(
     best_clean = False  # best 是否无硬违规
 
     for round_ in range(settings.max_revise_rounds + 1):
-        content, tags = await _run_writer(writer, user)
+        content, tags = await _run_writer(writer, user, req.platform)
         score, grade, passed, issues = await _run_reviewer(
             reviewer, spec, req.satisfaction, content, req.store.store_name, req.keywords
         )

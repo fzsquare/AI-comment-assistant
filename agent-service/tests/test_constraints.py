@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.constraints.banned_words import find_hard_violations  # noqa: E402
 from app.constraints.registry import get_spec  # noqa: E402
+from app.content_normalizer import normalize_generated_content  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
 from app.internal_auth import check_internal_token  # noqa: E402
 from app.jsonutil import extract_json  # noqa: E402
@@ -59,6 +60,32 @@ def test_meituan_platform_uses_dianping_constraints():
     )
     assert req.platform == "meituan"
     assert get_spec("meituan").display_name == "大众点评"
+
+
+def test_non_xiaohongshu_generated_content_strips_explicit_title():
+    content = "标题：适合朋友聚餐的小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("dianping", content) == "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+
+
+def test_non_xiaohongshu_generated_content_keeps_normal_sentence_with_title_word():
+    content = "标题取得普通一点反而真实，上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("dianping", content) == content
+
+
+def test_xiaohongshu_generated_content_keeps_title_without_label():
+    content = "标题：人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("xiaohongshu", content) == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+
+
+def test_xiaohongshu_generated_content_can_prepend_json_title():
+    assert (
+        normalize_generated_content(
+            "xiaohongshu",
+            "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。",
+            title="人均70挖到宝藏小店",
+        )
+        == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    )
 
 
 def test_extract_json_plain():
