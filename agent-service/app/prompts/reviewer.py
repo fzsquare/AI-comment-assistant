@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from ..config import settings
+from ..constraints.humanizer import reviewer_humanizer_note
 from ..constraints.platforms.base import PlatformSpec
 
 REVIEWER_SYSTEM = (
@@ -24,6 +25,8 @@ REVIEWER_SYSTEM = (
     "- 文案出现“允许菜品”之外编造的具体菜名。\n"
     "注意：城市级的身份表述（如“新上海人/北漂”）属轻微问题，只在 issues 里提醒、"
     "小幅扣分即可，不计入上面的硬扣项。\n\n"
+    + reviewer_humanizer_note()
+    + "\n\n"
     "【输出格式（严格）】只返回一个 JSON 对象，不要 markdown、不要解释：\n"
     '{"score": 0-100, "grade": "S/A/B/C/D", "pass": true/false, "issues": ["可操作的修改建议", ...]}\n'
     "issues 针对扣分点给出具体、可执行的修改建议（如“缺少具体价格，请补人均”）。"

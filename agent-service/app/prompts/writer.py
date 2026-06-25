@@ -5,6 +5,7 @@ import random
 from typing import List
 
 from ..constraints.banned_words import banned_words_block
+from ..constraints.humanizer import humanizer_block
 from ..constraints.personas import IDENTITY_ELEMENTS, persona_block
 from ..constraints.platforms.base import PlatformSpec
 from ..schemas import StoreContext
@@ -24,6 +25,7 @@ def build_writer_system(spec: PlatformSpec, satisfaction: str) -> str:
         f"{spec.writer_rules}\n\n"
         f"{title_rule}\n"
         f"{persona_block(satisfaction)}\n\n"
+        f"{humanizer_block()}\n\n"
         f"{banned_words_block(spec.code)}\n\n"
         f"【高质量范例（学习其真实感与细节密度，不要照抄内容）】\n{fewshots}\n\n"
         "【输出格式（严格）】只返回一个 JSON 对象，不要 markdown 代码块、不要任何解释：\n"

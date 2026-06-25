@@ -14,6 +14,7 @@ from .agents_setup import make_reviewer_agent, make_writer_agent
 from .config import settings
 from .content_normalizer import normalize_generated_content
 from .constraints.banned_words import find_hard_violations
+from .constraints.humanizer import find_ai_tells
 from .constraints.platforms.base import PlatformSpec
 from .constraints.registry import get_spec
 from .jsonutil import extract_json
@@ -94,6 +95,14 @@ async def _generate_one(
             score = min(score, 59)
             grade = "D"
             issues = [f"命中高风险禁用词：{'、'.join(hits)}，必须删改"] + issues
+
+        # 去 AI 腔兜底：命中高置信 AI 写作痕迹 → 逼一次「去 AI 腔」重写（软失败，
+        # 不像禁用词那样直接打 D；纯属文风，达不到合规级别的硬伤）
+        tells = find_ai_tells(content)
+        if tells:
+            issues = [f"去掉 AI 写作痕迹（改成真人随手写的口吻）：{'、'.join(tells)}"] + issues
+            if passed:
+                passed = False
 
         item = ReviewItem(
             content=content, tags=tags, score=score, grade=grade, revisions=round_

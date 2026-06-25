@@ -12,6 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.constraints.banned_words import find_hard_violations  # noqa: E402
+from app.constraints.humanizer import find_ai_tells  # noqa: E402
 from app.constraints.registry import get_spec  # noqa: E402
 from app.content_normalizer import normalize_generated_content  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
@@ -37,6 +38,17 @@ def test_hard_violations_catches_real_banned():
 def test_hard_violations_no_false_positive_on_diyi_ci():
     # 回归：系统人设“第一次来”不能被“第一”误伤（评审子代理发现的 P1）
     assert find_hard_violations("第一次来这家店，体验不错", "dianping") == []
+
+
+def test_ai_tells_catches_cliche_and_dash():
+    assert "总而言之" in find_ai_tells("菜不错，总而言之很满意")
+    assert "回味无穷" in find_ai_tells("那道鱼回味无穷")
+    assert "破折号——" in find_ai_tells("环境很好——尤其是灯光")
+
+
+def test_ai_tells_no_false_positive_on_plain_review():
+    # 真人随手写、无套话无破折号 → 不该误报
+    assert find_ai_tells("上周三和朋友来的，点了酸菜鱼，鱼挺嫩，就是上菜有点慢。") == []
 
 
 def test_hard_violations_no_false_positive_on_common_words():
