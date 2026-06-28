@@ -67,10 +67,15 @@ let nfcTags = [
   { id: 1, tagCode: 'TAG-DEMO-001', storeId: 1, landingToken: 'mock-demo-001', status: 'bound', remark: '演示标签' }
 ]
 
+// 多商家：演示「每个商家有自己独立的数据」（管理员能看到全部，商家只看到自己的）
 const merchants = [
-  { id: 1, account: 'merchant', merchantName: '示例商家', contactName: '张三', status: 1 }
+  { id: 1, account: 'merchant', merchantName: '巷子里的椒麻鸡', contactName: '张三', status: 1 },
+  { id: 2, account: 'merchant2', merchantName: '舒缘足道', contactName: '李四', status: 1 }
 ]
-const stores = [{ ...store, merchantUserId: 1 }]
+const stores = [
+  { ...store, id: 1, merchantUserId: 1 },
+  { id: 2, merchantUserId: 2, storeName: '舒缘足道', industryType: '足疗按摩', storeIntro: '', address: '', primaryPlatformStyle: 'dianping', brandTone: '轻松自然', status: 1 }
+]
 
 // ---------------- 落地页评价池（已 humanize，{{tag}} 会被替换成顾客选的菜）----------------
 const reviewPool: Record<string, string[]> = {
@@ -136,6 +141,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'DELETE', re: /\/merchant\/store\/keywords\/(\d+)$/, handler: (m) => { keywords = keywords.filter((k) => k.id !== Number(m[1])); return { deleted: true } } },
   { method: 'GET', re: /\/merchant\/store\/images$/, handler: () => images },
   { method: 'POST', re: /\/merchant\/store\/images\/upload$/, handler: (_m, b) => { const it = { id: nextId(), imageUrl: b.imageUrl, thumbnailUrl: b.thumbnailUrl || b.imageUrl, status: 1, sortNo: b.sortNo || 0 }; images.push(it); return it } },
+  { method: 'POST', re: /\/merchant\/store\/images\/upload-file$/, handler: () => { const u = ph('已上传图片', '#8b5cf6'); const it = { id: nextId(), imageUrl: u, thumbnailUrl: u, status: 1, sortNo: images.length + 1 }; images.push(it); return it } },
   { method: 'DELETE', re: /\/merchant\/store\/images\/(\d+)$/, handler: (m) => { images = images.filter((i) => i.id !== Number(m[1])); return { deleted: true } } },
   { method: 'GET', re: /\/merchant\/store\/platform-links$/, handler: () => platformLinks },
   { method: 'POST', re: /\/merchant\/store\/platform-links$/, handler: (_m, b) => { const it = { id: nextId(), sortNo: 0, status: 1, backupUrl: '', ...b }; platformLinks.push(it); return it } },
@@ -144,7 +150,17 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'GET', re: /\/merchant\/reviews$/, handler: () => merchantReviews },
   { method: 'POST', re: /\/merchant\/reviews$/, handler: (_m, b) => { const it = { id: nextId(), platformStyle: b.platformCode || 'xiaohongshu', content: b.content, tags: '', sourceType: 'manual', status: b.status || 'available' }; merchantReviews.unshift(it); return it } },
   { method: 'DELETE', re: /\/merchant\/reviews\/(\d+)$/, handler: (m) => { merchantReviews = merchantReviews.filter((r) => r.id !== Number(m[1])); return { deleted: true } } },
-  { method: 'POST', re: /\/merchant\/reviews\/generate$/, handler: (_m, b) => { tasks.unshift({ id: nextId(), storeId: 1, platformStyle: b.platformCode || 'xiaohongshu', triggerType: 'manual', targetCount: b.targetCount || 10, successCount: b.targetCount || 10, failedCount: 0, status: 'success' }); return { generated: b.targetCount || 10 } } },
+  { method: 'POST', re: /\/merchant\/reviews\/generate$/, handler: (_m, b) => {
+      const n = b.targetCount || 10
+      const plat = b.platformCode || 'xiaohongshu'
+      const pool = reviewPool[plat] || reviewPool.dianping
+      // 生成的评价进“评论列表”，便于调试
+      for (let i = 0; i < Math.min(n, 3); i++) {
+        merchantReviews.unshift({ id: nextId(), platformStyle: plat, content: pool[i % pool.length].replace(/\{\{tag\}\}/g, '招牌菜'), tags: '招牌菜', sourceType: 'ai', status: 'available' })
+      }
+      tasks.unshift({ id: nextId(), storeId: 1, platformStyle: plat, triggerType: 'manual', targetCount: n, successCount: n, failedCount: 0, status: 'success' })
+      return { generated: n }
+    } },
   { method: 'GET', re: /\/merchant\/review-generation-tasks$/, handler: () => tasks },
 
   // ----- 管理端 -----
@@ -158,7 +174,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'PUT', re: /\/admin\/nfc-tags\/(\d+)\/bind$/, handler: (m, b) => { const it = nfcTags.find((t) => t.id === Number(m[1])); if (it) { it.storeId = b.storeId; it.status = 'bound' } return it } },
   { method: 'PUT', re: /\/admin\/nfc-tags\/(\d+)\/status$/, handler: (m, b) => { const it = nfcTags.find((t) => t.id === Number(m[1])); if (it) it.status = b.status; return it } },
   { method: 'GET', re: /\/admin\/review-generation-tasks$/, handler: () => tasks },
-  { method: 'GET', re: /\/admin\/stats$/, handler: () => ({ merchantCount: 1, storeCount: 1, tagCount: nfcTags.length, reviewCount: merchantReviews.length, dispatchableCount: remaining }) }
+  { method: 'GET', re: /\/admin\/stats$/, handler: () => ({ merchantCount: merchants.length, storeCount: stores.length, tagCount: nfcTags.length, taskCount: tasks.length, reviewCount: merchantReviews.length, dispatchableCount: remaining }) }
 ]
 
 export const mockAdapter: AxiosAdapter = async (config) => {
