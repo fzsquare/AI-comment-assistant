@@ -13,7 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.constraints.banned_words import find_hard_violations  # noqa: E402
 from app.constraints.humanizer import find_ai_tells  # noqa: E402
-from app.constraints.industries import match_industry  # noqa: E402
+from app.constraints.industries import (  # noqa: E402
+    find_cross_industry_leak,
+    match_industry,
+)
 from app.constraints.registry import get_spec  # noqa: E402
 from app.content_normalizer import normalize_generated_content  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
@@ -60,6 +63,30 @@ def test_match_industry_routes_store_types():
     assert match_industry("").code == "restaurant"  # 未填默认餐饮
     # 各行业的 item_word 已正确区分
     assert match_industry("美甲").item_word != match_industry("川菜").item_word
+
+
+def test_match_industry_extended_types():
+    assert match_industry("健身房").code == "fitness"
+    assert match_industry("KTV").code == "entertainment"
+    assert match_industry("剧本杀").code == "entertainment"
+    assert match_industry("宠物美容").code == "pet"
+    assert match_industry("洗车养护").code == "auto"
+    assert match_industry("皮肤管理").code == "beauty"
+
+
+def test_cross_industry_leak_detection():
+    nail = match_industry("美甲店")
+    restaurant = match_industry("餐饮")
+    foot = match_industry("足疗")
+    # 美甲文案里混进餐饮/足疗标志词 → 判定串味
+    assert "上菜" in find_cross_industry_leak("做完美甲顺便上菜了", nail)
+    assert "推拿" in find_cross_industry_leak("美甲师还帮我推拿了肩颈", nail)
+    # 干净的美甲文案 → 不串味
+    assert find_cross_industry_leak("卸甲很轻，光疗做得扎实，款式好看", nail) == []
+    # 餐饮文案里混进美甲标志词 → 判定串味
+    assert "美甲师" in find_cross_industry_leak("菜不错，美甲师手法也好", restaurant)
+    # 足疗自身词不算串味
+    assert find_cross_industry_leak("技师推拿到位，采耳也舒服", foot) == []
 
 
 def test_hard_violations_no_false_positive_on_common_words():

@@ -15,7 +15,7 @@ from .config import settings
 from .content_normalizer import normalize_generated_content
 from .constraints.banned_words import find_hard_violations
 from .constraints.humanizer import find_ai_tells
-from .constraints.industries import IndustrySpec, match_industry
+from .constraints.industries import IndustrySpec, find_cross_industry_leak, match_industry
 from .constraints.platforms.base import PlatformSpec
 from .constraints.registry import get_spec
 from .jsonutil import extract_json
@@ -110,6 +110,17 @@ async def _generate_one(
             issues = [f"去掉 AI 写作痕迹（改成真人随手写的口吻）：{'、'.join(tells)}"] + issues
             if passed:
                 passed = False
+
+        # 跨行业串味兜底：本店是 X，却混进了别的行业的标志词 → 必须重写。
+        # 比 AI 腔更严重（关系到行业隔离），压低分确保不会被当达标返回。
+        leak = find_cross_industry_leak(content, industry)
+        if leak:
+            passed = False
+            score = min(score, 65)
+            issues = [
+                f"出现与本行业（{industry.display_name}）无关的词，疑似串味，必须删改："
+                f"{'、'.join(leak)}"
+            ] + issues
 
         item = ReviewItem(
             content=content, tags=tags, score=score, grade=grade, revisions=round_
