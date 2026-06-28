@@ -60,7 +60,13 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self, *, send_body: bool = True) -> None:
         path = urllib.parse.urlsplit(self.path).path
-        if path == "/api" or path.startswith("/api/"):
+        # /api 与 /uploads（商家上传图片的静态资源）都反代到后端，其余走前端 SPA。
+        if (
+            path == "/api"
+            or path.startswith("/api/")
+            or path == "/uploads"
+            or path.startswith("/uploads/")
+        ):
             self._proxy_api(send_body=send_body)
             return
         if self.command not in {"GET", "HEAD"}:

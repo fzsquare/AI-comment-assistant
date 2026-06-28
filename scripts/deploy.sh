@@ -148,6 +148,11 @@ configure_defaults() {
     fi
   fi
 
+  # 商家上传图片：持久化到 .deploy/uploads，经网关 /uploads 反代访问。
+  # 未配置规范域名时后端返回相对路径即可；配了 PUBLIC_ORIGIN 则用作图片绝对域名。
+  UPLOAD_DIR="${UPLOAD_DIR:-$STATE_DIR/uploads}"
+  PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-${PUBLIC_ORIGIN:-}}"
+
   LLM_API_KEY="${LLM_API_KEY:-}"
   ALLOW_EMPTY_LLM_KEY="${ALLOW_EMPTY_LLM_KEY:-false}"
   LLM_BASE_URL="${LLM_BASE_URL:-https://api.openai.com/v1}"
@@ -544,6 +549,8 @@ start_services() {
       MYSQL_DSN="$MYSQL_DSN" \
       JWT_SECRET="$JWT_SECRET" \
       ALLOWED_ORIGINS="$ALLOWED_ORIGINS" \
+      UPLOAD_DIR="$UPLOAD_DIR" \
+      PUBLIC_BASE_URL="$PUBLIC_BASE_URL" \
       AGENT_SERVICE_URL="$AGENT_SERVICE_URL" \
       AGENT_INTERNAL_TOKEN="$AGENT_INTERNAL_TOKEN" \
       AGENT_MIN_GRADE="$AGENT_MIN_GRADE" \

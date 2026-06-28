@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
-	"strings"
 
 	"ppk/backend/internal/model"
 	"ppk/backend/internal/pkg/response"
@@ -81,15 +80,13 @@ func (h *Handler) uploadImageFile(c *gin.Context) {
 	response.Success(c, img)
 }
 
-// publicURL 构造上传文件对外可访问的绝对地址。
-// 配置了 PublicBaseURL 用它，否则按当前请求的 scheme + host 推导。
+// publicURL 构造上传文件对外可访问的地址。
+// 配置了 PublicBaseURL（规范域名）则用绝对地址；否则返回相对路径——
+// 浏览器按页面 origin（部署网关）解析，直连后端调试时也成立，
+// 避免经反向代理后 c.Request.Host 变成后端本地地址导致图片打不开。
 func (h *Handler) publicURL(c *gin.Context, path string) string {
 	if h.Config.PublicBaseURL != "" {
 		return h.Config.PublicBaseURL + path
 	}
-	scheme := "http"
-	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	return scheme + "://" + c.Request.Host + path
+	return path
 }
