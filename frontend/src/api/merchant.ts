@@ -25,6 +25,11 @@ export const merchantApi = {
   createImage(payload: { imageUrl: string; thumbnailUrl: string; sortNo: number }) {
     return http.post('/merchant/store/images/upload', payload)
   },
+  uploadImageFile(file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post('/merchant/store/images/upload-file', form)
+  },
   deleteImage(id: number) {
     return http.delete(`/merchant/store/images/${id}`)
   },

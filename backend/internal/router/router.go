@@ -1,6 +1,8 @@
 package router
 
 import (
+	"os"
+
 	"ppk/backend/internal/config"
 	adminHandler "ppk/backend/internal/handler/admin"
 	merchantHandler "ppk/backend/internal/handler/merchant"
@@ -15,6 +17,10 @@ import (
 func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	r := gin.Default()
 	r.Use(middleware.CORS(cfg.AllowedOrigins))
+
+	// 商家上传图片的本地目录 + 静态访问
+	_ = os.MkdirAll(cfg.UploadDir, 0o755)
+	r.Static("/uploads", cfg.UploadDir)
 
 	authService := &service.AuthService{DB: db, Config: cfg}
 

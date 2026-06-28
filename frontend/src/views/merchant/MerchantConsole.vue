@@ -94,6 +94,19 @@ async function addImage() {
   }
 }
 
+async function onPickImage(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files && input.files[0]
+  if (!file) return
+  if (file.size > 5 * 1024 * 1024) {
+    error.value = '图片需在 5MB 以内'
+    input.value = ''
+    return
+  }
+  await runAction(() => merchantApi.uploadImageFile(file), '图片已上传')
+  input.value = '' // 允许再次选同一文件
+}
+
 async function addPlatformLink() {
   if (!platformForm.platformCode.trim() || !platformForm.targetUrl.trim()) {
     error.value = '请填写平台编码和主跳转链接'
@@ -238,10 +251,18 @@ onMounted(loadAll)
 
       <div class="card">
         <h2>图片管理</h2>
-        <div class="row">
-          <input v-model="imageUrl" placeholder="图片 URL" />
-          <button :disabled="loading" @click="addImage">添加</button>
-        </div>
+        <p class="muted" style="margin: 0 0 8px">上传店铺/菜品图片，顾客落地页会展示，可长按保存：</p>
+        <label class="upload-btn">
+          <span>📷 上传图片</span>
+          <input type="file" accept="image/*" :disabled="loading" @change="onPickImage" style="display: none" />
+        </label>
+        <details style="margin: 10px 0">
+          <summary class="muted" style="cursor: pointer">或：贴图片 URL</summary>
+          <div class="row" style="margin-top: 8px">
+            <input v-model="imageUrl" placeholder="图片 URL" />
+            <button :disabled="loading" @click="addImage">添加</button>
+          </div>
+        </details>
         <div class="row">
           <div v-for="item in images" :key="item.id" class="image-item">
             <img :src="item.thumbnailUrl || item.imageUrl" />
@@ -300,3 +321,20 @@ onMounted(loadAll)
     </div>
   </div>
 </template>
+
+<style scoped>
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  background: #3b82f6;
+  color: #fff;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 15px;
+}
+.upload-btn:hover {
+  background: #2563eb;
+}
+</style>

@@ -29,7 +29,8 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		merchant.DELETE("/store/keywords/:id", h.deleteKeyword)
 
 		merchant.GET("/store/images", h.listImages)
-		merchant.POST("/store/images/upload", h.createImage)
+		merchant.POST("/store/images/upload", h.createImage)          // 贴 URL 方式（保留）
+		merchant.POST("/store/images/upload-file", h.uploadImageFile) // 商家直接上传图片文件
 		merchant.DELETE("/store/images/:id", h.deleteImage)
 
 		merchant.GET("/store/platform-links", h.listPlatformLinks)

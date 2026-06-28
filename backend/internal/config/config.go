@@ -22,6 +22,7 @@ const (
 	defaultAllowedOrigins         = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
 	defaultMaxReviewGenerateCount = 50
 	defaultReviewTargetCount      = 10
+	defaultUploadDir              = "./uploads"
 	minSecretLength               = 32
 )
 
@@ -43,6 +44,10 @@ type Config struct {
 	MaxReviewGenerateCount int
 	// targetCount 缺省值
 	DefaultReviewTargetCount int
+	// 商家上传图片的本地保存目录
+	UploadDir string
+	// 上传图片对外访问的 URL 前缀；为空则按请求 scheme+host 推导
+	PublicBaseURL string
 }
 
 func Load() Config {
@@ -72,6 +77,8 @@ func Load() Config {
 		AgentMinGrade:            getEnv("AGENT_MIN_GRADE", defaultAgentMinGrade),
 		MaxReviewGenerateCount:   getEnvInt("MAX_REVIEW_GENERATE_COUNT", defaultMaxReviewGenerateCount),
 		DefaultReviewTargetCount: getEnvInt("DEFAULT_REVIEW_TARGET_COUNT", defaultReviewTargetCount),
+		UploadDir:                getEnv("UPLOAD_DIR", defaultUploadDir),
+		PublicBaseURL:            strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
 	}
 }
 
@@ -106,6 +113,14 @@ func (c Config) Validate() error {
 	}
 	if c.DefaultReviewTargetCount <= 0 || c.DefaultReviewTargetCount > c.MaxReviewGenerateCount {
 		problems = append(problems, "DEFAULT_REVIEW_TARGET_COUNT must be between 1 and MAX_REVIEW_GENERATE_COUNT")
+	}
+	if strings.TrimSpace(c.UploadDir) == "" {
+		problems = append(problems, "UPLOAD_DIR is required")
+	}
+	if c.PublicBaseURL != "" {
+		if err := validateHTTPURL(c.PublicBaseURL); err != nil {
+			problems = append(problems, "PUBLIC_BASE_URL must be an http(s) URL")
+		}
 	}
 
 	for _, origin := range c.AllowedOrigins {
