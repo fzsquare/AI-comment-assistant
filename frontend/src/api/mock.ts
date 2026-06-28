@@ -93,6 +93,26 @@ const reviewPool: Record<string, string[]> = {
   ]
 }
 
+// 行业 → 推荐标签（与后端 keyword_suggestions.go 对齐的精简版）
+function suggestTagsByIndustry(industryType: string): string[] {
+  const t = (industryType || '').toLowerCase()
+  const table: Array<[string[], string[]]> = [
+    [['足疗', '足浴', '按摩', '推拿', '采耳', '养生'], ['手法专业', '力度合适', '技师专业', '服务热情', '环境安静', '干净卫生']],
+    [['理发', '美发', '发型', '剪发', '烫染'], ['发型师专业', '听需求', '剪得满意', '不推办卡', '洗头舒服', '环境好']],
+    [['美甲', '美睫', '光疗'], ['款式好看', '手法细致', '卸甲不伤', '持久度好', '环境干净', '服务热情']],
+    [['宠物', '狗', '猫'], ['师傅专业', '温柔耐心', '剪得好看', '干净无异味', '宠物不抗拒']],
+    [['美容', '护肤', '皮肤'], ['手法专业', '项目效果', '不硬推卡', '环境干净', '服务贴心']],
+    [['健身', '瑜伽', '私教'], ['教练专业', '纠正动作', '器械齐全', '不推私教', '环境好']],
+    [['ktv', '酒吧', '桌游', '剧本杀', '密室', '娱乐'], ['包厢大', '设备好', '隔音好', '服务热情', '性价比高']],
+    [['洗车', '汽车', '保养', '贴膜'], ['洗得干净', '师傅仔细', '报价透明', '效率高', '环境好']],
+    [['餐', '美食', '菜', '火锅', '烧烤', '饭', '小吃'], ['味道好', '招牌菜', '分量足', '适合聚餐', '服务热情', '环境舒服', '性价比高']]
+  ]
+  for (const [aliases, tags] of table) {
+    if (aliases.some((a) => t.includes(a))) return tags
+  }
+  return ['服务热情', '环境舒服', '性价比高', '体验好', '干净卫生']
+}
+
 let switchCounter = 0
 let remaining = 42
 
@@ -136,6 +156,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'POST', re: /\/merchant\/auth\/login$/, handler: () => ({ token: 'mock-merchant-token' }) },
   { method: 'GET', re: /\/merchant\/store\/detail$/, handler: () => store },
   { method: 'PUT', re: /\/merchant\/store\/detail$/, handler: (_m, b) => Object.assign(store, b) },
+  { method: 'GET', re: /\/merchant\/store\/keyword-suggestions$/, handler: () => ({ tags: suggestTagsByIndustry(store.industryType) }) },
   { method: 'GET', re: /\/merchant\/store\/keywords$/, handler: () => keywords },
   { method: 'POST', re: /\/merchant\/store\/keywords$/, handler: (_m, b) => { const it = { id: nextId(), keyword: b.keyword, sortNo: b.sortNo || 0 }; keywords.push(it); return it } },
   { method: 'DELETE', re: /\/merchant\/store\/keywords\/(\d+)$/, handler: (m) => { keywords = keywords.filter((k) => k.id !== Number(m[1])); return { deleted: true } } },

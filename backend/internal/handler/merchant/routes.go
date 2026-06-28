@@ -23,6 +23,7 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		merchant.GET("/store/detail", h.getStoreDetail)
 		merchant.PUT("/store/detail", h.updateStoreDetail)
 
+		merchant.GET("/store/keyword-suggestions", h.keywordSuggestions) // 按行业推荐标签
 		merchant.GET("/store/keywords", h.listKeywords)
 		merchant.POST("/store/keywords", h.createKeyword)
 		merchant.PUT("/store/keywords/:id", h.updateKeyword)

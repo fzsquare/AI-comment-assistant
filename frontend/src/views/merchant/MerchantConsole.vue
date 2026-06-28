@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { merchantApi } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
 
@@ -18,7 +18,12 @@ const platformForm = reactive({ platformCode: '', platformName: '', buttonText: 
 const reviewText = ref('')
 const reviewPlatformCode = ref('')
 const keywords = ref<any[]>([])
+const suggestedTags = ref<string[]>([])
 const images = ref<any[]>([])
+// 还没添加的推荐标签
+const availableSuggestions = computed(() =>
+  suggestedTags.value.filter((t) => !keywords.value.some((k) => k.keyword === t))
+)
 const links = ref<any[]>([])
 const reviews = ref<any[]>([])
 const tasks = ref<any[]>([])
@@ -34,9 +39,10 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [storeRes, keywordRes, imageRes, linkRes, reviewRes, taskRes] = await Promise.all([
+    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, taskRes] = await Promise.all([
       merchantApi.getStoreDetail(),
       merchantApi.listKeywords(),
+      merchantApi.getKeywordSuggestions(),
       merchantApi.listImages(),
       merchantApi.listPlatformLinks(),
       merchantApi.listReviews(),
@@ -44,6 +50,7 @@ async function loadAll() {
     ])
     Object.assign(storeForm, storeRes.data.data)
     keywords.value = keywordRes.data.data
+    suggestedTags.value = suggestRes.data.data?.tags || []
     images.value = imageRes.data.data
     links.value = linkRes.data.data
     reviews.value = reviewRes.data.data
@@ -84,6 +91,10 @@ async function addKeyword() {
   if (await runAction(() => merchantApi.createKeyword({ keyword: value, sortNo: keywords.value.length + 1 }), '关键词已添加')) {
     keyword.value = ''
   }
+}
+
+async function addSuggested(tag: string) {
+  await runAction(() => merchantApi.createKeyword({ keyword: tag, sortNo: keywords.value.length + 1 }), '已添加推荐标签')
 }
 
 async function addImage() {
@@ -237,8 +248,21 @@ onMounted(loadAll)
     <div class="grid-2">
       <div class="card">
         <h2>关键词管理</h2>
+        <p class="muted" style="margin: 0 0 8px">这些标签会显示给顾客选择，用于生成更贴合的评价。</p>
+        <div v-if="availableSuggestions.length" style="margin-bottom: 10px">
+          <p class="muted" style="margin: 0 0 6px">本行业推荐标签（点击添加）：</p>
+          <div class="row" style="gap: 8px">
+            <button
+              v-for="tag in availableSuggestions"
+              :key="tag"
+              class="suggest-chip"
+              :disabled="loading"
+              @click="addSuggested(tag)"
+            >+ {{ tag }}</button>
+          </div>
+        </div>
         <div class="row">
-          <input v-model="keyword" placeholder="新增关键词" />
+          <input v-model="keyword" placeholder="自定义关键词" />
           <button :disabled="loading" @click="addKeyword">添加</button>
         </div>
         <ul>
@@ -336,5 +360,20 @@ onMounted(loadAll)
 }
 .upload-btn:hover {
   background: #2563eb;
+}
+.suggest-chip {
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px dashed #93c5fd;
+  background: #f0f7ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  cursor: pointer;
+}
+.suggest-chip:hover {
+  background: #dbeafe;
+}
+.suggest-chip:disabled {
+  opacity: 0.6;
 }
 </style>

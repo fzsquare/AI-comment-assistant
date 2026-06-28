@@ -13,6 +13,9 @@ export const merchantApi = {
   listKeywords() {
     return http.get('/merchant/store/keywords')
   },
+  getKeywordSuggestions() {
+    return http.get('/merchant/store/keyword-suggestions')
+  },
   createKeyword(payload: { keyword: string; sortNo: number }) {
     return http.post('/merchant/store/keywords', payload)
   },
