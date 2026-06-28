@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 // 消费者碰卡的入口，保持同步导入 → 进首屏主包，开得最快
 import LandingPage from '../views/landing/LandingPage.vue'
+import Portal from '../views/Portal.vue'
 import type { Role } from '../stores/auth'
 
 // 商家/管理后台按需加载，消费者落地页不下载这些重代码（CRUD 表格/表单）
@@ -34,7 +35,7 @@ function clearAuth() {
 const router = createRouter({
   history: createWebHistory(),
   routes: [
-    { path: '/', redirect: '/merchant/login' },
+    { path: '/', component: Portal },
     { path: '/landing/:token', component: LandingPage },
     { path: '/merchant/login', component: MerchantLogin },
     { path: '/merchant/console', component: MerchantConsole, meta: { requiresAuth: true, role: 'merchant' } },
