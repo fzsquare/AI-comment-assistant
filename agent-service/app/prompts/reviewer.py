@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ..config import settings
 from ..constraints.humanizer import reviewer_humanizer_note
+from ..constraints.industries import RESTAURANT, IndustrySpec, reviewer_industry_note
 from ..constraints.platforms.base import PlatformSpec
 
 REVIEWER_SYSTEM = (
@@ -16,13 +17,13 @@ REVIEWER_SYSTEM = (
     "- 价值性 10：对他人参考价值(5) + 信息完整度(5)\n"
     "【等级】S=90-100 直接发布 / A=80-89 建议发布 / B=70-79 修改后发布 / "
     "C=60-69 建议重写 / D<60 禁止发布。\n\n"
-    "【发布前自检（命中越多分越高）】具体消费时间 / 同行人员 / 至少2道菜品 / 价格参考 / "
+    "【发布前自检（命中越多分越高）】具体消费时间 / 同行人员 / 至少2个具体项目或产品 / 价格参考 / "
     "至少1个合理缺点 / 避开所有高风险禁用词 / 字数符合平台 / 段落结构清晰 / 语气自然口语化 / "
     "有互动引导（小红书/抖音）。\n\n"
     "【真实底线核查（命中即大幅扣分，grade 不得高于 C，pass=false）】\n"
     "- 文案出现与“门店真实信息”不一致的店名、分店或品牌名；\n"
     "- 文案编造了具体的路名/门牌/地标/分店位置；\n"
-    "- 文案出现“允许菜品”之外编造的具体菜名。\n"
+    "- 文案出现“允许范围”之外编造的具体项目/菜品/款式。\n"
     "注意：城市级的身份表述（如“新上海人/北漂”）属轻微问题，只在 issues 里提醒、"
     "小幅扣分即可，不计入上面的硬扣项。\n\n"
     + reviewer_humanizer_note()
@@ -39,12 +40,15 @@ def build_reviewer_user(
     content: str,
     store_name: str,
     keywords: list[str],
+    industry: IndustrySpec = RESTAURANT,
 ) -> str:
-    kw = "、".join(keywords) if keywords else "（未提供具体菜品，文案不应出现任何具体菜名）"
+    item = industry.item_word
+    kw = "、".join(keywords) if keywords else f"（未提供具体{item}，文案不应出现任何具体{item}）"
     return (
         "门店真实信息（用于核查是否编造）：\n"
         f"- 店名（必须原样出现，不得改名/编分店）：{store_name}\n"
-        f"- 允许出现的菜品/关键词（不得超出）：{kw}\n\n"
+        f"- 允许出现的{item}/关键词（不得超出）：{kw}\n"
+        f"- {reviewer_industry_note(industry)}\n\n"
         f"平台：{spec.display_name}\n"
         f"满意度要求：{satisfaction}\n"
         f"字数要求：{spec.total_min_chars}-{spec.total_max_chars} 字\n"

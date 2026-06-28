@@ -9,16 +9,17 @@ from __future__ import annotations
 from agents import Agent
 
 from .client import make_model
+from .constraints.industries import RESTAURANT, IndustrySpec
 from .constraints.registry import get_spec
 from .prompts.reviewer import REVIEWER_SYSTEM
 from .prompts.writer import build_writer_system
 
 
-def make_writer_agent(platform: str, satisfaction: str) -> Agent:
+def make_writer_agent(platform: str, satisfaction: str, industry: IndustrySpec = RESTAURANT) -> Agent:
     spec = get_spec(platform)
     return Agent(
-        name=f"{spec.display_name}文案写手",
-        instructions=build_writer_system(spec, satisfaction),
+        name=f"{spec.display_name}·{industry.display_name}文案写手",
+        instructions=build_writer_system(spec, satisfaction, industry),
         model=make_model(),
     )
 

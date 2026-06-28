@@ -15,6 +15,7 @@ from .config import settings
 from .content_normalizer import normalize_generated_content
 from .constraints.banned_words import find_hard_violations
 from .constraints.humanizer import find_ai_tells
+from .constraints.industries import IndustrySpec, match_industry
 from .constraints.platforms.base import PlatformSpec
 from .constraints.registry import get_spec
 from .jsonutil import extract_json
@@ -60,8 +61,9 @@ async def _run_reviewer(
     content: str,
     store_name: str,
     keywords: List[str],
+    industry: IndustrySpec,
 ) -> Tuple[int, str, bool, List[str]]:
-    user = build_reviewer_user(spec, satisfaction, content, store_name, keywords)
+    user = build_reviewer_user(spec, satisfaction, content, store_name, keywords, industry)
     result = await Runner.run(agent, user)
     try:
         data = extract_json(result.final_output or "")
@@ -76,16 +78,21 @@ async def _run_reviewer(
 
 
 async def _generate_one(
-    writer: Agent, reviewer: Agent, spec: PlatformSpec, req: GenerateRequest, index: int
+    writer: Agent,
+    reviewer: Agent,
+    spec: PlatformSpec,
+    req: GenerateRequest,
+    index: int,
+    industry: IndustrySpec,
 ) -> ReviewItem:
-    user = build_writer_user(spec, req.store, req.keywords, req.satisfaction, index)
+    user = build_writer_user(spec, req.store, req.keywords, req.satisfaction, index, industry)
     best: ReviewItem | None = None
     best_clean = False  # best 是否无硬违规
 
     for round_ in range(settings.max_revise_rounds + 1):
         content, tags = await _run_writer(writer, user, req.platform)
         score, grade, passed, issues = await _run_reviewer(
-            reviewer, spec, req.satisfaction, content, req.store.store_name, req.keywords
+            reviewer, spec, req.satisfaction, content, req.store.store_name, req.keywords, industry
         )
 
         # 硬过滤：命中高风险禁用词 → 直接判不合规，强制重写
@@ -125,14 +132,15 @@ async def _generate_one(
 async def generate(req: GenerateRequest) -> GenerateResponse:
     settings.require_key()
     spec = get_spec(req.platform)
-    writer = make_writer_agent(req.platform, req.satisfaction)
+    industry = match_industry(req.store.industry_type)
+    writer = make_writer_agent(req.platform, req.satisfaction, industry)
     reviewer = make_reviewer_agent()
 
     sem = asyncio.Semaphore(settings.max_concurrency)
 
     async def worker(i: int) -> ReviewItem:
         async with sem:
-            return await _generate_one(writer, reviewer, spec, req, i)
+            return await _generate_one(writer, reviewer, spec, req, i, industry)
 
     results = await asyncio.gather(
         *[worker(i) for i in range(req.count)], return_exceptions=True

@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.constraints.banned_words import find_hard_violations  # noqa: E402
 from app.constraints.humanizer import find_ai_tells  # noqa: E402
+from app.constraints.industries import match_industry  # noqa: E402
 from app.constraints.registry import get_spec  # noqa: E402
 from app.content_normalizer import normalize_generated_content  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
@@ -49,6 +50,16 @@ def test_ai_tells_catches_cliche_and_dash():
 def test_ai_tells_no_false_positive_on_plain_review():
     # 真人随手写、无套话无破折号 → 不该误报
     assert find_ai_tells("上周三和朋友来的，点了酸菜鱼，鱼挺嫩，就是上菜有点慢。") == []
+
+
+def test_match_industry_routes_store_types():
+    assert match_industry("足疗按摩").code == "footmassage"
+    assert match_industry("美发沙龙").code == "hairsalon"
+    assert match_industry("美甲店").code == "nailsalon"
+    assert match_industry("川菜/餐饮").code == "restaurant"
+    assert match_industry("").code == "restaurant"  # 未填默认餐饮
+    # 各行业的 item_word 已正确区分
+    assert match_industry("美甲").item_word != match_industry("川菜").item_word
 
 
 def test_hard_violations_no_false_positive_on_common_words():
