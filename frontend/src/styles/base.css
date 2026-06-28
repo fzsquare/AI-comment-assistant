@@ -1,8 +1,16 @@
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
   background: #f5f7fb;
   color: #222;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
 }
 
 * {
@@ -39,6 +47,8 @@ input, textarea, select {
   border-radius: 10px;
   padding: 10px 12px;
   background: #fff;
+  /* 16px 起步，防止 iOS Safari 聚焦输入框时自动放大 */
+  font-size: 16px;
 }
 
 button {
@@ -139,4 +149,21 @@ h1, h2, h3 {
   gap: 12px;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   margin-top: 16px;
+}
+
+/* 小屏（手机）适配：更紧凑的内边距 + 更大的触摸目标 + 安全区 */
+@media (max-width: 640px) {
+  .page {
+    padding: 14px 14px;
+    padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  }
+  .card {
+    padding: 16px;
+    border-radius: 14px;
+    margin-bottom: 12px;
+  }
+  button {
+    min-height: 46px;
+    padding: 12px 16px;
+  }
 }

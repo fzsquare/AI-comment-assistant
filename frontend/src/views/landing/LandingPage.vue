@@ -156,72 +156,323 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="page" style="max-width: 720px">
-    <div class="card" v-if="loading">加载中...</div>
-    <div class="card" v-else-if="error">{{ error }}</div>
-    <template v-else-if="payload">
-      <div class="card">
-        <h1>{{ payload.storeName }}</h1>
-        <p class="muted">请选择你要发布评价的平台</p>
+  <div class="landing">
+    <!-- 加载骨架屏：开得快、不白屏 -->
+    <template v-if="loading">
+      <div class="card sk">
+        <div class="sk-line w50"></div>
+        <div class="sk-line w30"></div>
+      </div>
+      <div class="card sk">
+        <div class="sk-line w40"></div>
+        <div class="sk-pill-row">
+          <span class="sk-pill"></span><span class="sk-pill"></span><span class="sk-pill"></span>
+        </div>
+        <div class="sk-block"></div>
+      </div>
+    </template>
 
-        <div v-if="payload.platformLinks.length" class="platform-grid">
+    <div class="card error-card" v-else-if="error">{{ error }}</div>
+
+    <template v-else-if="payload">
+      <header class="store-head">
+        <h1 class="store-name">{{ payload.storeName }}</h1>
+        <p class="sub">碰一碰，几秒生成一条你的真实评价，可改成自己的话再发</p>
+      </header>
+
+      <!-- 步骤 1：选平台 -->
+      <section class="card">
+        <h2 class="step"><span class="no">1</span>选择要发布的平台</h2>
+        <div v-if="payload.platformLinks.length" class="choice-grid">
           <button
             v-for="link in payload.platformLinks"
             :key="link.id"
-            :class="{ secondary: selectedPlatform?.platformCode !== link.platformCode }"
+            class="choice"
+            :class="{ active: selectedPlatform?.platformCode === link.platformCode }"
             :disabled="switching"
             @click="choosePlatform(link)"
-          >
-            {{ link.platformName || link.buttonText }}
-          </button>
+          >{{ link.platformName || link.buttonText }}</button>
         </div>
         <p v-else class="muted">当前门店还没有配置可用平台，请联系商家。</p>
-      </div>
+      </section>
 
-      <div class="card" v-if="selectedPlatform && payload.review">
-        <h2>{{ selectedPlatform.platformName }}评价文案</h2>
-        <div v-if="payload.keywords && payload.keywords.length" style="margin: 12px 0;">
-          <p class="muted" style="margin-bottom: 8px;">你点了什么 / 体验如何？选一个，帮你生成更贴合的评价：</p>
-          <div class="row" style="flex-wrap: wrap; gap: 8px;">
-            <button
-              v-for="kw in payload.keywords"
-              :key="kw.id"
-              :class="{ secondary: selectedTag !== kw.keyword }"
-              :disabled="switching"
-              @click="pickByTag(kw.keyword)"
-            >{{ kw.keyword }}</button>
+      <!-- 步骤 2 + 3：选体验 + 文案 -->
+      <section class="card" v-if="selectedPlatform && payload.review">
+        <h2 class="step"><span class="no">2</span>你点了什么 / 体验如何</h2>
+        <div v-if="payload.keywords && payload.keywords.length" class="chips">
+          <button
+            v-for="kw in payload.keywords"
+            :key="kw.id"
+            class="chip"
+            :class="{ active: selectedTag === kw.keyword }"
+            :disabled="switching"
+            @click="pickByTag(kw.keyword)"
+          >{{ kw.keyword }}</button>
+        </div>
+
+        <h2 class="step mt"><span class="no">3</span>推荐文案（可改成你自己的话）</h2>
+        <div class="review-wrap" :class="{ busy: switching }">
+          <textarea
+            v-model="editedContent"
+            class="review-box"
+            rows="9"
+            :disabled="switching"
+            placeholder="正在生成…"
+          ></textarea>
+          <div class="busy-mask" v-if="switching">换文案中…</div>
+        </div>
+        <div class="actions">
+          <button class="act-switch" :disabled="switching" @click="switchReview">🔄 换一换</button>
+          <div class="act-row">
+            <button class="act-copy" :disabled="!editedContent.trim() || switching" @click="copyReview">复制</button>
+            <button class="act-go" :disabled="!editedContent.trim() || switching" @click="jump(selectedPlatform)">
+              {{ selectedPlatform.buttonText || '去发布' }}
+            </button>
           </div>
         </div>
+      </section>
 
-        <p class="muted" style="margin: 12px 0 6px;">推荐文案（可改成你自己的话再发）：</p>
-        <textarea
-          v-model="editedContent"
-          rows="8"
-          style="width: 100%; font-size: 17px; line-height: 1.7; padding: 12px; border: 1px solid #ddd; border-radius: 12px; box-sizing: border-box; resize: vertical;"
-        ></textarea>
-
-        <div class="row" style="margin-top: 12px;">
-          <button :disabled="!editedContent.trim()" @click="copyReview">复制文案</button>
-          <button class="secondary" :disabled="switching" @click="switchReview">换一换</button>
-        </div>
-        <p class="muted" style="margin-top: 12px">{{ selectedPlatform.platformName }}剩余可发放文案：{{ payload.remainingDispatchableCount }}</p>
-      </div>
-
-      <div class="card" v-if="payload.images.length">
-        <h2>配图素材</h2>
-        <div class="row">
-          <a v-for="image in payload.images" :key="image.id" :href="image.imageUrl || image.url" target="_blank" rel="noreferrer">
-            <img :src="image.thumbnailUrl || image.imageUrl || image.url" style="width: 180px; height: 120px; object-fit: cover; border-radius: 12px" />
+      <!-- 配图素材 -->
+      <section class="card" v-if="payload.images.length">
+        <h2 class="step">配图素材（长按图片保存）</h2>
+        <div class="img-row">
+          <a
+            v-for="image in payload.images"
+            :key="image.id"
+            :href="image.imageUrl || image.url"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <img :src="image.thumbnailUrl || image.imageUrl || image.url" loading="lazy" alt="" />
           </a>
         </div>
-      </div>
-
-      <div class="card" v-if="selectedPlatform && payload.review">
-        <h2>去平台发布</h2>
-        <div class="row">
-          <button :disabled="!editedContent.trim()" @click="jump(selectedPlatform)">{{ selectedPlatform.buttonText }}</button>
-        </div>
-      </div>
+      </section>
     </template>
   </div>
 </template>
+
+<style scoped>
+.landing {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 16px 14px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+}
+
+.store-head {
+  padding: 4px 4px 12px;
+}
+.store-name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.sub {
+  margin: 6px 0 0;
+  color: #667085;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+  margin-bottom: 14px;
+}
+.error-card {
+  color: #991b1b;
+  text-align: center;
+}
+.muted {
+  color: #667085;
+}
+
+.step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.step.mt {
+  margin-top: 18px;
+}
+.step .no {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #3b82f6;
+  color: #fff;
+  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 平台选择 */
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+.choice {
+  min-height: 52px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #1f2937;
+  font-size: 15px;
+  font-weight: 600;
+}
+.choice.active {
+  border-color: #3b82f6;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.choice:disabled {
+  opacity: 0.6;
+}
+
+/* 体验标签 chips */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.chip {
+  min-height: 40px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1.5px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
+  font-size: 14px;
+}
+.chip.active {
+  border-color: #3b82f6;
+  background: #3b82f6;
+  color: #fff;
+}
+
+/* 文案框 */
+.review-wrap {
+  position: relative;
+}
+.review-box {
+  width: 100%;
+  font-size: 16px;
+  line-height: 1.75;
+  padding: 14px;
+  border: 1px solid #dbe2ea;
+  border-radius: 14px;
+  background: #fcfdff;
+  resize: vertical;
+}
+.busy-mask {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.65);
+  border-radius: 14px;
+  color: #475569;
+  font-size: 14px;
+}
+/* 文案下方的操作组：全部在正常文档流里，无固定浮层 → 不会压住任何内容 */
+.actions {
+  margin-top: 14px;
+}
+.act-switch {
+  width: 100%;
+  min-height: 44px;
+  background: #eef2ff;
+  color: #1e40af;
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  margin-bottom: 10px;
+}
+.act-row {
+  display: flex;
+  gap: 10px;
+}
+.act-copy {
+  flex: 0 0 96px;
+  min-height: 50px;
+  background: #eef2ff;
+  color: #1e40af;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.act-go {
+  flex: 1;
+  min-height: 50px;
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+.actions button:disabled {
+  opacity: 0.5;
+}
+
+/* 配图横向滑动 */
+.img-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+.img-row img {
+  width: 150px;
+  height: 110px;
+  object-fit: cover;
+  border-radius: 12px;
+  flex: 0 0 auto;
+}
+
+/* 骨架屏 */
+.sk-line,
+.sk-pill,
+.sk-block {
+  background: linear-gradient(90deg, #eef1f6 25%, #e3e8f0 37%, #eef1f6 63%);
+  background-size: 400% 100%;
+  animation: sk 1.3s ease infinite;
+  border-radius: 8px;
+}
+.sk-line {
+  height: 16px;
+  margin-bottom: 12px;
+}
+.w50 { width: 50%; }
+.w40 { width: 40%; }
+.w30 { width: 30%; }
+.sk-pill-row {
+  display: flex;
+  gap: 10px;
+  margin: 14px 0;
+}
+.sk-pill {
+  width: 64px;
+  height: 32px;
+  border-radius: 999px;
+}
+.sk-block {
+  height: 150px;
+  border-radius: 14px;
+}
+@keyframes sk {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0 50%; }
+}
+</style>

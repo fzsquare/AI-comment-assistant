@@ -1,10 +1,13 @@
 import { createRouter, createWebHistory } from 'vue-router'
+// 消费者碰卡的入口，保持同步导入 → 进首屏主包，开得最快
 import LandingPage from '../views/landing/LandingPage.vue'
-import MerchantLogin from '../views/merchant/MerchantLogin.vue'
-import MerchantConsole from '../views/merchant/MerchantConsole.vue'
-import AdminLogin from '../views/admin/AdminLogin.vue'
-import AdminConsole from '../views/admin/AdminConsole.vue'
 import type { Role } from '../stores/auth'
+
+// 商家/管理后台按需加载，消费者落地页不下载这些重代码（CRUD 表格/表单）
+const MerchantLogin = () => import('../views/merchant/MerchantLogin.vue')
+const MerchantConsole = () => import('../views/merchant/MerchantConsole.vue')
+const AdminLogin = () => import('../views/admin/AdminLogin.vue')
+const AdminConsole = () => import('../views/admin/AdminConsole.vue')
 
 const TOKEN_KEY = 'ppk-token'
 const ROLE_KEY = 'ppk-role'
