@@ -341,61 +341,15 @@ EOF
   fi
 }
 
-init_db_if_requested() {
-  if ! truthy "${INIT_DB:-false}"; then
-    return
-  fi
-  require_command mysql
-  [[ -n "$DB_APP_PASSWORD" ]] || die "INIT_DB=true requires DB_APP_PASSWORD"
-  [[ "$DB_APP_PASSWORD" != *"'"* ]] || die "DB_APP_PASSWORD must not contain a single quote when INIT_DB=true"
-  validate_mysql_identifier DB_NAME "$DB_NAME"
-  validate_mysql_identifier DB_APP_USER "$DB_APP_USER"
-  validate_mysql_host_pattern DB_APP_HOST "$DB_APP_HOST"
-  validate_init_db_consistency
-
-  log "initializing MySQL database $DB_NAME"
-  mysql_cmd -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-  mysql_cmd -e "CREATE USER IF NOT EXISTS '$DB_APP_USER'@'$DB_APP_HOST' IDENTIFIED BY '$DB_APP_PASSWORD'; ALTER USER '$DB_APP_USER'@'$DB_APP_HOST' IDENTIFIED BY '$DB_APP_PASSWORD'; GRANT SELECT, INSERT, UPDATE, DELETE ON \`$DB_NAME\`.* TO '$DB_APP_USER'@'$DB_APP_HOST'; FLUSH PRIVILEGES;"
-  mysql_cmd "$DB_NAME" < "$ROOT_DIR/database/schema.sql"
-  if truthy "${LOAD_SEED:-false}"; then
-    mysql_cmd "$DB_NAME" < "$ROOT_DIR/database/seed.sql"
-  else
-    log "LOAD_SEED=false; demo admin/merchant accounts are not imported"
-  fi
-  # schema.sql 已是最终形态，标记迁移为已应用，避免重复 DDL
-  baseline_migrations
-}
-
 ensure_migrations_table() {
   mysql_cmd "$DB_NAME" -e "CREATE TABLE IF NOT EXISTS schema_migrations (filename VARCHAR(255) PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);"
 }
 
-# 全新安装：schema.sql 已含所有迁移的最终形态，故把现有迁移全部标记为已应用，
-# 避免之后 run_migrations 再去 ADD COLUMN 撞已存在的列。
-baseline_migrations() {
+# 以 root 运行 database/migrations/*.sql，每个文件经 schema_migrations 去重只跑一次。
+# 迁移本身用 information_schema 守卫，幂等，全新库/旧库均可安全运行。
+apply_migrations() {
   local dir="$ROOT_DIR/database/migrations"
   [[ -d "$dir" ]] || return
-  validate_mysql_identifier DB_NAME "$DB_NAME"
-  ensure_migrations_table
-  local f base count=0
-  for f in "$dir"/*.sql; do
-    [[ -e "$f" ]] || continue
-    base="$(basename "$f")"
-    mysql_cmd "$DB_NAME" -e "INSERT IGNORE INTO schema_migrations (filename) VALUES ('$base');"
-    count=$((count + 1))
-  done
-  log "baselined $count migration(s) as applied (fresh schema)"
-}
-
-run_migrations() {
-  if ! truthy "${MIGRATE_DB:-false}"; then
-    return
-  fi
-  require_command mysql
-  local dir="$ROOT_DIR/database/migrations"
-  [[ -d "$dir" ]] || { log "no migrations dir; skipping"; return; }
-  validate_mysql_identifier DB_NAME "$DB_NAME"
-  # 以 root 运行（app 用户无 DDL 权限）；schema_migrations 记录已应用文件，幂等。
   ensure_migrations_table
   local f base applied
   for f in "$dir"/*.sql; do
@@ -410,6 +364,43 @@ run_migrations() {
       log "migration $base already applied; skipping"
     fi
   done
+}
+
+# 关键顺序：schema（仅 INIT_DB）→ migrations → seed（仅 INIT_DB+LOAD_SEED）。
+# migrations 夹在 schema 与 seed 之间，保证 seed 看到的是已迁移（含 uuid/type_id）的表。
+prepare_database() {
+  local do_init="false" do_migrate="false"
+  truthy "${INIT_DB:-false}" && do_init="true"
+  truthy "${MIGRATE_DB:-false}" && do_migrate="true"
+  if [[ "$do_init" != "true" && "$do_migrate" != "true" ]]; then
+    return
+  fi
+  require_command mysql
+  validate_mysql_identifier DB_NAME "$DB_NAME"
+
+  if [[ "$do_init" == "true" ]]; then
+    [[ -n "$DB_APP_PASSWORD" ]] || die "INIT_DB=true requires DB_APP_PASSWORD"
+    [[ "$DB_APP_PASSWORD" != *"'"* ]] || die "DB_APP_PASSWORD must not contain a single quote when INIT_DB=true"
+    validate_mysql_identifier DB_APP_USER "$DB_APP_USER"
+    validate_mysql_host_pattern DB_APP_HOST "$DB_APP_HOST"
+    validate_init_db_consistency
+
+    log "initializing MySQL database $DB_NAME"
+    mysql_cmd -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+    mysql_cmd -e "CREATE USER IF NOT EXISTS '$DB_APP_USER'@'$DB_APP_HOST' IDENTIFIED BY '$DB_APP_PASSWORD'; ALTER USER '$DB_APP_USER'@'$DB_APP_HOST' IDENTIFIED BY '$DB_APP_PASSWORD'; GRANT SELECT, INSERT, UPDATE, DELETE ON \`$DB_NAME\`.* TO '$DB_APP_USER'@'$DB_APP_HOST'; FLUSH PRIVILEGES;"
+    mysql_cmd "$DB_NAME" < "$ROOT_DIR/database/schema.sql"
+  fi
+
+  # 迁移在 schema 之后、seed 之前；旧库在此补齐 uuid/type_id 等列
+  apply_migrations
+
+  if [[ "$do_init" == "true" ]]; then
+    if truthy "${LOAD_SEED:-false}"; then
+      mysql_cmd "$DB_NAME" < "$ROOT_DIR/database/seed.sql"
+    else
+      log "LOAD_SEED=false; demo admin/merchant accounts are not imported"
+    fi
+  fi
 }
 
 install_dependencies() {
@@ -669,8 +660,7 @@ case "$COMMAND" in
     validate_runtime_config
     ensure_runtime_secrets
     install_dependencies
-    init_db_if_requested
-    run_migrations
+    prepare_database
     build_project
     start_services
     ;;
