@@ -74,9 +74,20 @@ const merchants = [
   { id: 1, account: 'merchant', merchantName: '巷子里的椒麻鸡', contactName: '张三', status: 1 },
   { id: 2, account: 'merchant2', merchantName: '舒缘足道', contactName: '李四', status: 1 }
 ]
-const stores = [
+const storeTypes = [
+  { id: 1, code: 'restaurant', name: '餐饮', industryCode: 'restaurant', isPreset: true, status: 1 },
+  { id: 2, code: 'footmassage', name: '足疗按摩', industryCode: 'footmassage', isPreset: true, status: 1 },
+  { id: 3, code: 'hairsalon', name: '理发美发', industryCode: 'hairsalon', isPreset: true, status: 1 },
+  { id: 4, code: 'nailsalon', name: '美甲美睫', industryCode: 'nailsalon', isPreset: true, status: 1 },
+  { id: 5, code: 'beauty', name: '美容护肤', industryCode: 'beauty', isPreset: true, status: 1 },
+  { id: 6, code: 'fitness', name: '健身运动', industryCode: 'fitness', isPreset: true, status: 1 },
+  { id: 7, code: 'entertainment', name: '休闲娱乐', industryCode: 'entertainment', isPreset: true, status: 1 },
+  { id: 8, code: 'pet', name: '宠物服务', industryCode: 'pet', isPreset: true, status: 1 },
+  { id: 9, code: 'auto', name: '汽车服务', industryCode: 'auto', isPreset: true, status: 1 }
+]
+const stores: any[] = [
   { ...store, id: 1, merchantUserId: 1 },
-  { id: 2, merchantUserId: 2, storeName: '舒缘足道', industryType: '足疗按摩', storeIntro: '', address: '', primaryPlatformStyle: 'dianping', brandTone: '轻松自然', status: 1 }
+  { id: 2, merchantUserId: 2, uuid: '22222222-2222-4222-8222-222222222222', typeId: 2, storeName: '舒缘足道', industryType: '足疗按摩', storeIntro: '', address: '', primaryPlatformStyle: 'dianping', brandTone: '轻松自然', status: 1 }
 ]
 
 // ---------------- 落地页评价池（已 humanize，{{tag}} 会被替换成顾客选的菜）----------------
@@ -190,10 +201,20 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'POST', re: /\/admin\/auth\/login$/, handler: () => ({ token: 'mock-admin-token' }) },
   { method: 'GET', re: /\/admin\/merchants$/, handler: () => merchants },
   { method: 'PUT', re: /\/admin\/merchants\/(\d+)\/status$/, handler: (m, b) => { const it = merchants.find((x) => x.id === Number(m[1])); if (it) it.status = b.status; return it } },
+  { method: 'GET', re: /\/admin\/store-types$/, handler: () => storeTypes },
+  { method: 'POST', re: /\/admin\/store-types$/, handler: (_m, b) => { const it = { id: nextId(), code: `custom-${nextId()}`, name: b.name, industryCode: b.industryCode, isPreset: false, status: 1 }; storeTypes.push(it); return it } },
   { method: 'GET', re: /\/admin\/stores$/, handler: () => stores },
+  { method: 'POST', re: /\/admin\/stores$/, handler: (_m, b) => {
+    const t = storeTypes.find((x) => x.id === Number(b.typeId))
+    const mid = nextId(); const sid = nextId(); const uuid = `mock-${sid}-${Date.now()}`
+    merchants.push({ id: mid, account: b.account, merchantName: b.merchantName || b.storeName, contactName: b.merchantName || b.storeName, status: 1 })
+    const s = { id: sid, merchantUserId: mid, uuid, typeId: t?.id || 0, storeName: b.storeName, industryType: t?.name || '餐饮', storeIntro: b.storeIntro || '', address: b.address || '', primaryPlatformStyle: b.primaryPlatformStyle || 'dianping', brandTone: '轻松自然', status: 1 }
+    stores.push(s)
+    return { store: s, merchant: { id: mid, account: b.account }, landingUrl: `/landing/${uuid}` }
+  } },
   { method: 'PUT', re: /\/admin\/stores\/(\d+)\/status$/, handler: (m, b) => { const it = stores.find((x) => x.id === Number(m[1])); if (it) it.status = b.status; return it } },
   { method: 'GET', re: /\/admin\/nfc-tags$/, handler: () => nfcTags },
-  { method: 'POST', re: /\/admin\/nfc-tags$/, handler: (_m, b) => { const it = { id: nextId(), tagCode: b.tagCode || `TAG-${nextId()}`, storeId: 0, landingToken: `mock-${nextId()}`, status: 'unbound', remark: b.remark || '' }; nfcTags.push(it); return it } },
+  { method: 'POST', re: /\/admin\/nfc-tags$/, handler: (_m, b) => { const sid = Number(b.storeId) || 0; const it = { id: nextId(), tagCode: b.tagCode || `TAG-${nextId()}`, storeId: sid, landingToken: '', status: sid ? 'bound' : 'unbound', remark: b.remark || '' }; nfcTags.push(it); return it } },
   { method: 'PUT', re: /\/admin\/nfc-tags\/(\d+)\/bind$/, handler: (m, b) => { const it = nfcTags.find((t) => t.id === Number(m[1])); if (it) { it.storeId = b.storeId; it.status = 'bound' } return it } },
   { method: 'PUT', re: /\/admin\/nfc-tags\/(\d+)\/status$/, handler: (m, b) => { const it = nfcTags.find((t) => t.id === Number(m[1])); if (it) it.status = b.status; return it } },
   { method: 'GET', re: /\/admin\/review-generation-tasks$/, handler: () => tasks },
