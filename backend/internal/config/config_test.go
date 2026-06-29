@@ -33,6 +33,7 @@ func TestValidateAllowsDevelopmentDefaults(t *testing.T) {
 		AllowedOrigins:           []string{"http://localhost:5173"},
 		MaxReviewGenerateCount:   50,
 		DefaultReviewTargetCount: 10,
+		UploadDir:                "./uploads",
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -52,6 +53,7 @@ func TestValidateRejectsAllowedOriginWithPath(t *testing.T) {
 		AllowedOrigins:           []string{"https://frontend.example.com/app"},
 		MaxReviewGenerateCount:   50,
 		DefaultReviewTargetCount: 10,
+		UploadDir:                "./uploads",
 	}
 
 	err := cfg.Validate()
@@ -74,6 +76,40 @@ func TestLoadInvalidIntegerEnvFailsValidation(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected invalid integer env to fail validation")
+	}
+}
+
+func TestLoadNormalizesPublicBasePath(t *testing.T) {
+	t.Setenv("PUBLIC_BASE_PATH", "ppk/")
+	t.Setenv("APP_ENV", "development")
+
+	cfg := Load()
+	if got, want := cfg.PublicBasePath, "/ppk"; got != want {
+		t.Fatalf("got public base path %q, want %q", got, want)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected normalized public base path to validate, got %v", err)
+	}
+}
+
+func TestValidateRejectsInvalidPublicBasePath(t *testing.T) {
+	cfg := Config{
+		AppEnv:                   "development",
+		AppHost:                  "127.0.0.1",
+		AppPort:                  "8080",
+		MySQLDSN:                 "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                "dev-jwt-secret-change-me-32-bytes",
+		AgentServiceURL:          "http://127.0.0.1:8090",
+		AgentInternalToken:       "dev-agent-internal-token-change-me",
+		AllowedOrigins:           []string{"http://localhost:5173"},
+		MaxReviewGenerateCount:   50,
+		DefaultReviewTargetCount: 10,
+		UploadDir:                "./uploads",
+		PublicBasePath:           "/bad path",
+	}
+
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "PUBLIC_BASE_PATH") {
+		t.Fatalf("expected PUBLIC_BASE_PATH validation error, got %v", err)
 	}
 }
 

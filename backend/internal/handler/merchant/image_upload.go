@@ -81,12 +81,14 @@ func (h *Handler) uploadImageFile(c *gin.Context) {
 }
 
 // publicURL 构造上传文件对外可访问的地址。
-// 配置了 PublicBaseURL（规范域名）则用绝对地址；否则返回相对路径——
-// 浏览器按页面 origin（部署网关）解析，直连后端调试时也成立，
-// 避免经反向代理后 c.Request.Host 变成后端本地地址导致图片打不开。
+// 配置了 PublicBaseURL（规范域名）则用绝对地址；否则按 PUBLIC_BASE_PATH
+// 返回子路径相对地址（如 /ppk/uploads/x.jpg），避免只反代 /ppk 时图片走到根路径。
 func (h *Handler) publicURL(c *gin.Context, path string) string {
 	if h.Config.PublicBaseURL != "" {
 		return h.Config.PublicBaseURL + path
+	}
+	if h.Config.PublicBasePath != "" {
+		return h.Config.PublicBasePath + path
 	}
 	return path
 }

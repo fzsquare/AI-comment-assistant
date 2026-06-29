@@ -22,7 +22,7 @@ Browser
   -> local/private agent-service
 ```
 
-浏览器只访问前端静态资源与 Go backend 的公开 `/api`。数据库和 agent-service 不开放公网，也不配置到前端环境变量中；前端只允许使用 `VITE_API_BASE_URL` 指向 Go backend API。
+浏览器只访问前端静态资源与 Go backend 的公开 API。根路径部署时 API 为 `/api`；如果 Nginx 把 `/ppk/` 统一反代到 `8989`，前端会使用 `/ppk/api`，资源会使用 `/ppk/assets` 与 `/ppk/uploads`。数据库和 agent-service 不开放公网，也不配置到前端环境变量中；前端只允许使用 `VITE_API_BASE_URL` 指向 Go backend API。
 
 ---
 
@@ -404,10 +404,11 @@ cp .env.example .env.local
 
 ```bash
 VITE_API_BASE_URL=/api
+VITE_BASE_PATH=/
 VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8080
 ```
 
-开发环境默认通过 Vite proxy 把 `/api` 转发到 `VITE_DEV_API_PROXY_TARGET`。生产构建未配置 `VITE_API_BASE_URL` 时，Axios 默认使用同源 `/api`；如果前端静态托管与 API 不同域，只能把它设置为 Go backend 的公开 API，例如 `https://api.example.com/api`。不要在前端 `.env` 中配置 MySQL、agent-service、JWT 密钥或任何服务端 secret。
+开发环境默认通过 Vite proxy 把 `/api` 转发到 `VITE_DEV_API_PROXY_TARGET`。生产根路径构建未配置 `VITE_API_BASE_URL` 时，Axios 默认使用同源 `/api`；子路径构建设置 `VITE_BASE_PATH=/ppk/` 后，Axios 默认使用 `/ppk/api`。如果前端静态托管与 API 不同域，只能把它设置为 Go backend 的公开 API，例如 `https://api.example.com/api`。不要在前端 `.env` 中配置 MySQL、agent-service、JWT 密钥或任何服务端 secret。
 
 ---
 
@@ -425,11 +426,11 @@ Browser
   -> local/private agent-service
 ```
 
-默认部署脚本会在 `8989` 上提供前端静态资源，并把 `/api` 反向代理到本机 backend `127.0.0.1:18989`。客户资源信息、门店数据、评价池与生成任务都通过 Go backend 鉴权后读取；浏览器不直接访问 MySQL 或 agent-service。
+默认部署脚本会在 `8989` 上提供前端静态资源，并把公开 API 反向代理到本机 backend `127.0.0.1:18989`。根路径部署时公开 API 是 `/api`；设置 `BASE_PATH=/ppk` 时公开 API 是 `/ppk/api`。客户资源信息、门店数据、评价池与生成任务都通过 Go backend 鉴权后读取；浏览器不直接访问 MySQL 或 agent-service。
 
 脚本部署时生产环境只应对公网开放：
 
-- `8989`：前端页面和同源 `/api`
+- `8989`：前端页面和同源 API（根路径 `/api`，或 `BASE_PATH=/ppk` 时 `/ppk/api`）
 
 必须保持本机或私有网络访问：
 
@@ -453,12 +454,12 @@ scripts/deploy.sh start
 脚本会完成：
 
 - 安装 Go / npm / Python 项目依赖
-- 构建 frontend，并强制前端使用同源 `/api`
+- 构建 frontend，并按 `BASE_PATH` 使用同源 API
 - 构建 backend
 - 启动 agent-service：`127.0.0.1:8090`
 - 启动 backend：`127.0.0.1:18989`
 - 启动 public gateway：`0.0.0.0:8989`
-- 通过 public gateway 自检前端页面、`/api` 代理与后台管理接口
+- 通过 public gateway 自检前端页面、同源 API 代理与后台管理接口
 
 常用命令：
 
@@ -483,7 +484,16 @@ MYSQL_ROOT_PASSWORD=<root-password>
 
 `JWT_SECRET` 与 `AGENT_INTERNAL_TOKEN` 不填时，脚本会自动生成并保存到 `.deploy/runtime.env`。`.env.deploy` 与 `.deploy/` 已被 git 忽略，不应提交。
 
-脚本启动前会先检查 MySQL host/port 是否能从服务器连通，并默认要求 `LLM_API_KEY` 不为空。启动后会运行 `scripts/check_frontend_flows.py`，从 `http://127.0.0.1:8989` 检查 SPA 页面、同源 `/api` 代理、管理员与商家后台接口；`LOAD_SEED=false` 时会跳过默认账号登录检查。若只想先启动 UI/API 而暂不启用 AI 生成，可在 `.env.deploy` 中设置 `ALLOW_EMPTY_LLM_KEY=true`。
+脚本启动前会先检查 MySQL host/port 是否能从服务器连通，并默认要求 `LLM_API_KEY` 不为空。启动后会运行 `scripts/check_frontend_flows.py`，从 `http://127.0.0.1:8989${BASE_PATH}` 检查 SPA 页面、同源 API 代理、管理员与商家后台接口；`LOAD_SEED=false` 时会跳过默认账号登录检查。若只想先启动 UI/API 而暂不启用 AI 生成，可在 `.env.deploy` 中设置 `ALLOW_EMPTY_LLM_KEY=true`。
+
+如果公网 Nginx 只反代 `/ppk/` 到本机 `8989`，在 `.env.deploy` 中设置：
+
+```bash
+BASE_PATH=/ppk
+PUBLIC_ORIGIN=https://your-domain.com
+```
+
+此时写入 NFC 的链接会是 `https://your-domain.com/ppk/landing/<store-uuid>`，前端资源和接口也都会走 `/ppk/...`。
 
 ## 7.3 手动单机部署流程
 
@@ -551,7 +561,13 @@ npm ci
 VITE_API_BASE_URL=/api npm run build
 ```
 
-同域反向代理部署时可以不配置 `VITE_API_BASE_URL`，前端默认请求 `/api`。如果前端托管商和 API 域名不同，只在前端构建环境配置：
+Nginx `/ppk/` 子路径部署时：
+
+```bash
+VITE_BASE_PATH=/ppk/ VITE_API_BASE_URL=/ppk/api npm run build
+```
+
+同域反向代理部署时可以不配置 `VITE_API_BASE_URL`，前端默认请求与 `VITE_BASE_PATH` 对应的同源 API。根路径是 `/api`，`/ppk/` 子路径是 `/ppk/api`。如果前端托管商和 API 域名不同，只在前端构建环境配置：
 
 ```bash
 VITE_API_BASE_URL=https://api.example.com/api
@@ -579,6 +595,28 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+如果按 `/ppk/` 子路径把所有资源反代到脚本 gateway `8989`：
+
+```nginx
+server {
+    listen 80;
+    server_name app.example.com;
+
+    location = /ppk {
+        return 301 /ppk/;
+    }
+
+    location /ppk/ {
+        proxy_pass http://127.0.0.1:8989;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /ppk;
     }
 }
 ```

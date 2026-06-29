@@ -185,7 +185,7 @@ function numericStatusText(status: number) {
 
 function logout() {
   auth.clear()
-  location.href = '/merchant/login'
+  location.href = import.meta.env.BASE_URL + 'merchant/login'
 }
 
 onMounted(loadAll)

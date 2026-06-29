@@ -191,11 +191,15 @@ func (h *Handler) createStore(c *gin.Context) {
 	})
 }
 
-// landingURL 拼接写入 NFC 卡片的落地地址。配置 PublicBaseURL 用绝对地址，否则相对路径。
+// landingURL 拼接写入 NFC 卡片的落地地址。
+// 配置 PublicBaseURL 时返回绝对地址；否则按 PUBLIC_BASE_PATH 返回子路径相对地址。
 func (h *Handler) landingURL(uuid string) string {
 	path := "/landing/" + uuid
 	if h.Config.PublicBaseURL != "" {
 		return h.Config.PublicBaseURL + path
+	}
+	if h.Config.PublicBasePath != "" {
+		return h.Config.PublicBasePath + path
 	}
 	return path
 }

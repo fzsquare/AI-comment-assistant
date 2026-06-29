@@ -56,7 +56,8 @@ function typeName(typeId: number) {
 }
 
 function landingUrl(uuid: string) {
-  return `${location.origin}/landing/${uuid}`
+  // import.meta.env.BASE_URL 形如 /ppk/ 或 /，兼容子路径反代
+  return `${location.origin}${import.meta.env.BASE_URL}landing/${uuid}`
 }
 
 async function loadAll() {
@@ -191,7 +192,7 @@ function tagStatusText(status: string) {
 
 function logout() {
   auth.clear()
-  location.href = '/admin/login'
+  location.href = import.meta.env.BASE_URL + 'admin/login'
 }
 
 onMounted(loadAll)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve the built frontend and proxy /api to the local Go backend."""
+"""Serve the built frontend and proxy public API/upload paths to the local Go backend."""
 from __future__ import annotations
 
 import argparse
@@ -26,12 +26,20 @@ HOP_BY_HOP_HEADERS = {
 }
 
 
+def normalize_base_path(raw: str) -> str:
+    raw = raw.strip().strip("/")
+    if not raw:
+        return ""
+    return "/" + raw
+
+
 class GatewayHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
-    def __init__(self, *args, dist_dir: Path, backend_url: str, **kwargs) -> None:
+    def __init__(self, *args, dist_dir: Path, backend_url: str, base_path: str, **kwargs) -> None:
         self.dist_dir = dist_dir.resolve()
         self.backend_url = backend_url.rstrip("/")
+        self.base_path = normalize_base_path(base_path)
         super().__init__(*args, **kwargs)
 
     def do_GET(self) -> None:
@@ -60,22 +68,37 @@ class GatewayHandler(BaseHTTPRequestHandler):
 
     def _dispatch(self, *, send_body: bool = True) -> None:
         path = urllib.parse.urlsplit(self.path).path
+        internal_path = self._strip_base_path(path)
         # /api 与 /uploads（商家上传图片的静态资源）都反代到后端，其余走前端 SPA。
+        # 配置 --base-path /ppk 时，同时支持 /ppk/api 与直连 /api，方便 Nginx
+        # proxy_pass 保留或剥离前缀两种写法。
         if (
-            path == "/api"
-            or path.startswith("/api/")
-            or path == "/uploads"
-            or path.startswith("/uploads/")
+            internal_path == "/api"
+            or internal_path.startswith("/api/")
+            or internal_path == "/uploads"
+            or internal_path.startswith("/uploads/")
         ):
-            self._proxy_api(send_body=send_body)
+            self._proxy_api(internal_path, send_body=send_body)
             return
         if self.command not in {"GET", "HEAD"}:
             self.send_error(405, "Method Not Allowed")
             return
-        self._serve_frontend(send_body=send_body)
+        self._serve_frontend(internal_path, send_body=send_body)
 
-    def _proxy_api(self, *, send_body: bool) -> None:
-        target = self.backend_url + self.path
+    def _strip_base_path(self, path: str) -> str:
+        if not self.base_path:
+            return path or "/"
+        if path == self.base_path:
+            return "/"
+        if path.startswith(self.base_path + "/"):
+            stripped = path[len(self.base_path) :]
+            return stripped or "/"
+        return path or "/"
+
+    def _proxy_api(self, internal_path: str, *, send_body: bool) -> None:
+        parsed = urllib.parse.urlsplit(self.path)
+        target_path = urllib.parse.urlunsplit(("", "", internal_path, parsed.query, ""))
+        target = self.backend_url + target_path
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length) if length else None
 
@@ -85,8 +108,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
             if lower in HOP_BY_HOP_HEADERS or lower in {"host", "origin", "content-length"}:
                 continue
             headers[key] = value
-        headers["X-Forwarded-Host"] = self.headers.get("Host", "")
-        headers["X-Forwarded-Proto"] = "http"
+        headers["X-Forwarded-Host"] = self.headers.get("X-Forwarded-Host") or self.headers.get("Host", "")
+        headers["X-Forwarded-Proto"] = self.headers.get("X-Forwarded-Proto", "http")
+        if self.base_path:
+            headers["X-Forwarded-Prefix"] = self.base_path
 
         request = urllib.request.Request(target, data=body, method=self.command, headers=headers)
         try:
@@ -129,8 +154,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if send_body and body:
             self.wfile.write(body)
 
-    def _serve_frontend(self, *, send_body: bool) -> None:
-        file_path = self._resolve_static_path()
+    def _serve_frontend(self, internal_path: str, *, send_body: bool) -> None:
+        file_path = self._resolve_static_path(internal_path)
         try:
             data = file_path.read_bytes() if send_body else b""
         except OSError:
@@ -147,9 +172,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if send_body and data:
             self.wfile.write(data)
 
-    def _resolve_static_path(self) -> Path:
-        parsed = urllib.parse.urlsplit(self.path)
-        raw_path = urllib.parse.unquote(parsed.path)
+    def _resolve_static_path(self, internal_path: str) -> Path:
+        raw_path = urllib.parse.unquote(internal_path)
         normalized = posixpath.normpath(raw_path).lstrip("/")
         candidate = (self.dist_dir / normalized).resolve()
 
@@ -169,6 +193,7 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8989)
     parser.add_argument("--dist", required=True, type=Path)
     parser.add_argument("--backend", required=True)
+    parser.add_argument("--base-path", default="", help="public path prefix, for example /ppk")
     args = parser.parse_args()
 
     if not (args.dist / "index.html").is_file():
@@ -179,11 +204,16 @@ def main() -> None:
             *handler_args,
             dist_dir=args.dist,
             backend_url=args.backend,
+            base_path=args.base_path,
             **handler_kwargs,
         )
 
     server = ThreadingHTTPServer((args.host, args.port), handler)
-    print(f"gateway listening on {args.host}:{args.port}, proxying /api to {args.backend}", flush=True)
+    base_path = normalize_base_path(args.base_path) or "/"
+    print(
+        f"gateway listening on {args.host}:{args.port}, base {base_path}, proxying /api and /uploads to {args.backend}",
+        flush=True,
+    )
     server.serve_forever()
 
 

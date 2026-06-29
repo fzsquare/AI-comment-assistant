@@ -36,6 +36,7 @@ Commands:
 Useful env:
   ENV_FILE=.env.deploy        Optional deployment env file
   FRONTEND_PORT=8989          Public gateway/frontend port
+  BASE_PATH=/ppk              Optional public sub-path proxied to this gateway
   BACKEND_PORT=18989          Local-only Go backend port
   ALLOW_EMPTY_LLM_KEY=true    Allow UI/API startup without AI generation
   INIT_DB=true                Optionally create/import MySQL schema
@@ -149,10 +150,34 @@ configure_defaults() {
     fi
   fi
 
+  # 子路径部署：BASE_PATH=/ppk（Nginx 反代 /ppk/ 到 8989）。默认空=根路径 /。
+  BASE_PATH="${BASE_PATH:-}"
+  BASE_PATH="${BASE_PATH%/}" # 规范成 /ppk 或空
+  if [[ "$BASE_PATH" == "/" ]]; then
+    BASE_PATH=""
+  fi
+  if [[ -n "$BASE_PATH" && "$BASE_PATH" != /* ]]; then
+    BASE_PATH="/$BASE_PATH"
+  fi
+  if [[ -n "$BASE_PATH" ]]; then
+    FRONTEND_BASE_PATH="$BASE_PATH/" # vite base 需带尾斜杠：/ppk/
+  else
+    FRONTEND_BASE_PATH="/"
+  fi
+  if [[ -n "$BASE_PATH" ]]; then
+    FRONTEND_API_BASE_URL="${FRONTEND_API_BASE_URL:-$BASE_PATH/api}"
+  else
+    FRONTEND_API_BASE_URL="${FRONTEND_API_BASE_URL:-/api}"
+  fi
+
   # 商家上传图片：持久化到 .deploy/uploads，经网关 /uploads 反代访问。
-  # 未配置规范域名时后端返回相对路径即可；配了 PUBLIC_ORIGIN 则用作图片绝对域名。
+  # 图片/落地绝对地址：配了 PUBLIC_ORIGIN 则用 PUBLIC_ORIGIN+BASE_PATH（含子路径）。
   UPLOAD_DIR="${UPLOAD_DIR:-$STATE_DIR/uploads}"
-  PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-${PUBLIC_ORIGIN:-}}"
+  PUBLIC_BASE_PATH="${PUBLIC_BASE_PATH:-$BASE_PATH}"
+  if [[ -z "${PUBLIC_BASE_URL:-}" && -n "${PUBLIC_ORIGIN:-}" ]]; then
+    PUBLIC_BASE_URL="${PUBLIC_ORIGIN%/}${BASE_PATH}"
+  fi
+  PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-}"
 
   LLM_API_KEY="${LLM_API_KEY:-}"
   ALLOW_EMPTY_LLM_KEY="${ALLOW_EMPTY_LLM_KEY:-false}"
@@ -427,8 +452,8 @@ install_dependencies() {
 
 build_project() {
   require_base_commands
-  log "building frontend with same-origin /api"
-  (cd "$ROOT_DIR/frontend" && VITE_API_BASE_URL=/api npm run build)
+  log "building frontend with base $FRONTEND_BASE_PATH and API $FRONTEND_API_BASE_URL"
+  (cd "$ROOT_DIR/frontend" && VITE_BASE_PATH="$FRONTEND_BASE_PATH" VITE_API_BASE_URL="$FRONTEND_API_BASE_URL" npm run build)
 
   log "building backend"
   (cd "$ROOT_DIR/backend" && go build -o "$BIN_DIR/ppk-server" ./cmd/server)
@@ -509,7 +534,7 @@ run_smoke_tests() {
   fi
 
   local base_url args
-  base_url="http://127.0.0.1:$FRONTEND_PORT"
+  base_url="http://127.0.0.1:$FRONTEND_PORT$BASE_PATH"
   args=(
     --base-url "$base_url"
     --admin-account "$SMOKE_ADMIN_ACCOUNT"
@@ -591,6 +616,7 @@ start_services() {
       ALLOWED_ORIGINS="$ALLOWED_ORIGINS" \
       UPLOAD_DIR="$UPLOAD_DIR" \
       PUBLIC_BASE_URL="$PUBLIC_BASE_URL" \
+      PUBLIC_BASE_PATH="$PUBLIC_BASE_PATH" \
       AGENT_SERVICE_URL="$AGENT_SERVICE_URL" \
       AGENT_INTERNAL_TOKEN="$AGENT_INTERNAL_TOKEN" \
       AGENT_MIN_GRADE="$AGENT_MIN_GRADE" \
@@ -608,14 +634,15 @@ start_services() {
       --host "$FRONTEND_HOST" \
       --port "$FRONTEND_PORT" \
       --dist "$ROOT_DIR/frontend/dist" \
-      --backend "http://$BACKEND_HOST:$BACKEND_PORT"
+      --backend "http://$BACKEND_HOST:$BACKEND_PORT" \
+      --base-path "$BASE_PATH"
   ) >> "$LOG_DIR/gateway.log" 2>&1 &
   echo $! > "$(pid_file_for gateway)"
   wait_for_port gateway "127.0.0.1" "$FRONTEND_PORT" "$(pid_file_for gateway)"
 
   run_smoke_tests
 
-  log "deployment is up: http://127.0.0.1:$FRONTEND_PORT"
+  log "deployment is up: http://127.0.0.1:$FRONTEND_PORT$BASE_PATH"
   log "public port: $FRONTEND_PORT; local backend: $BACKEND_HOST:$BACKEND_PORT; local agent: $AGENT_HOST:$AGENT_PORT"
 }
 

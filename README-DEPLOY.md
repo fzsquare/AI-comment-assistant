@@ -48,7 +48,7 @@ Browser
   -> local/private agent-service
 ```
 
-浏览器永远只访问 `8989` 提供的前端静态资源和同源 `/api`。Go backend 只绑定本机 `127.0.0.1:18989`，MySQL 与 agent-service 不开放公网，不配置到任何前端 `.env` 文件中。
+浏览器永远只访问 `8989` 提供的前端静态资源和同源 API。根路径部署时是 `/api`；`BASE_PATH=/ppk` 时是 `/ppk/api`。Go backend 只绑定本机 `127.0.0.1:18989`，MySQL 与 agent-service 不开放公网，不配置到任何前端 `.env` 文件中。
 
 ---
 
@@ -115,10 +115,10 @@ scripts/deploy.sh stop
 - `npm ci`
 - `python3 -m venv agent-service/.venv`
 - `pip install -r agent-service/requirements.txt`
-- `VITE_API_BASE_URL=/api npm run build`
+- `VITE_BASE_PATH=$FRONTEND_BASE_PATH VITE_API_BASE_URL=$FRONTEND_API_BASE_URL npm run build`
 - `go build -o .deploy/bin/ppk-server ./cmd/server`
 - 后台启动 agent-service、backend、public gateway
-- 启动后从 `http://127.0.0.1:8989` 自检前端页面、同源 `/api` 代理与后台管理接口
+- 启动后从 `http://127.0.0.1:8989${BASE_PATH}` 自检前端页面、同源 API 代理与后台管理接口
 
 运行日志和 PID 文件位于 `.deploy/`。`JWT_SECRET` 与 `AGENT_INTERNAL_TOKEN` 未配置时会自动生成到 `.deploy/runtime.env`。
 
@@ -140,6 +140,15 @@ DB_APP_PASSWORD=<strong-db-password>
 ```
 
 `MYSQL_DSN` 可以直接填写完整连接串；也可以留空，让脚本用 `DB_APP_USER`、`DB_APP_PASSWORD`、`MYSQL_HOST`、`MYSQL_PORT`、`DB_NAME` 自动生成。`DB_APP_HOST` 是 MySQL 账户 host，单机部署通常是 `127.0.0.1`；托管/内网 MySQL 要填数据库看到的 backend 来源地址或授权模式。`LOAD_SEED=true` 会导入默认管理员 `admin / 123456` 与默认商家 `merchant / 123456`，适合新服务器首次验证。生产环境如果不导入演示数据，需要自行准备可登录的管理员与商家数据，或设置 `SMOKE_TEST_AUTH=false` 跳过默认账号自检。
+
+如果公网入口由 Nginx 的 `/ppk/` 统一反代到 `8989`，在 `.env.deploy` 中设置：
+
+```bash
+BASE_PATH=/ppk
+PUBLIC_ORIGIN=https://your-domain.com
+```
+
+脚本会构建 `/ppk/` base 的前端，并让浏览器访问 `/ppk/api`、`/ppk/uploads`、`/ppk/assets`。不配置 `PUBLIC_ORIGIN` 时，后端仍会返回 `/ppk/landing/...` 与 `/ppk/uploads/...` 这类同源路径。
 
 生产环境防火墙只需要开放 `8989`。不要开放 `18989`、`8090` 或 MySQL 端口。
 
@@ -387,16 +396,24 @@ npm run dev -- --host 0.0.0.0 --port 5173
 
 ```bash
 VITE_API_BASE_URL=/api
+VITE_BASE_PATH=/
 VITE_DEV_API_PROXY_TARGET=http://127.0.0.1:8080
 ```
 
-开发环境默认通过 Vite proxy 把 `/api` 转发到 `VITE_DEV_API_PROXY_TARGET`。生产环境不配置时，前端默认请求同源 `/api`。脚本部署时会用 `VITE_API_BASE_URL=/api` 构建前端，并由 `8989` public gateway 转发到本机 backend `127.0.0.1:18989`。不要把 MySQL、agent-service 或任何服务端密钥写入前端环境变量。
+开发环境默认通过 Vite proxy 把 `/api` 转发到 `VITE_DEV_API_PROXY_TARGET`。生产根路径部署不配置时，前端默认请求同源 `/api`；子路径部署时设置 `VITE_BASE_PATH=/ppk/`，API 使用 `/ppk/api`。脚本部署会根据 `BASE_PATH` 自动设置 `VITE_BASE_PATH` 与 `VITE_API_BASE_URL`，并由 `8989` public gateway 转发到本机 backend `127.0.0.1:18989`。不要把 MySQL、agent-service 或任何服务端密钥写入前端环境变量。
 
 ## 6.3 生产构建
 
 ```bash
 cd frontend
 VITE_API_BASE_URL=/api npm run build
+```
+
+如果构建给 Nginx `/ppk/` 子路径入口使用：
+
+```bash
+cd frontend
+VITE_BASE_PATH=/ppk/ VITE_API_BASE_URL=/ppk/api npm run build
 ```
 
 构建完成后，产物输出到：
@@ -430,6 +447,35 @@ server {
 ```
 
 生产默认推荐同源 `/api` 反向代理。脚本部署已内置 public gateway；如果改用 Nginx，同样只把公网流量转给本机 backend，MySQL 与 agent-service 仍保持本机或私有网络访问。
+
+如果 Nginx 只把 `/ppk/` 下的资源反代到脚本内置 gateway（`8989`），使用下面这种入口。`proxy_pass` 是否带尾部 `/` 都可工作；推荐不带尾部 `/`，让 gateway 看到 `/ppk/...` 并自行剥离前缀。
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location = /ppk {
+        return 301 /ppk/;
+    }
+
+    location /ppk/ {
+        proxy_pass http://127.0.0.1:8989;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /ppk;
+    }
+}
+```
+
+对应 `.env.deploy`：
+
+```bash
+BASE_PATH=/ppk
+PUBLIC_ORIGIN=http://your-domain.com
+```
 
 ---
 
@@ -491,7 +537,7 @@ server {
 }
 ```
 
-这样 frontend 访问 `/api/*` 时会自动转发到 backend。脚本部署已经用 `scripts/serve_gateway.py` 实现了等价能力，固定公开端口为 `8989`。
+这样 frontend 访问 `/api/*` 时会自动转发到 backend。脚本部署已经用 `scripts/serve_gateway.py` 实现了等价能力，固定公开端口为 `8989`；设置 `BASE_PATH=/ppk` 后，gateway 也会接受 `/ppk/api/*`、`/ppk/uploads/*` 与 `/ppk/assets/*`。
 
 ---
 
@@ -512,6 +558,7 @@ server {
 ## 9.3 消费者演示页面
 
 - `http://127.0.0.1:5173/landing/landing-demo-001`
+- 脚本部署且 `BASE_PATH=/ppk`：`http://127.0.0.1:8989/ppk/landing/11111111-1111-4111-8111-111111111111`
 
 如果走 Nginx 托管，则替换为你的正式域名。消费者页面会先展示平台列表；点击平台后才会调用 `switch-review`，并按请求中的 `platformCode` 发放该平台的评价。
 
@@ -552,13 +599,13 @@ server {
 - [ ] `npm run build` 成功
 - [ ] `dist/` 已发布到静态服务器
 - [ ] 路由刷新不会 404（需 `try_files /index.html`）
-- [ ] 构建环境只包含 `VITE_API_BASE_URL` 这类浏览器可见变量
+- [ ] 构建环境只包含 `VITE_API_BASE_URL`、`VITE_BASE_PATH` 这类浏览器可见变量
 - [ ] 脚本部署时只开放 `8989`，不开放 `18989`、`8090`、`3306`
 
 ### 10.5 联通性
 - [ ] 商家登录可用
 - [ ] 管理员登录可用
-- [ ] `python3 scripts/check_frontend_flows.py --base-url http://127.0.0.1:8989` 通过
+- [ ] `python3 scripts/check_frontend_flows.py --base-url http://127.0.0.1:8989${BASE_PATH}` 通过
 - [ ] 消费者落地页初始化可用
 - [ ] 消费者选择平台后 `switch-review` 可用，且请求体带有 `platformCode`
 - [ ] `events` 可用
@@ -602,9 +649,9 @@ Access denied for user 'root'@'localhost'
 
 检查项：
 - backend 是否已启动
-- frontend 的 `VITE_API_BASE_URL` 是否指向 Go backend 公开 `/api`，未配置时是否有同源 `/api` 反向代理
+- frontend 的 `VITE_API_BASE_URL` 是否指向 Go backend 公开 API；根路径为 `/api`，`BASE_PATH=/ppk` 时为 `/ppk/api`
 - 是否存在跨域问题
-- Nginx 是否正确代理 `/api/`
+- Nginx 是否正确代理 `/api/`，或子路径部署时是否正确代理 `/ppk/`
 - 如果是新服务器，是否导入了 `database/seed.sql`，或一键脚本是否设置了 `INIT_DB=true LOAD_SEED=true`
 - 浏览器访问的是 `8989` 统一入口，而不是直接访问 `18989`
 - 不要尝试从浏览器直接请求 MySQL 或 agent-service

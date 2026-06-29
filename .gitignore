@@ -2,3 +2,6 @@
 .deploy/
 __pycache__/
 *.pyc
+.gstack/
+
+ui-test-shots/

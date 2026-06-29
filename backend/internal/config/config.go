@@ -46,8 +46,10 @@ type Config struct {
 	DefaultReviewTargetCount int
 	// 商家上传图片的本地保存目录
 	UploadDir string
-	// 上传图片对外访问的 URL 前缀；为空则按请求 scheme+host 推导
+	// 上传图片/落地页对外访问的 URL 前缀；为空时用 PublicBasePath 或根路径相对地址
 	PublicBaseURL string
+	// 部署在子路径时的公开路径前缀，例如 /ppk；用于生成相对落地页和上传资源地址
+	PublicBasePath string
 }
 
 func Load() Config {
@@ -79,6 +81,7 @@ func Load() Config {
 		DefaultReviewTargetCount: getEnvInt("DEFAULT_REVIEW_TARGET_COUNT", defaultReviewTargetCount),
 		UploadDir:                getEnv("UPLOAD_DIR", defaultUploadDir),
 		PublicBaseURL:            strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
+		PublicBasePath:           normalizeBasePath(getEnv("PUBLIC_BASE_PATH", "")),
 	}
 }
 
@@ -120,6 +123,11 @@ func (c Config) Validate() error {
 	if c.PublicBaseURL != "" {
 		if err := validateHTTPURL(c.PublicBaseURL); err != nil {
 			problems = append(problems, "PUBLIC_BASE_URL must be an http(s) URL")
+		}
+	}
+	if c.PublicBasePath != "" {
+		if err := validateBasePath(c.PublicBasePath); err != nil {
+			problems = append(problems, "PUBLIC_BASE_PATH must be a URL path prefix like /ppk")
 		}
 	}
 
@@ -190,6 +198,18 @@ func parseCSV(value string) []string {
 	return result
 }
 
+func normalizeBasePath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "/" {
+		return ""
+	}
+	value = "/" + strings.Trim(value, "/")
+	if value == "/" {
+		return ""
+	}
+	return value
+}
+
 func isProduction(appEnv string) bool {
 	switch strings.ToLower(strings.TrimSpace(appEnv)) {
 	case "prod", "production":
@@ -233,6 +253,22 @@ func validateHTTPOrigin(raw string) error {
 	}
 	if u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return fmt.Errorf("origin must not include query, fragment, or user info")
+	}
+	return nil
+}
+
+func validateBasePath(path string) error {
+	if path == "" {
+		return nil
+	}
+	if !strings.HasPrefix(path, "/") {
+		return fmt.Errorf("missing leading slash")
+	}
+	if path != strings.TrimRight(path, "/") {
+		return fmt.Errorf("must not end with slash")
+	}
+	if strings.ContainsAny(path, " ?#") {
+		return fmt.Errorf("contains invalid characters")
 	}
 	return nil
 }
