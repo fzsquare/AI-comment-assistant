@@ -50,8 +50,12 @@ router.beforeEach((to) => {
   const role = (localStorage.getItem(ROLE_KEY) as Role | null) || ''
 
   if (to.path === '/merchant/login' || to.path === '/admin/login') {
-    if (token && (role === 'merchant' || role === 'admin')) {
-      return homePath(role)
+    const loginRole: Role = to.path === '/admin/login' ? 'admin' : 'merchant'
+    if (token && role === loginRole) {
+      return homePath(loginRole)
+    }
+    if (token) {
+      clearAuth()
     }
     return true
   }
