@@ -144,12 +144,21 @@ type ReviewGenerationTask struct {
 }
 
 type NFCTag struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	TagCode      string    `gorm:"size:128;uniqueIndex;not null" json:"tagCode"`
-	StoreID      uint      `gorm:"index" json:"storeId"`
+	ID      uint   `gorm:"primaryKey" json:"id"`
+	TagCode string `gorm:"size:128;uniqueIndex;not null" json:"tagCode"`
+	// 未绑定门店时为 NULL（指针），避免写入 store_id=0 触发 fk_nfc_store 外键约束。
+	StoreID      *uint     `gorm:"index" json:"storeId"`
 	LandingToken string    `gorm:"size:128;uniqueIndex;not null" json:"landingToken"`
 	Status       string    `gorm:"size:32;default:'unbound';not null" json:"status"`
 	Remark       string    `gorm:"size:255" json:"remark"`
 	CreatedAt    time.Time `json:"createdAt"`
 	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
+// StoreIDValue 返回绑定的门店 ID，未绑定时返回 0。
+func (t NFCTag) StoreIDValue() uint {
+	if t.StoreID != nil {
+		return *t.StoreID
+	}
+	return 0
 }

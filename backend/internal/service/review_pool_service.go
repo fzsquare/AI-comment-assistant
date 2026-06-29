@@ -252,7 +252,7 @@ func (s *ReviewPoolService) InitLandingByToken(token string) (*LandingPayload, e
 		return nil, errors.New("页面暂不可用")
 	}
 
-	store, err := s.activeStoreByID(tag.StoreID)
+	store, err := s.activeStoreByID(tag.StoreIDValue())
 	if err != nil {
 		return nil, errors.New("商家服务已暂停")
 	}
@@ -284,7 +284,7 @@ func (s *ReviewPoolService) SwitchReview(token string, platformCode string, tag 
 		return nil, 0, errors.New("页面暂不可用")
 	}
 
-	store, err := s.activeStoreByID(tagRow.StoreID)
+	store, err := s.activeStoreByID(tagRow.StoreIDValue())
 	if err != nil {
 		return nil, 0, errors.New("商家服务已暂停")
 	}

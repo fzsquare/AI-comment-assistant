@@ -147,7 +147,7 @@ func (h *Handler) bindTag(c *gin.Context) {
 		return
 	}
 
-	item.StoreID = req.StoreID
+	item.StoreID = &req.StoreID
 	item.Status = model.TagStatusBound
 	if err := h.DB.Save(&item).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "绑定失败")

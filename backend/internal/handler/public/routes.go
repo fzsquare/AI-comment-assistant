@@ -65,7 +65,7 @@ func (h *Handler) createEvent(c *gin.Context) {
 		response.Error(c, http.StatusNotFound, "标签不存在")
 		return
 	}
-	log := model.ReviewDisplayLog{StoreID: tag.StoreID, ReviewItemID: req.ReviewItemID, NFCTagID: tag.ID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+	log := model.ReviewDisplayLog{StoreID: tag.StoreIDValue(), ReviewItemID: req.ReviewItemID, NFCTagID: tag.ID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
 	if err := h.DB.Create(&log).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "保存失败")
 		return
