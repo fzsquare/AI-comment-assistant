@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { publicApi } from '../../api/public'
 import { openPlatform } from '../../utils/deeplink'
+import { copyToClipboard } from '../../utils/clipboard'
 
 type Keyword = { id: number; keyword: string }
 
@@ -115,25 +116,23 @@ async function fetchReview(tag: string, action: string) {
 async function copyReview() {
   const text = editedContent.value.trim()
   if (!payload.value || !payload.value.review || !text) return
-  try {
-    await navigator.clipboard.writeText(text)
+  const ok = await copyToClipboard(text)
+  if (ok) {
     await trackEvent({
       sessionId: payload.value.sessionId,
       reviewItemId: payload.value.review.id,
       actionType: 'review_copy'
     })
     alert('已复制，可直接去平台发布')
-  } catch {
-    alert('复制失败，请手动长按复制')
+  } else {
+    alert('复制失败，请手动长按选中文案复制')
   }
 }
 
 async function jump(link: { platformCode: string; targetUrl: string; backupUrl?: string }) {
   const text = editedContent.value.trim()
   if (!payload.value || !payload.value.review || !text) return
-  try {
-    await navigator.clipboard.writeText(text)
-  } catch {
+  if (!(await copyToClipboard(text))) {
     alert('文案未自动复制，请手动复制后发布')
   }
   await trackEvent({

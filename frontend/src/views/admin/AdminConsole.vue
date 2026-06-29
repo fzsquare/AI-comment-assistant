@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { adminApi } from '../../api/admin'
+import { copyToClipboard } from '../../utils/clipboard'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -173,11 +174,10 @@ async function toggleTagStatus(tag: any) {
 }
 
 async function copyText(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyToClipboard(text)) {
     notice.value = '已复制到剪贴板'
-  } catch {
-    notice.value = text
+  } else {
+    error.value = '复制失败，请手动选中复制：' + text
   }
 }
 
