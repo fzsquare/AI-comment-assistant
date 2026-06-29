@@ -30,6 +30,7 @@ export const adminApi = {
     address?: string
     primaryPlatformStyle?: string
     brandTone?: string
+    platformUrl?: string
   }) {
     return http.post('/admin/stores', payload)
   },

@@ -2,6 +2,7 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { publicApi } from '../../api/public'
+import { openPlatform } from '../../utils/deeplink'
 
 type Keyword = { id: number; keyword: string }
 
@@ -141,15 +142,12 @@ async function jump(link: { platformCode: string; targetUrl: string; backupUrl?:
     actionType: 'platform_link_click',
     platformCode: link.platformCode
   })
-  try {
-    window.location.href = link.targetUrl
-  } catch {
-    if (link.backupUrl) {
-      window.location.href = link.backupUrl
-      return
-    }
-    alert('跳转失败，请稍后重试')
+  // deeplink 唤起对应 App，唤不起回退商家网页链接
+  if (!link.targetUrl && !link.backupUrl) {
+    alert('该平台还没配置链接，请联系商家')
+    return
   }
+  openPlatform(link.platformCode, link.targetUrl, link.backupUrl)
 }
 
 onMounted(load)

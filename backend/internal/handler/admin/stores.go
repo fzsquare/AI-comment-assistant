@@ -27,6 +27,14 @@ var presetIndustryNames = map[string]string{
 	"auto":          "汽车服务",
 }
 
+// 平台 code -> {显示名, 按钮文案}。顾客落地页据此渲染平台按钮并 deeplink 唤端。
+var platformMeta = map[string][2]string{
+	"dianping":    {"大众点评", "去大众点评发布"},
+	"meituan":     {"美团", "去美团发布"},
+	"xiaohongshu": {"小红书", "去小红书发布"},
+	"douyin":      {"抖音", "去抖音发布"},
+}
+
 func (h *Handler) listStoreTypes(c *gin.Context) {
 	var items []model.StoreType
 	h.DB.Order("is_preset desc, id asc").Find(&items)
@@ -75,6 +83,7 @@ func (h *Handler) createStore(c *gin.Context) {
 		Address              string `json:"address"`
 		PrimaryPlatformStyle string `json:"primaryPlatformStyle"`
 		BrandTone            string `json:"brandTone"`
+		PlatformURL          string `json:"platformUrl"` // 主推平台的商家网页链接（落地页 deeplink 用）
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
@@ -134,12 +143,42 @@ func (h *Handler) createStore(c *gin.Context) {
 		Status:               model.StatusEnabled,
 	}
 
+	platformURL := strings.TrimSpace(req.PlatformURL)
+
 	if err := h.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&merchant).Error; err != nil {
 			return err
 		}
 		store.MerchantUserID = merchant.ID
-		return tx.Create(&store).Error
+		if err := tx.Create(&store).Error; err != nil {
+			return err
+		}
+		// 主推平台的商家链接：建店时填了就落一条 store_platform_links，落地页据此唤端
+		if platformURL != "" {
+			meta := platformMeta[platformStyle]
+			name := meta[0]
+			if name == "" {
+				name = platformStyle
+			}
+			btn := meta[1]
+			if btn == "" {
+				btn = "去发布"
+			}
+			link := model.StorePlatformLink{
+				StoreID:      store.ID,
+				PlatformCode: platformStyle,
+				PlatformName: name,
+				ButtonText:   btn,
+				TargetURL:    platformURL,
+				BackupURL:    platformURL,
+				SortNo:       1,
+				Status:       model.StatusEnabled,
+			}
+			if err := tx.Create(&link).Error; err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		response.Error(c, http.StatusBadRequest, "创建失败：登录账号可能已存在")
 		return

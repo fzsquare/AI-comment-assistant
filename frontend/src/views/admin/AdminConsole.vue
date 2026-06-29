@@ -36,7 +36,8 @@ const newStore = reactive({
   storeName: '',
   address: '',
   storeIntro: '',
-  primaryPlatformStyle: 'dianping'
+  primaryPlatformStyle: 'dianping',
+  platformUrl: ''
 })
 const lastCreated = ref<{ storeName: string; uuid: string; landingUrl: string; account: string } | null>(null)
 
@@ -122,7 +123,8 @@ async function createStore() {
       storeName: newStore.storeName.trim(),
       address: newStore.address.trim() || undefined,
       storeIntro: newStore.storeIntro.trim() || undefined,
-      primaryPlatformStyle: newStore.primaryPlatformStyle
+      primaryPlatformStyle: newStore.primaryPlatformStyle,
+      platformUrl: newStore.platformUrl.trim() || undefined
     })
     const created = data.data
     lastCreated.value = {
@@ -138,6 +140,7 @@ async function createStore() {
     newStore.storeName = ''
     newStore.address = ''
     newStore.storeIntro = ''
+    newStore.platformUrl = ''
     await loadAll()
   } catch (err: any) {
     error.value = messageFrom(err, '创建失败')
@@ -253,6 +256,9 @@ onMounted(loadAll)
             <select v-model="newStore.primaryPlatformStyle">
               <option v-for="p in platformOptions" :key="p.code" :value="p.code">{{ p.name }}</option>
             </select>
+          </label>
+          <label class="fld">主推平台店铺链接
+            <input v-model="newStore.platformUrl" placeholder="商家在该平台的店铺/分享网页链接，顾客点按钮唤起对应 App" />
           </label>
           <label class="fld">门店地址<input v-model="newStore.address" placeholder="选填" /></label>
         </div>
