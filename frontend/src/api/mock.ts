@@ -26,6 +26,8 @@ const nextId = () => ++seq
 // ---------------- 可变 mock 状态 ----------------
 const store = {
   id: 1,
+  uuid: '11111111-1111-4111-8111-111111111111',
+  typeId: 1,
   storeName: '巷子里的椒麻鸡（Mock 演示）',
   industryType: '川菜/餐饮',
   storeIntro: '一家适合朋友聚会的本地川菜小馆',

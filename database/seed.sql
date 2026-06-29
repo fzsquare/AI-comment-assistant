@@ -6,10 +6,11 @@ INSERT INTO merchant_users (account, password_hash, merchant_name, contact_name,
 VALUES ('merchant', '$2a$10$hokEuqVp1VwxjW4/2dzt2OzWNbWfBA6t9V0rgt7pSYOU3hAr9oAE6', '示例商家', '张三', 1)
 ON DUPLICATE KEY UPDATE merchant_name = VALUES(merchant_name), contact_name = VALUES(contact_name);
 
-INSERT INTO stores (merchant_user_id, store_name, industry_type, store_intro, address, primary_platform_style, brand_tone, status)
-SELECT id, '示例餐厅', '餐饮', '一家适合朋友聚会的本地餐厅', '示例路 88 号', 'xiaohongshu', '轻松自然', 1
-FROM merchant_users WHERE account = 'merchant'
-ON DUPLICATE KEY UPDATE store_name = VALUES(store_name), industry_type = VALUES(industry_type), store_intro = VALUES(store_intro), address = VALUES(address), primary_platform_style = VALUES(primary_platform_style), brand_tone = VALUES(brand_tone), status = VALUES(status);
+-- 固定 uuid，落地演示链接稳定：/landing/11111111-1111-4111-8111-111111111111
+INSERT INTO stores (merchant_user_id, uuid, type_id, store_name, industry_type, store_intro, address, primary_platform_style, brand_tone, status)
+SELECT m.id, '11111111-1111-4111-8111-111111111111', t.id, '示例餐厅', '餐饮', '一家适合朋友聚会的本地餐厅', '示例路 88 号', 'xiaohongshu', '轻松自然', 1
+FROM merchant_users m JOIN store_types t ON t.code = 'restaurant' WHERE m.account = 'merchant'
+ON DUPLICATE KEY UPDATE store_name = VALUES(store_name), uuid = VALUES(uuid), type_id = VALUES(type_id), industry_type = VALUES(industry_type), store_intro = VALUES(store_intro), address = VALUES(address), primary_platform_style = VALUES(primary_platform_style), brand_tone = VALUES(brand_tone), status = VALUES(status);
 
 INSERT INTO store_keywords (store_id, keyword, sort_no)
 SELECT s.id, '环境舒服', 1 FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'

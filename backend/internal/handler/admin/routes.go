@@ -20,7 +20,10 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 	{
 		admin.GET("/merchants", h.listMerchants)
 		admin.PUT("/merchants/:id/status", h.updateMerchantStatus)
+		admin.GET("/store-types", h.listStoreTypes)
+		admin.POST("/store-types", h.createStoreType)
 		admin.GET("/stores", h.listStores)
+		admin.POST("/stores", h.createStore)
 		admin.PUT("/stores/:id/status", h.updateStoreStatus)
 		admin.GET("/nfc-tags", h.listTags)
 		admin.POST("/nfc-tags", h.createTag)
@@ -109,17 +112,35 @@ func (h *Handler) updateStoreStatus(c *gin.Context) {
 
 func (h *Handler) listTags(c *gin.Context) {
 	var items []model.NFCTag
-	h.DB.Order("id desc").Find(&items)
+	q := h.DB.Order("id desc")
+	if sid, _ := strconv.ParseUint(c.Query("storeId"), 10, 64); sid > 0 {
+		q = q.Where("store_id = ?", sid)
+	}
+	q.Find(&items)
 	response.Success(c, items)
 }
 
+// createTag 新建一张卡片库存。可直接带 storeId 归属某门店（卡片即库存，落地走 store.uuid）。
 func (h *Handler) createTag(c *gin.Context) {
-	var req struct{ TagCode, Remark string }
+	var req struct {
+		TagCode string `json:"tagCode"`
+		Remark  string `json:"remark"`
+		StoreID uint   `json:"storeId"`
+	}
 	_ = c.ShouldBindJSON(&req)
 	if req.TagCode == "" {
 		req.TagCode = "TAG-" + utils.RandomString(8)
 	}
-	item := model.NFCTag{TagCode: req.TagCode, LandingToken: utils.RandomString(16), Status: model.TagStatusUnbound, Remark: req.Remark}
+	item := model.NFCTag{TagCode: req.TagCode, Status: model.TagStatusUnbound, Remark: req.Remark}
+	if req.StoreID > 0 {
+		var store model.Store
+		if err := h.DB.First(&store, req.StoreID).Error; err != nil {
+			response.Error(c, http.StatusBadRequest, "门店不存在")
+			return
+		}
+		item.StoreID = &req.StoreID
+		item.Status = model.TagStatusBound
+	}
 	if err := h.DB.Create(&item).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "创建失败")
 		return

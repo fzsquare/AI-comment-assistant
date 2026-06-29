@@ -242,19 +242,21 @@ func (s *ReviewPoolService) activeStoreByID(storeID uint) (*model.Store, error) 
 	return &store, err
 }
 
-func (s *ReviewPoolService) DispatchByLandingToken(token string) (*LandingPayload, error) {
-	return s.InitLandingByToken(token)
+// activeStoreByUUID 按门店 uuid 取启用中的门店（且商家启用）。落地入口的唯一映射。
+func (s *ReviewPoolService) activeStoreByUUID(uuid string) (*model.Store, error) {
+	var store model.Store
+	err := s.DB.Table("stores").
+		Select("stores.*").
+		Joins("JOIN merchant_users ON merchant_users.id = stores.merchant_user_id").
+		Where("stores.uuid = ? AND stores.status = ? AND merchant_users.status = ?", uuid, model.StatusEnabled, model.StatusEnabled).
+		First(&store).Error
+	return &store, err
 }
 
-func (s *ReviewPoolService) InitLandingByToken(token string) (*LandingPayload, error) {
-	var tag model.NFCTag
-	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tag).Error; err != nil {
-		return nil, errors.New("页面暂不可用")
-	}
-
-	store, err := s.activeStoreByID(tag.StoreIDValue())
+func (s *ReviewPoolService) InitLandingByUUID(uuid string) (*LandingPayload, error) {
+	store, err := s.activeStoreByUUID(uuid)
 	if err != nil {
-		return nil, errors.New("商家服务已暂停")
+		return nil, errors.New("页面暂不可用")
 	}
 
 	var keywords []model.StoreKeyword
@@ -278,15 +280,10 @@ func (s *ReviewPoolService) InitLandingByToken(token string) (*LandingPayload, e
 }
 
 // SwitchReview 换一换；tag 非空时按顾客选择的菜品/场景标签取。
-func (s *ReviewPoolService) SwitchReview(token string, platformCode string, tag string) (*model.ReviewItem, int64, error) {
-	var tagRow model.NFCTag
-	if err := s.DB.Where("landing_token = ? AND status = ?", token, model.TagStatusBound).First(&tagRow).Error; err != nil {
-		return nil, 0, errors.New("页面暂不可用")
-	}
-
-	store, err := s.activeStoreByID(tagRow.StoreIDValue())
+func (s *ReviewPoolService) SwitchReview(uuid string, platformCode string, tag string) (*model.ReviewItem, int64, error) {
+	store, err := s.activeStoreByUUID(uuid)
 	if err != nil {
-		return nil, 0, errors.New("商家服务已暂停")
+		return nil, 0, errors.New("页面暂不可用")
 	}
 	platformCode = normalizePlatformCode(platformCode, "")
 	if err := s.ensureActivePlatformLink(store.ID, platformCode); err != nil {

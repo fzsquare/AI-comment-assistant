@@ -29,7 +29,7 @@ const go = (path: string) => router.push(path)
         <span class="ico">📱</span>
         <span class="t">顾客入口</span>
         <span class="d">顾客无需登录，到店碰一碰桌上的 NFC 卡即可打开</span>
-        <button class="demo" @click="go('/landing/mock-demo-001')">查看顾客页演示</button>
+        <button class="demo" @click="go('/landing/11111111-1111-4111-8111-111111111111')">查看顾客页演示</button>
       </div>
     </section>
 

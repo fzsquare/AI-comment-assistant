@@ -39,6 +39,7 @@ Useful env:
   BACKEND_PORT=18989          Local-only Go backend port
   ALLOW_EMPTY_LLM_KEY=true    Allow UI/API startup without AI generation
   INIT_DB=true                Optionally create/import MySQL schema
+  MIGRATE_DB=true             Run database/migrations/*.sql once (as root) for an existing DB
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
   SMOKE_TEST=true             Check frontend gateway and management APIs after start
   SMOKE_TEST_AUTH=true        Force default/custom admin and merchant login checks
@@ -361,6 +362,54 @@ init_db_if_requested() {
   else
     log "LOAD_SEED=false; demo admin/merchant accounts are not imported"
   fi
+  # schema.sql 已是最终形态，标记迁移为已应用，避免重复 DDL
+  baseline_migrations
+}
+
+ensure_migrations_table() {
+  mysql_cmd "$DB_NAME" -e "CREATE TABLE IF NOT EXISTS schema_migrations (filename VARCHAR(255) PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);"
+}
+
+# 全新安装：schema.sql 已含所有迁移的最终形态，故把现有迁移全部标记为已应用，
+# 避免之后 run_migrations 再去 ADD COLUMN 撞已存在的列。
+baseline_migrations() {
+  local dir="$ROOT_DIR/database/migrations"
+  [[ -d "$dir" ]] || return
+  validate_mysql_identifier DB_NAME "$DB_NAME"
+  ensure_migrations_table
+  local f base count=0
+  for f in "$dir"/*.sql; do
+    [[ -e "$f" ]] || continue
+    base="$(basename "$f")"
+    mysql_cmd "$DB_NAME" -e "INSERT IGNORE INTO schema_migrations (filename) VALUES ('$base');"
+    count=$((count + 1))
+  done
+  log "baselined $count migration(s) as applied (fresh schema)"
+}
+
+run_migrations() {
+  if ! truthy "${MIGRATE_DB:-false}"; then
+    return
+  fi
+  require_command mysql
+  local dir="$ROOT_DIR/database/migrations"
+  [[ -d "$dir" ]] || { log "no migrations dir; skipping"; return; }
+  validate_mysql_identifier DB_NAME "$DB_NAME"
+  # 以 root 运行（app 用户无 DDL 权限）；schema_migrations 记录已应用文件，幂等。
+  ensure_migrations_table
+  local f base applied
+  for f in "$dir"/*.sql; do
+    [[ -e "$f" ]] || continue
+    base="$(basename "$f")"
+    applied="$(mysql_cmd "$DB_NAME" -N -B -e "SELECT COUNT(*) FROM schema_migrations WHERE filename = '$base';")"
+    if [[ "$applied" == "0" ]]; then
+      log "applying migration $base"
+      mysql_cmd "$DB_NAME" < "$f"
+      mysql_cmd "$DB_NAME" -e "INSERT INTO schema_migrations (filename) VALUES ('$base');"
+    else
+      log "migration $base already applied; skipping"
+    fi
+  done
 }
 
 install_dependencies() {
@@ -621,6 +670,7 @@ case "$COMMAND" in
     ensure_runtime_secrets
     install_dependencies
     init_db_if_requested
+    run_migrations
     build_project
     start_services
     ;;

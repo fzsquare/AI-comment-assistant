@@ -21,13 +21,13 @@ func NewHandler(db *gorm.DB, reviewPool *service.ReviewPoolService) *Handler {
 }
 
 func (h *Handler) Register(api *gin.RouterGroup) {
-	api.GET("/public/landing/:token/init", h.initLanding)
-	api.POST("/public/landing/:token/switch-review", h.switchReview)
-	api.POST("/public/landing/:token/events", h.createEvent)
+	api.GET("/public/landing/:uuid/init", h.initLanding)
+	api.POST("/public/landing/:uuid/switch-review", h.switchReview)
+	api.POST("/public/landing/:uuid/events", h.createEvent)
 }
 
 func (h *Handler) initLanding(c *gin.Context) {
-	payload, err := h.ReviewPool.DispatchByLandingToken(c.Param("token"))
+	payload, err := h.ReviewPool.InitLandingByUUID(c.Param("uuid"))
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -41,7 +41,7 @@ func (h *Handler) switchReview(c *gin.Context) {
 		Tag          string `json:"tag"` // 顾客选的菜品/场景标签，空则随机换一条
 	}
 	_ = c.ShouldBindJSON(&req)
-	item, remaining, err := h.ReviewPool.SwitchReview(c.Param("token"), req.PlatformCode, req.Tag)
+	item, remaining, err := h.ReviewPool.SwitchReview(c.Param("uuid"), req.PlatformCode, req.Tag)
 	if err != nil {
 		response.Error(c, http.StatusBadRequest, err.Error())
 		return
@@ -60,12 +60,13 @@ func (h *Handler) createEvent(c *gin.Context) {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
 	}
-	var tag model.NFCTag
-	if err := h.DB.Where("landing_token = ?", c.Param("token")).First(&tag).Error; err != nil {
-		response.Error(c, http.StatusNotFound, "标签不存在")
+	var store model.Store
+	if err := h.DB.Where("uuid = ?", c.Param("uuid")).First(&store).Error; err != nil {
+		response.Error(c, http.StatusNotFound, "门店不存在")
 		return
 	}
-	log := model.ReviewDisplayLog{StoreID: tag.StoreIDValue(), ReviewItemID: req.ReviewItemID, NFCTagID: tag.ID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+	// uuid 落地：URL 为门店级，不区分具体卡片，nfc_tag_id 记 0（无特定卡）。
+	log := model.ReviewDisplayLog{StoreID: store.ID, ReviewItemID: req.ReviewItemID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
 	if err := h.DB.Create(&log).Error; err != nil {
 		response.Error(c, http.StatusInternalServerError, "保存失败")
 		return

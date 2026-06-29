@@ -55,9 +55,24 @@ type MerchantUser struct {
 	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
+// StoreType 门店类型标签：预置 9 行业 + 自定义。IndustryCode 为生成/隔离基准
+// （对应 agent-service 的 9 行业 code）。
+type StoreType struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Code         string    `gorm:"size:64;uniqueIndex;not null" json:"code"`
+	Name         string    `gorm:"size:64;not null" json:"name"`
+	IndustryCode string    `gorm:"size:64;not null;default:'restaurant'" json:"industryCode"`
+	IsPreset     bool      `gorm:"default:false;not null" json:"isPreset"`
+	Status       int       `gorm:"default:1;not null" json:"status"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+}
+
 type Store struct {
 	ID                   uint      `gorm:"primaryKey" json:"id"`
 	MerchantUserID       uint      `gorm:"uniqueIndex;not null" json:"merchantUserId"`
+	UUID                 string    `gorm:"size:36;uniqueIndex;not null" json:"uuid"`
+	TypeID               *uint     `gorm:"index" json:"typeId"`
 	StoreName            string    `gorm:"size:128;not null" json:"storeName"`
 	IndustryType         string    `gorm:"size:64" json:"industryType"`
 	StoreIntro           string    `gorm:"type:text" json:"storeIntro"`
@@ -148,7 +163,7 @@ type NFCTag struct {
 	TagCode string `gorm:"size:128;uniqueIndex;not null" json:"tagCode"`
 	// 未绑定门店时为 NULL（指针），避免写入 store_id=0 触发 fk_nfc_store 外键约束。
 	StoreID      *uint     `gorm:"index" json:"storeId"`
-	LandingToken string    `gorm:"size:128;uniqueIndex;not null" json:"landingToken"`
+	LandingToken string    `gorm:"size:128" json:"landingToken"` // 历史字段，落地已改用 store.uuid
 	Status       string    `gorm:"size:32;default:'unbound';not null" json:"status"`
 	Remark       string    `gorm:"size:255" json:"remark"`
 	CreatedAt    time.Time `json:"createdAt"`
