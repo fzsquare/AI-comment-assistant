@@ -239,10 +239,10 @@ onMounted(loadAll)
 </script>
 
 <template>
-  <div class="page">
-    <div class="row" style="justify-content: space-between; align-items: center">
+  <div class="page merchant-console">
+    <div class="row merchant-header">
       <h1>商家后台</h1>
-      <div class="row">
+      <div class="row header-actions">
         <button class="secondary" :disabled="loading" @click="loadAll">刷新</button>
         <button class="secondary" @click="logout">退出登录</button>
       </div>
@@ -250,33 +250,56 @@ onMounted(loadAll)
     <p v-if="error" class="alert">{{ error }}</p>
     <p v-else-if="notice" class="notice">{{ notice }}</p>
 
-    <div class="grid-2">
+    <div class="focus-grid">
       <div class="card">
-        <h2>店铺信息</h2>
-        <input v-model="storeForm.storeName" placeholder="门店名称" />
-        <div style="height: 8px"></div>
-        <input v-model="storeForm.industryType" placeholder="行业类型" />
-        <div style="height: 8px"></div>
-        <input v-model="storeForm.address" placeholder="门店地址" />
-        <div style="height: 8px"></div>
-        <input v-model="storeForm.primaryPlatformStyle" placeholder="主平台风格" />
-        <div style="height: 8px"></div>
-        <textarea v-model="storeForm.storeIntro" placeholder="门店简介"></textarea>
-        <div style="height: 8px"></div>
-        <input v-model="storeForm.brandTone" placeholder="品牌调性" />
-        <div style="height: 8px"></div>
-        <button :disabled="loading" @click="saveStore">保存</button>
+        <h2>客户端跳转链接</h2>
+        <p class="muted card-subtitle">顾客从落地页点按钮时打开这里配置的商家链接。</p>
+        <input v-model.trim="platformForm.platformCode" list="platform-codes" placeholder="平台编码，如 dianping" @change="applyPlatformPreset" />
+        <datalist id="platform-codes">
+          <option value="dianping">大众点评</option>
+          <option value="meituan">美团</option>
+          <option value="xiaohongshu">小红书</option>
+          <option value="douyin">抖音</option>
+        </datalist>
+        <div class="field-gap"></div>
+        <input v-model="platformForm.platformName" placeholder="平台名称" />
+        <div class="field-gap"></div>
+        <input v-model="platformForm.buttonText" placeholder="按钮文案" />
+        <div class="field-gap"></div>
+        <input v-model.trim="platformForm.targetUrl" placeholder="客户端跳转链接" />
+        <div class="field-gap"></div>
+        <input v-model.trim="platformForm.backupUrl" placeholder="备用链接（选填）" />
+        <div class="field-gap"></div>
+        <div class="row action-row">
+          <button :disabled="loading" @click="savePlatformLink">
+            {{ isEditingPlatformLink ? '保存跳转链接' : '新增跳转链接' }}
+          </button>
+          <button v-if="isEditingPlatformLink" class="secondary" :disabled="loading" @click="resetPlatformForm">取消编辑</button>
+        </div>
+        <ul class="link-list">
+          <li v-for="item in links" :key="item.id" class="list-action">
+            <span>{{ item.buttonText }} - {{ item.targetUrl }}（{{ numericStatusText(item.status) }}）</span>
+            <span class="row link-actions">
+              <button class="secondary" :disabled="loading" @click="editPlatformLink(item)">编辑</button>
+              <button class="secondary" :disabled="loading" @click="togglePlatformLinkStatus(item)">
+                {{ item.status === 1 ? '禁用' : '启用' }}
+              </button>
+              <button class="danger" :disabled="loading" @click="deletePlatformLink(item.id)">删除</button>
+            </span>
+          </li>
+        </ul>
       </div>
 
       <div class="card">
         <h2>AI 生成任务</h2>
+        <p class="muted card-subtitle">选择平台后生成一批可投放的评价文案。</p>
         <select v-model="reviewPlatformCode">
           <option value="" disabled>选择评价平台</option>
           <option v-for="item in links" :key="item.id" :value="item.platformCode">
             {{ item.platformName || item.platformCode }}
           </option>
         </select>
-        <div style="height: 8px"></div>
+        <div class="field-gap"></div>
         <button :disabled="loading" @click="generateReviews">生成 10 条评价</button>
         <table>
           <thead><tr><th>ID</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
@@ -292,121 +315,227 @@ onMounted(loadAll)
       </div>
     </div>
 
-    <div class="grid-2">
-      <div class="card">
-        <h2>关键词管理</h2>
-        <p class="muted" style="margin: 0 0 8px">这些标签会显示给顾客选择，用于生成更贴合的评价。</p>
-        <div v-if="availableSuggestions.length" style="margin-bottom: 10px">
-          <p class="muted" style="margin: 0 0 6px">本行业推荐标签（点击添加）：</p>
-          <div class="row" style="gap: 8px">
-            <button
-              v-for="tag in availableSuggestions"
-              :key="tag"
-              class="suggest-chip"
-              :disabled="loading"
-              @click="addSuggested(tag)"
-            >+ {{ tag }}</button>
+    <div class="fold-grid">
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>店铺信息</strong>
+            <small>门店名称、行业、地址和品牌语气</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <input v-model="storeForm.storeName" placeholder="门店名称" />
+          <div class="field-gap"></div>
+          <input v-model="storeForm.industryType" placeholder="行业类型" />
+          <div class="field-gap"></div>
+          <input v-model="storeForm.address" placeholder="门店地址" />
+          <div class="field-gap"></div>
+          <input v-model="storeForm.primaryPlatformStyle" placeholder="主平台风格" />
+          <div class="field-gap"></div>
+          <textarea v-model="storeForm.storeIntro" placeholder="门店简介"></textarea>
+          <div class="field-gap"></div>
+          <input v-model="storeForm.brandTone" placeholder="品牌调性" />
+          <div class="field-gap"></div>
+          <button :disabled="loading" @click="saveStore">保存</button>
+        </div>
+      </details>
+
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>关键词管理</strong>
+            <small>顾客选择标签，用来生成更贴合的评价</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <div v-if="availableSuggestions.length" class="suggestions">
+            <p class="muted">本行业推荐标签（点击添加）：</p>
+            <div class="row suggestion-row">
+              <button
+                v-for="tag in availableSuggestions"
+                :key="tag"
+                class="suggest-chip"
+                :disabled="loading"
+                @click="addSuggested(tag)"
+              >+ {{ tag }}</button>
+            </div>
+          </div>
+          <div class="row action-row">
+            <input v-model="keyword" placeholder="自定义关键词" />
+            <button :disabled="loading" @click="addKeyword">添加</button>
+          </div>
+          <ul>
+            <li v-for="item in keywords" :key="item.id" class="list-action">
+              <span>{{ item.keyword }}</span>
+              <button class="danger" :disabled="loading" @click="deleteKeyword(item.id)">删除</button>
+            </li>
+          </ul>
+        </div>
+      </details>
+
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>图片管理</strong>
+            <small>落地页展示的店铺或菜品图片</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <label class="upload-btn">
+            <span>上传图片</span>
+            <input type="file" accept="image/*" :disabled="loading" @change="onPickImage" style="display: none" />
+          </label>
+          <details class="inline-details">
+            <summary>或：贴图片 URL</summary>
+            <div class="row action-row">
+              <input v-model="imageUrl" placeholder="图片 URL" />
+              <button :disabled="loading" @click="addImage">添加</button>
+            </div>
+          </details>
+          <div class="row image-list">
+            <div v-for="item in images" :key="item.id" class="image-item">
+              <img :src="item.thumbnailUrl || item.imageUrl" alt="店铺图片" />
+              <button class="danger" :disabled="loading" @click="deleteImage(item.id)">删除</button>
+            </div>
           </div>
         </div>
-        <div class="row">
-          <input v-model="keyword" placeholder="自定义关键词" />
-          <button :disabled="loading" @click="addKeyword">添加</button>
-        </div>
-        <ul>
-          <li v-for="item in keywords" :key="item.id" class="list-action">
-            <span>{{ item.keyword }}</span>
-            <button class="danger" :disabled="loading" @click="deleteKeyword(item.id)">删除</button>
-          </li>
-        </ul>
-      </div>
+      </details>
 
-      <div class="card">
-        <h2>图片管理</h2>
-        <p class="muted" style="margin: 0 0 8px">上传店铺/菜品图片，顾客落地页会展示，可长按保存：</p>
-        <label class="upload-btn">
-          <span>上传图片</span>
-          <input type="file" accept="image/*" :disabled="loading" @change="onPickImage" style="display: none" />
-        </label>
-        <details style="margin: 10px 0">
-          <summary class="muted" style="cursor: pointer">或：贴图片 URL</summary>
-          <div class="row" style="margin-top: 8px">
-            <input v-model="imageUrl" placeholder="图片 URL" />
-            <button :disabled="loading" @click="addImage">添加</button>
-          </div>
-        </details>
-        <div class="row">
-          <div v-for="item in images" :key="item.id" class="image-item">
-            <img :src="item.thumbnailUrl || item.imageUrl" alt="店铺图片" />
-            <button class="danger" :disabled="loading" @click="deleteImage(item.id)">删除</button>
-          </div>
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>评价管理</strong>
+            <small>手工补充和维护可用评价</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <select v-model="reviewPlatformCode">
+            <option value="" disabled>选择评价平台</option>
+            <option v-for="item in links" :key="item.id" :value="item.platformCode">
+              {{ item.platformName || item.platformCode }}
+            </option>
+          </select>
+          <div class="field-gap"></div>
+          <textarea v-model="reviewText" placeholder="新增手工评价"></textarea>
+          <div class="field-gap"></div>
+          <button :disabled="loading" @click="addReview">添加评价</button>
+          <ul>
+            <li v-for="item in reviews.slice(0, 8)" :key="item.id" class="list-action">
+              <span>{{ item.platformStyle }} - {{ item.content }}</span>
+              <button class="danger" :disabled="loading" @click="deleteReview(item.id)">删除</button>
+            </li>
+          </ul>
         </div>
-      </div>
-    </div>
-
-    <div class="grid-2">
-      <div class="card">
-        <h2>客户端跳转链接</h2>
-        <p class="muted" style="margin: 0 0 8px">顾客从落地页点按钮时打开这里配置的商家链接。</p>
-        <input v-model.trim="platformForm.platformCode" list="platform-codes" placeholder="平台编码，如 dianping" @change="applyPlatformPreset" />
-        <datalist id="platform-codes">
-          <option value="dianping">大众点评</option>
-          <option value="meituan">美团</option>
-          <option value="xiaohongshu">小红书</option>
-          <option value="douyin">抖音</option>
-        </datalist>
-        <div style="height: 8px"></div>
-        <input v-model="platformForm.platformName" placeholder="平台名称" />
-        <div style="height: 8px"></div>
-        <input v-model="platformForm.buttonText" placeholder="按钮文案" />
-        <div style="height: 8px"></div>
-        <input v-model.trim="platformForm.targetUrl" placeholder="客户端跳转链接" />
-        <div style="height: 8px"></div>
-        <input v-model.trim="platformForm.backupUrl" placeholder="备用链接（选填）" />
-        <div style="height: 8px"></div>
-        <div class="row">
-          <button :disabled="loading" @click="savePlatformLink">
-            {{ isEditingPlatformLink ? '保存跳转链接' : '新增跳转链接' }}
-          </button>
-          <button v-if="isEditingPlatformLink" class="secondary" :disabled="loading" @click="resetPlatformForm">取消编辑</button>
-        </div>
-        <ul>
-          <li v-for="item in links" :key="item.id" class="list-action">
-            <span>{{ item.buttonText }} - {{ item.targetUrl }}（{{ numericStatusText(item.status) }}）</span>
-            <span class="row">
-              <button class="secondary" :disabled="loading" @click="editPlatformLink(item)">编辑</button>
-              <button class="secondary" :disabled="loading" @click="togglePlatformLinkStatus(item)">
-                {{ item.status === 1 ? '禁用' : '启用' }}
-              </button>
-              <button class="danger" :disabled="loading" @click="deletePlatformLink(item.id)">删除</button>
-            </span>
-          </li>
-        </ul>
-      </div>
-
-      <div class="card">
-        <h2>评价管理</h2>
-        <select v-model="reviewPlatformCode">
-          <option value="" disabled>选择评价平台</option>
-          <option v-for="item in links" :key="item.id" :value="item.platformCode">
-            {{ item.platformName || item.platformCode }}
-          </option>
-        </select>
-        <div style="height: 8px"></div>
-        <textarea v-model="reviewText" placeholder="新增手工评价"></textarea>
-        <div style="height: 8px"></div>
-        <button :disabled="loading" @click="addReview">添加评价</button>
-        <ul>
-          <li v-for="item in reviews.slice(0, 8)" :key="item.id" class="list-action">
-            <span>{{ item.platformStyle }} - {{ item.content }}</span>
-            <button class="danger" :disabled="loading" @click="deleteReview(item.id)">删除</button>
-          </li>
-        </ul>
-      </div>
+      </details>
     </div>
   </div>
 </template>
 
 <style scoped>
+.merchant-header {
+  align-items: center;
+  justify-content: space-between;
+}
+.header-actions {
+  align-items: center;
+}
+.focus-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+}
+.card-subtitle {
+  margin: 0 0 10px;
+}
+.field-gap {
+  height: 8px;
+}
+.action-row {
+  align-items: center;
+}
+.link-list {
+  margin-top: 14px;
+  padding-left: 0;
+}
+.link-actions {
+  flex: 0 0 auto;
+}
+.suggestions {
+  margin-bottom: 12px;
+}
+.suggestions p {
+  margin: 0 0 8px;
+}
+.suggestion-row {
+  gap: 8px;
+}
+.image-list {
+  margin-top: 12px;
+}
+.inline-details {
+  margin: 10px 0;
+}
+.inline-details summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+.inline-details .row {
+  margin-top: 8px;
+}
+.fold-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.fold-card {
+  margin-bottom: 0;
+  padding: 0;
+}
+.fold-card summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 16px 18px;
+}
+.fold-card summary::-webkit-details-marker {
+  display: none;
+}
+.fold-card summary strong {
+  display: block;
+  font-size: 16px;
+}
+.fold-card summary small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.fold-hint {
+  color: var(--primary-strong);
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+}
+.fold-card[open] .fold-hint {
+  color: var(--muted);
+  font-size: 0;
+}
+.fold-card[open] .fold-hint::before {
+  content: "收起";
+  font-size: 13px;
+}
+.fold-body {
+  border-top: 1px solid var(--border-soft);
+  padding: 14px 18px 18px;
+}
 .upload-btn {
   display: inline-flex;
   align-items: center;
@@ -444,12 +573,41 @@ onMounted(loadAll)
 }
 
 @media (max-width: 640px) {
+  .merchant-header {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+  .header-actions,
+  .action-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .header-actions button,
+  .action-row button {
+    width: 100%;
+  }
+  .action-row button:only-child {
+    grid-column: 1 / -1;
+  }
+  .focus-grid,
+  .fold-grid {
+    grid-template-columns: 1fr;
+  }
   .upload-btn {
     width: 100%;
   }
   .suggest-chip {
     flex: 1 1 calc(50% - 8px);
     min-height: 44px;
+  }
+  .link-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+  }
+  .link-actions button {
+    width: 100%;
   }
 }
 </style>

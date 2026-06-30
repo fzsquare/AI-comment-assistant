@@ -251,38 +251,11 @@ onMounted(loadAll)
     <p v-if="error" class="alert">{{ error }}</p>
     <p v-else-if="notice" class="notice">{{ notice }}</p>
 
-    <div class="grid-2">
-      <div class="card">
-        <h2>平台统计</h2>
-        <div class="stat-grid">
-          <div><span>商家</span><strong>{{ stats.merchantCount || 0 }}</strong></div>
-          <div><span>门店</span><strong>{{ stats.storeCount || 0 }}</strong></div>
-          <div><span>交付 URL</span><strong>{{ stats.storeCount || 0 }}</strong></div>
-          <div><span>生成任务</span><strong>{{ stats.taskCount || 0 }}</strong></div>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>类型标签管理</h2>
-        <p class="muted">类型决定推荐标签与行业隔离基准。</p>
-        <div class="row inline-form">
-          <input v-model="newType.name" placeholder="自定义类型名称，如 苍蝇馆子" />
-          <select v-model="newType.industryCode">
-            <option v-for="t in presetTypes" :key="t.code" :value="t.code">基准：{{ t.name }}</option>
-          </select>
-          <button :disabled="loading" @click="createStoreType">新增类型</button>
-        </div>
-        <table>
-          <thead><tr><th>类型</th><th>行业基准</th><th>来源</th></tr></thead>
-          <tbody>
-            <tr v-for="t in storeTypes" :key="t.id">
-              <td>{{ t.name }}</td>
-              <td>{{ t.industryCode }}</td>
-              <td>{{ t.isPreset ? '预置' : '自定义' }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <div class="stat-strip" aria-label="平台统计">
+      <div><span>商家</span><strong>{{ stats.merchantCount || 0 }}</strong></div>
+      <div><span>门店</span><strong>{{ stats.storeCount || 0 }}</strong></div>
+      <div><span>交付 URL</span><strong>{{ stats.storeCount || 0 }}</strong></div>
+      <div><span>生成任务</span><strong>{{ stats.taskCount || 0 }}</strong></div>
     </div>
 
     <div class="card">
@@ -342,7 +315,7 @@ onMounted(loadAll)
 
     <div class="card">
       <h2>门店列表</h2>
-      <table>
+      <table class="desktop-table">
         <thead><tr><th>门店</th><th>类型</th><th>商家账号</th><th>交付 URL</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
           <tr v-for="item in stores" :key="item.id">
@@ -369,47 +342,123 @@ onMounted(loadAll)
           </tr>
         </tbody>
       </table>
+      <div class="mobile-store-list" aria-label="门店列表">
+        <article v-for="item in stores" :key="item.id" class="mobile-store-item">
+          <div class="mobile-store-head">
+            <div>
+              <strong>{{ item.storeName }}</strong>
+              <span>ID {{ item.id }} · {{ typeName(item.typeId) }}</span>
+            </div>
+            <b :class="['status-pill', item.status === 1 ? 'enabled' : 'disabled']">{{ numericStatusText(item.status) }}</b>
+          </div>
+          <dl class="mobile-store-meta">
+            <div>
+              <dt>商家账号</dt>
+              <dd>{{ item.merchantAccount || merchantForStore(item).account || '-' }}</dd>
+            </div>
+            <div>
+              <dt>交付 URL</dt>
+              <dd>
+                <code>{{ storeLandingUrl(item) }}</code>
+                <button class="link" @click="copyText(storeLandingUrl(item))">复制 URL</button>
+              </dd>
+            </div>
+          </dl>
+          <div class="mobile-store-actions">
+            <button class="secondary" :disabled="loading" @click="editStore(item)">编辑</button>
+            <button class="secondary" :disabled="loading" @click="toggleStoreStatus(item)">
+              {{ item.status === 1 ? '禁用' : '启用' }}
+            </button>
+            <button class="danger" :disabled="loading" @click="deleteStore(item)">删除</button>
+          </div>
+        </article>
+      </div>
     </div>
 
-    <div class="grid-2">
-      <div class="card">
-        <h2>商家账号</h2>
-        <table>
-          <thead><tr><th>ID</th><th>名称</th><th>账号</th><th>状态</th><th>操作</th></tr></thead>
-          <tbody>
-            <tr v-for="item in merchants" :key="item.id">
-              <td>{{ item.id }}</td>
-              <td>{{ item.merchantName }}</td>
-              <td>{{ item.account }}</td>
-              <td>{{ numericStatusText(item.status) }}</td>
-              <td>
-                <span class="table-actions compact">
-                  <button class="secondary" :disabled="loading" @click="toggleMerchantStatus(item)">
-                    {{ item.status === 1 ? '禁用' : '启用' }}
-                  </button>
-                  <button class="danger" :disabled="loading" @click="deleteMerchant(item)">删除</button>
-                </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+    <div class="fold-grid">
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>类型标签管理</strong>
+            <small>低频配置，用于推荐标签与行业隔离基准</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <div class="row inline-form">
+            <input v-model="newType.name" placeholder="自定义类型名称，如 苍蝇馆子" />
+            <select v-model="newType.industryCode">
+              <option v-for="t in presetTypes" :key="t.code" :value="t.code">基准：{{ t.name }}</option>
+            </select>
+            <button :disabled="loading" @click="createStoreType">新增类型</button>
+          </div>
+          <table>
+            <thead><tr><th>类型</th><th>行业基准</th><th>来源</th></tr></thead>
+            <tbody>
+              <tr v-for="t in storeTypes" :key="t.id">
+                <td>{{ t.name }}</td>
+                <td>{{ t.industryCode }}</td>
+                <td>{{ t.isPreset ? '预置' : '自定义' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
 
-      <div class="card">
-        <h2>生成任务</h2>
-        <table>
-          <thead><tr><th>ID</th><th>门店</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
-          <tbody>
-            <tr v-for="item in tasks" :key="item.id">
-              <td>{{ item.id }}</td>
-              <td>{{ item.storeId }}</td>
-              <td>{{ item.triggerType }}</td>
-              <td>{{ item.status }}</td>
-              <td>{{ item.successCount }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>商家账号</strong>
+            <small>账号禁用、删除等管理动作</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <table>
+            <thead><tr><th>ID</th><th>名称</th><th>账号</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody>
+              <tr v-for="item in merchants" :key="item.id">
+                <td>{{ item.id }}</td>
+                <td>{{ item.merchantName }}</td>
+                <td>{{ item.account }}</td>
+                <td>{{ numericStatusText(item.status) }}</td>
+                <td>
+                  <span class="table-actions compact">
+                    <button class="secondary" :disabled="loading" @click="toggleMerchantStatus(item)">
+                      {{ item.status === 1 ? '禁用' : '启用' }}
+                    </button>
+                    <button class="danger" :disabled="loading" @click="deleteMerchant(item)">删除</button>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>生成任务</strong>
+            <small>查看评价生成记录和成功数量</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <table>
+            <thead><tr><th>ID</th><th>门店</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
+            <tbody>
+              <tr v-for="item in tasks" :key="item.id">
+                <td>{{ item.id }}</td>
+                <td>{{ item.storeId }}</td>
+                <td>{{ item.triggerType }}</td>
+                <td>{{ item.status }}</td>
+                <td>{{ item.successCount }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
     </div>
   </div>
 </template>
@@ -422,23 +471,25 @@ onMounted(loadAll)
 .header-actions {
   align-items: center;
 }
-.stat-grid {
+.stat-strip {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
 }
-.stat-grid div {
+.stat-strip div {
+  background: var(--surface);
   border: 1px solid var(--border-soft);
   border-radius: 8px;
   padding: 12px;
 }
-.stat-grid span,
+.stat-strip span,
 .subtext {
   color: var(--muted);
   display: block;
   font-size: 12px;
 }
-.stat-grid strong {
+.stat-strip strong {
   display: block;
   font-size: 24px;
   line-height: 1.1;
@@ -533,6 +584,135 @@ onMounted(loadAll)
   min-height: 38px;
   padding: 8px 12px;
 }
+.mobile-store-list {
+  display: none;
+}
+.mobile-store-item {
+  border-top: 1px solid var(--border-soft);
+  padding: 14px 0;
+}
+.mobile-store-item:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.mobile-store-item:last-child {
+  padding-bottom: 0;
+}
+.mobile-store-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+.mobile-store-head strong {
+  display: block;
+  font-size: 17px;
+}
+.mobile-store-head span {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+  margin-top: 3px;
+}
+.status-pill {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+.status-pill.enabled {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+.status-pill.disabled {
+  background: #f1f5f9;
+  color: var(--muted);
+}
+.mobile-store-meta {
+  display: grid;
+  gap: 10px;
+  margin: 12px 0;
+}
+.mobile-store-meta div {
+  min-width: 0;
+}
+.mobile-store-meta dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 3px;
+}
+.mobile-store-meta dd {
+  margin: 0;
+  min-width: 0;
+}
+.mobile-store-meta code {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+.mobile-store-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.mobile-store-actions button {
+  min-height: 44px;
+  padding: 8px 10px;
+  width: 100%;
+}
+.fold-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 1fr;
+}
+.fold-card {
+  margin-bottom: 0;
+  padding: 0;
+}
+.fold-card summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  list-style: none;
+  padding: 16px 18px;
+}
+.fold-card summary::-webkit-details-marker {
+  display: none;
+}
+.fold-card summary strong {
+  display: block;
+  font-size: 16px;
+}
+.fold-card summary small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  margin-top: 2px;
+}
+.fold-hint {
+  color: var(--primary-strong);
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+}
+.fold-card[open] .fold-hint {
+  color: var(--muted);
+}
+.fold-card[open] .fold-hint::before {
+  content: "收起";
+}
+.fold-card[open] .fold-hint {
+  font-size: 0;
+}
+.fold-card[open] .fold-hint::before {
+  font-size: 13px;
+}
+.fold-body {
+  border-top: 1px solid var(--border-soft);
+  padding: 14px 18px 18px;
+}
 
 @media (max-width: 640px) {
   .admin-header,
@@ -552,8 +732,17 @@ onMounted(loadAll)
   .section-head button {
     width: 100%;
   }
-  .stat-grid {
+  .form-actions button:only-child {
+    grid-column: 1 / -1;
+  }
+  .stat-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stat-strip div {
+    padding: 10px;
+  }
+  .stat-strip strong {
+    font-size: 20px;
   }
   .inline-form {
     display: grid;
@@ -563,6 +752,12 @@ onMounted(loadAll)
     width: 100%;
     min-height: 44px;
     margin: 8px 0 0;
+  }
+  .desktop-table {
+    display: none;
+  }
+  .mobile-store-list {
+    display: block;
   }
   .table-actions {
     display: grid;
