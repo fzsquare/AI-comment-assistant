@@ -20,11 +20,14 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 	{
 		admin.GET("/merchants", h.listMerchants)
 		admin.PUT("/merchants/:id/status", h.updateMerchantStatus)
+		admin.DELETE("/merchants/:id", h.deleteMerchant)
 		admin.GET("/store-types", h.listStoreTypes)
 		admin.POST("/store-types", h.createStoreType)
 		admin.GET("/stores", h.listStores)
 		admin.POST("/stores", h.createStore)
+		admin.PUT("/stores/:id", h.updateStore)
 		admin.PUT("/stores/:id/status", h.updateStoreStatus)
+		admin.DELETE("/stores/:id", h.deleteStore)
 		admin.GET("/nfc-tags", h.listTags)
 		admin.POST("/nfc-tags", h.createTag)
 		admin.PUT("/nfc-tags/:id/bind", h.bindTag)
@@ -85,8 +88,18 @@ func (h *Handler) updateMerchantStatus(c *gin.Context) {
 
 func (h *Handler) listStores(c *gin.Context) {
 	var items []model.Store
-	h.DB.Order("id desc").Find(&items)
-	response.Success(c, items)
+	if err := h.DB.Order("id desc").Find(&items).Error; err != nil {
+		response.Error(c, http.StatusInternalServerError, "门店列表加载失败")
+		return
+	}
+
+	views := make([]adminStoreView, 0, len(items))
+	for _, item := range items {
+		var merchant model.MerchantUser
+		_ = h.DB.First(&merchant, item.MerchantUserID).Error
+		views = append(views, h.storeView(h.DB, item, merchant))
+	}
+	response.Success(c, views)
 }
 
 func (h *Handler) updateStoreStatus(c *gin.Context) {

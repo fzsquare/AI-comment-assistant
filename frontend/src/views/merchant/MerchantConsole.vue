@@ -15,6 +15,7 @@ const storeForm = reactive({
 const keyword = ref('')
 const imageUrl = ref('')
 const platformForm = reactive({ platformCode: '', platformName: '', buttonText: '', targetUrl: '', backupUrl: '', sortNo: 1, status: 1 })
+const editingPlatformLinkId = ref<number | null>(null)
 const reviewText = ref('')
 const reviewPlatformCode = ref('')
 const keywords = ref<any[]>([])
@@ -30,6 +31,14 @@ const tasks = ref<any[]>([])
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
+const isEditingPlatformLink = computed(() => editingPlatformLinkId.value !== null)
+
+const platformPresets: Record<string, { name: string; buttonText: string }> = {
+  dianping: { name: '大众点评', buttonText: '去大众点评发布' },
+  meituan: { name: '美团', buttonText: '去美团发布' },
+  xiaohongshu: { name: '小红书', buttonText: '去小红书发布' },
+  douyin: { name: '抖音', buttonText: '去抖音发布' }
+}
 
 function messageFrom(err: any, fallback: string) {
   return err?.response?.data?.message || err?.message || fallback
@@ -85,6 +94,24 @@ async function saveStore() {
   await runAction(() => merchantApi.updateStoreDetail(storeForm), '门店信息已保存')
 }
 
+function resetPlatformForm() {
+  editingPlatformLinkId.value = null
+  platformForm.platformCode = ''
+  platformForm.platformName = ''
+  platformForm.buttonText = ''
+  platformForm.targetUrl = ''
+  platformForm.backupUrl = ''
+  platformForm.sortNo = links.value.length + 1
+  platformForm.status = 1
+}
+
+function applyPlatformPreset() {
+  const preset = platformPresets[platformForm.platformCode]
+  if (!preset) return
+  if (!platformForm.platformName.trim()) platformForm.platformName = preset.name
+  if (!platformForm.buttonText.trim()) platformForm.buttonText = preset.buttonText
+}
+
 async function addKeyword() {
   const value = keyword.value.trim()
   if (!value) return
@@ -118,19 +145,38 @@ async function onPickImage(e: Event) {
   input.value = '' // 允许再次选同一文件
 }
 
-async function addPlatformLink() {
+function editPlatformLink(item: any) {
+  editingPlatformLinkId.value = item.id
+  platformForm.platformCode = item.platformCode || ''
+  platformForm.platformName = item.platformName || ''
+  platformForm.buttonText = item.buttonText || ''
+  platformForm.targetUrl = item.targetUrl || ''
+  platformForm.backupUrl = item.backupUrl || ''
+  platformForm.sortNo = item.sortNo || 1
+  platformForm.status = item.status === 0 ? 0 : 1
+}
+
+async function savePlatformLink() {
+  applyPlatformPreset()
   if (!platformForm.platformCode.trim() || !platformForm.targetUrl.trim()) {
-    error.value = '请填写平台编码和主跳转链接'
+    error.value = '请填写平台编码和客户端跳转链接'
     return
   }
-  if (await runAction(() => merchantApi.createPlatformLink(platformForm), '平台入口已新增')) {
-    platformForm.platformCode = ''
-    platformForm.platformName = ''
-    platformForm.buttonText = ''
-    platformForm.targetUrl = ''
-    platformForm.backupUrl = ''
-    platformForm.sortNo = links.value.length + 1
-    platformForm.status = 1
+  const payload = {
+    platformCode: platformForm.platformCode.trim(),
+    platformName: platformForm.platformName.trim() || platformForm.platformCode.trim(),
+    buttonText: platformForm.buttonText.trim() || '去发布',
+    targetUrl: platformForm.targetUrl.trim(),
+    backupUrl: platformForm.backupUrl.trim(),
+    sortNo: platformForm.sortNo || links.value.length + 1,
+    status: platformForm.status || 1
+  }
+  const action = isEditingPlatformLink.value
+    ? () => merchantApi.updatePlatformLink(editingPlatformLinkId.value as number, payload)
+    : () => merchantApi.createPlatformLink(payload)
+  const success = isEditingPlatformLink.value ? '客户端跳转链接已保存' : '客户端跳转链接已新增'
+  if (await runAction(action, success)) {
+    resetPlatformForm()
   }
 }
 
@@ -166,12 +212,13 @@ async function deleteImage(id: number) {
 
 async function togglePlatformLinkStatus(item: any) {
   const nextStatus = item.status === 1 ? 0 : 1
-  await runAction(() => merchantApi.updatePlatformLinkStatus(item.id, nextStatus), '平台入口状态已更新')
+  await runAction(() => merchantApi.updatePlatformLinkStatus(item.id, nextStatus), '跳转链接状态已更新')
 }
 
 async function deletePlatformLink(id: number) {
-  if (!window.confirm('确认删除这个平台入口？')) return
-  await runAction(() => merchantApi.deletePlatformLink(id), '平台入口已删除')
+  if (!window.confirm('确认删除这个客户端跳转链接？')) return
+  await runAction(() => merchantApi.deletePlatformLink(id), '跳转链接已删除')
+  if (editingPlatformLinkId.value === id) resetPlatformForm()
 }
 
 async function deleteReview(id: number) {
@@ -298,22 +345,35 @@ onMounted(loadAll)
 
     <div class="grid-2">
       <div class="card">
-        <h2>平台入口配置</h2>
-        <input v-model="platformForm.platformCode" placeholder="平台编码" />
+        <h2>客户端跳转链接</h2>
+        <p class="muted" style="margin: 0 0 8px">顾客从落地页点按钮时打开这里配置的商家链接。</p>
+        <input v-model.trim="platformForm.platformCode" list="platform-codes" placeholder="平台编码，如 dianping" @change="applyPlatformPreset" />
+        <datalist id="platform-codes">
+          <option value="dianping">大众点评</option>
+          <option value="meituan">美团</option>
+          <option value="xiaohongshu">小红书</option>
+          <option value="douyin">抖音</option>
+        </datalist>
         <div style="height: 8px"></div>
         <input v-model="platformForm.platformName" placeholder="平台名称" />
         <div style="height: 8px"></div>
         <input v-model="platformForm.buttonText" placeholder="按钮文案" />
         <div style="height: 8px"></div>
-        <input v-model="platformForm.targetUrl" placeholder="主跳转链接" />
+        <input v-model.trim="platformForm.targetUrl" placeholder="客户端跳转链接" />
         <div style="height: 8px"></div>
-        <input v-model="platformForm.backupUrl" placeholder="备用链接" />
+        <input v-model.trim="platformForm.backupUrl" placeholder="备用链接（选填）" />
         <div style="height: 8px"></div>
-        <button :disabled="loading" @click="addPlatformLink">新增平台入口</button>
+        <div class="row">
+          <button :disabled="loading" @click="savePlatformLink">
+            {{ isEditingPlatformLink ? '保存跳转链接' : '新增跳转链接' }}
+          </button>
+          <button v-if="isEditingPlatformLink" class="secondary" :disabled="loading" @click="resetPlatformForm">取消编辑</button>
+        </div>
         <ul>
           <li v-for="item in links" :key="item.id" class="list-action">
             <span>{{ item.buttonText }} - {{ item.targetUrl }}（{{ numericStatusText(item.status) }}）</span>
             <span class="row">
+              <button class="secondary" :disabled="loading" @click="editPlatformLink(item)">编辑</button>
               <button class="secondary" :disabled="loading" @click="togglePlatformLinkStatus(item)">
                 {{ item.status === 1 ? '禁用' : '启用' }}
               </button>

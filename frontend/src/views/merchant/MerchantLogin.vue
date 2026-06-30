@@ -29,7 +29,7 @@ async function submit() {
     <form class="auth-card" @submit.prevent="submit">
       <p class="auth-kicker">店铺运营台</p>
       <h1>商家登录</h1>
-      <p class="auth-sub">维护平台入口、图片素材、关键词和评价池。</p>
+      <p class="auth-sub">维护跳转链接、图片素材、关键词和评价池。</p>
 
       <label class="field">
         <span>账号</span>

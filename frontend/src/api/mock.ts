@@ -9,6 +9,7 @@ import type { AxiosAdapter, AxiosResponse } from 'axios'
 
 const envelope = (data: unknown) => ({ code: 0, message: 'ok', data })
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const landingPath = (uuid: string) => `${import.meta.env.BASE_URL}landing/${uuid}`
 
 // 自包含 SVG 占位图（无需联网也能显示）
 const ph = (text: string, bg: string) =>
@@ -52,9 +53,9 @@ let images = [
 ]
 
 let platformLinks = [
-  { id: 1, platformCode: 'xiaohongshu', platformName: '小红书', buttonText: '去小红书发布', targetUrl: 'https://www.xiaohongshu.com', backupUrl: '', sortNo: 1, status: 1 },
-  { id: 2, platformCode: 'dianping', platformName: '大众点评', buttonText: '去点评发布', targetUrl: 'https://www.dianping.com', backupUrl: '', sortNo: 2, status: 1 },
-  { id: 3, platformCode: 'douyin', platformName: '抖音', buttonText: '去抖音发布', targetUrl: 'https://www.douyin.com', backupUrl: '', sortNo: 3, status: 1 }
+  { id: 1, storeId: 1, platformCode: 'xiaohongshu', platformName: '小红书', buttonText: '去小红书发布', targetUrl: 'https://www.xiaohongshu.com', backupUrl: '', sortNo: 1, status: 1 },
+  { id: 2, storeId: 1, platformCode: 'dianping', platformName: '大众点评', buttonText: '去点评发布', targetUrl: 'https://www.dianping.com', backupUrl: '', sortNo: 2, status: 1 },
+  { id: 3, storeId: 1, platformCode: 'douyin', platformName: '抖音', buttonText: '去抖音发布', targetUrl: 'https://www.douyin.com', backupUrl: '', sortNo: 3, status: 1 }
 ]
 
 let merchantReviews = [
@@ -157,6 +158,73 @@ function landingPayload() {
   }
 }
 
+function deleteStoreById(id: number) {
+  const index = stores.findIndex((s) => s.id === id)
+  if (index < 0) return { deleted: false }
+  stores.splice(index, 1)
+  platformLinks = platformLinks.filter((link) => link.storeId !== id)
+  nfcTags = nfcTags.map((tag) =>
+    tag.storeId === id ? { ...tag, storeId: 0, landingToken: '', status: 'unbound' } : tag
+  )
+  tasks = tasks.filter((task) => task.storeId !== id)
+  if (id === store.id) {
+    keywords = []
+    images = []
+    merchantReviews = []
+  }
+  return { deleted: true }
+}
+
+function deleteMerchantById(id: number) {
+  const merchantIndex = merchants.findIndex((m) => m.id === id)
+  if (merchantIndex < 0) return { deleted: false }
+  const storeIds = stores.filter((s) => s.merchantUserId === id).map((s) => s.id)
+  for (const storeId of storeIds) {
+    deleteStoreById(storeId)
+  }
+  merchants.splice(merchantIndex, 1)
+  return { deleted: true }
+}
+
+function platformName(code: string) {
+  return ({ dianping: '大众点评', meituan: '美团', xiaohongshu: '小红书', douyin: '抖音' } as Record<string, string>)[code] || code
+}
+
+function adminStoreView(item: any) {
+  const merchant = merchants.find((m) => m.id === item.merchantUserId)
+  const link = platformLinks.find((p) => p.storeId === item.id && p.platformCode === item.primaryPlatformStyle)
+  return {
+    ...item,
+    merchantAccount: merchant?.account || '',
+    merchantName: merchant?.merchantName || '',
+    contactName: merchant?.contactName || '',
+    platformUrl: link?.targetUrl || '',
+    landingUrl: landingPath(item.uuid)
+  }
+}
+
+function saveMockPlatformLink(storeId: number, platformCode: string, targetUrl?: string) {
+  const index = platformLinks.findIndex((p) => p.storeId === storeId && p.platformCode === platformCode)
+  const value = String(targetUrl || '').trim()
+  if (!value) {
+    if (index >= 0) platformLinks.splice(index, 1)
+    return
+  }
+  const next = {
+    id: index >= 0 ? platformLinks[index].id : nextId(),
+    storeId,
+    platformCode,
+    platformName: platformName(platformCode),
+    buttonText: `去${platformName(platformCode)}发布`,
+    targetUrl: value,
+    backupUrl: value,
+    sortNo: 1,
+    status: 1
+  }
+  if (index >= 0) platformLinks[index] = next
+  else platformLinks.push(next)
+}
+
 // ---------------- 路由表 ----------------
 type Handler = (m: RegExpMatchArray, body: any) => unknown
 const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
@@ -179,6 +247,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'DELETE', re: /\/merchant\/store\/images\/(\d+)$/, handler: (m) => { images = images.filter((i) => i.id !== Number(m[1])); return { deleted: true } } },
   { method: 'GET', re: /\/merchant\/store\/platform-links$/, handler: () => platformLinks },
   { method: 'POST', re: /\/merchant\/store\/platform-links$/, handler: (_m, b) => { const it = { id: nextId(), sortNo: 0, status: 1, backupUrl: '', ...b }; platformLinks.push(it); return it } },
+  { method: 'PUT', re: /\/merchant\/store\/platform-links\/(\d+)$/, handler: (m, b) => { const it = platformLinks.find((p) => p.id === Number(m[1])); if (it) Object.assign(it, b); return it } },
   { method: 'PUT', re: /\/merchant\/store\/platform-links\/(\d+)\/status$/, handler: (m, b) => { const it = platformLinks.find((p) => p.id === Number(m[1])); if (it) it.status = b.status; return it } },
   { method: 'DELETE', re: /\/merchant\/store\/platform-links\/(\d+)$/, handler: (m) => { platformLinks = platformLinks.filter((p) => p.id !== Number(m[1])); return { deleted: true } } },
   { method: 'GET', re: /\/merchant\/reviews$/, handler: () => merchantReviews },
@@ -201,18 +270,52 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'POST', re: /\/admin\/auth\/login$/, handler: () => ({ token: 'mock-admin-token' }) },
   { method: 'GET', re: /\/admin\/merchants$/, handler: () => merchants },
   { method: 'PUT', re: /\/admin\/merchants\/(\d+)\/status$/, handler: (m, b) => { const it = merchants.find((x) => x.id === Number(m[1])); if (it) it.status = b.status; return it } },
+  { method: 'DELETE', re: /\/admin\/merchants\/(\d+)$/, handler: (m) => deleteMerchantById(Number(m[1])) },
   { method: 'GET', re: /\/admin\/store-types$/, handler: () => storeTypes },
   { method: 'POST', re: /\/admin\/store-types$/, handler: (_m, b) => { const it = { id: nextId(), code: `custom-${nextId()}`, name: b.name, industryCode: b.industryCode, isPreset: false, status: 1 }; storeTypes.push(it); return it } },
-  { method: 'GET', re: /\/admin\/stores$/, handler: () => stores },
+  { method: 'GET', re: /\/admin\/stores$/, handler: () => stores.map(adminStoreView) },
   { method: 'POST', re: /\/admin\/stores$/, handler: (_m, b) => {
     const t = storeTypes.find((x) => x.id === Number(b.typeId))
     const mid = nextId(); const sid = nextId(); const uuid = `mock-${sid}-${Date.now()}`
-    merchants.push({ id: mid, account: b.account, merchantName: b.merchantName || b.storeName, contactName: b.merchantName || b.storeName, status: 1 })
-    const s = { id: sid, merchantUserId: mid, uuid, typeId: t?.id || 0, storeName: b.storeName, industryType: t?.name || '餐饮', storeIntro: b.storeIntro || '', address: b.address || '', primaryPlatformStyle: b.primaryPlatformStyle || 'dianping', brandTone: '轻松自然', status: 1 }
+    merchants.push({ id: mid, account: b.account, merchantName: b.merchantName || b.storeName, contactName: b.contactName || b.merchantName || b.storeName, status: 1 })
+    const s = { id: sid, merchantUserId: mid, uuid, typeId: t?.id || 0, storeName: b.storeName, industryType: t?.name || '餐饮', storeIntro: b.storeIntro || '', address: b.address || '', primaryPlatformStyle: b.primaryPlatformStyle || 'dianping', brandTone: b.brandTone || '轻松自然', status: 1 }
     stores.push(s)
-    return { store: s, merchant: { id: mid, account: b.account }, landingUrl: `/landing/${uuid}` }
+    saveMockPlatformLink(sid, s.primaryPlatformStyle, b.platformUrl)
+    return { store: s, merchant: { id: mid, account: b.account }, landingUrl: landingPath(uuid) }
+  } },
+  { method: 'PUT', re: /\/admin\/stores\/(\d+)$/, handler: (m, b) => {
+    const item = stores.find((x) => x.id === Number(m[1]))
+    if (!item) return null
+    const t = storeTypes.find((x) => x.id === Number(b.typeId))
+    const merchant = merchants.find((x) => x.id === item.merchantUserId)
+    if (merchant) {
+      merchant.account = b.account
+      merchant.merchantName = b.merchantName || b.storeName
+      merchant.contactName = b.contactName || merchant.merchantName
+    }
+    Object.assign(item, {
+      typeId: t?.id || item.typeId,
+      storeName: b.storeName,
+      industryType: t?.name || item.industryType,
+      storeIntro: b.storeIntro || '',
+      address: b.address || '',
+      primaryPlatformStyle: b.primaryPlatformStyle || 'dianping',
+      brandTone: b.brandTone || ''
+    })
+    saveMockPlatformLink(item.id, item.primaryPlatformStyle, b.platformUrl)
+    return adminStoreView(item)
   } },
   { method: 'PUT', re: /\/admin\/stores\/(\d+)\/status$/, handler: (m, b) => { const it = stores.find((x) => x.id === Number(m[1])); if (it) it.status = b.status; return it } },
+  { method: 'DELETE', re: /\/admin\/stores\/(\d+)$/, handler: (m) => {
+    const storeId = Number(m[1])
+    const target = stores.find((s) => s.id === storeId)
+    const result = deleteStoreById(storeId)
+    if (target) {
+      const merchantIndex = merchants.findIndex((merchant) => merchant.id === target.merchantUserId)
+      if (merchantIndex >= 0) merchants.splice(merchantIndex, 1)
+    }
+    return result
+  } },
   { method: 'GET', re: /\/admin\/nfc-tags$/, handler: () => nfcTags },
   { method: 'POST', re: /\/admin\/nfc-tags$/, handler: (_m, b) => { const sid = Number(b.storeId) || 0; const it = { id: nextId(), tagCode: b.tagCode || `TAG-${nextId()}`, storeId: sid, landingToken: '', status: sid ? 'bound' : 'unbound', remark: b.remark || '' }; nfcTags.push(it); return it } },
   { method: 'PUT', re: /\/admin\/nfc-tags\/(\d+)\/bind$/, handler: (m, b) => { const it = nfcTags.find((t) => t.id === Number(m[1])); if (it) { it.storeId = b.storeId; it.status = 'bound' } return it } },

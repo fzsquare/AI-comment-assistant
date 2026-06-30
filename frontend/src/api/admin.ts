@@ -10,6 +10,9 @@ export const adminApi = {
   updateMerchantStatus(id: number, status: number) {
     return http.put(`/admin/merchants/${id}/status`, { status })
   },
+  deleteMerchant(id: number) {
+    return http.delete(`/admin/merchants/${id}`)
+  },
   listStoreTypes() {
     return http.get('/admin/store-types')
   },
@@ -34,8 +37,26 @@ export const adminApi = {
   }) {
     return http.post('/admin/stores', payload)
   },
+  updateStore(id: number, payload: {
+    account: string
+    password?: string
+    merchantName?: string
+    contactName?: string
+    typeId: number
+    storeName: string
+    storeIntro?: string
+    address?: string
+    primaryPlatformStyle?: string
+    brandTone?: string
+    platformUrl?: string
+  }) {
+    return http.put(`/admin/stores/${id}`, payload)
+  },
   updateStoreStatus(id: number, status: number) {
     return http.put(`/admin/stores/${id}/status`, { status })
+  },
+  deleteStore(id: number) {
+    return http.delete(`/admin/stores/${id}`)
   },
   listTags(storeId?: number) {
     return http.get('/admin/nfc-tags', storeId ? { params: { storeId } } : undefined)

@@ -42,6 +42,9 @@ export const merchantApi = {
   createPlatformLink(payload: Record<string, unknown>) {
     return http.post('/merchant/store/platform-links', payload)
   },
+  updatePlatformLink(id: number, payload: Record<string, unknown>) {
+    return http.put(`/merchant/store/platform-links/${id}`, payload)
+  },
   updatePlatformLinkStatus(id: number, status: number) {
     return http.put(`/merchant/store/platform-links/${id}/status`, { status })
   },
