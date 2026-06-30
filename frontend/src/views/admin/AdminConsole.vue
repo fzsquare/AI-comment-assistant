@@ -272,8 +272,8 @@ onMounted(loadAll)
       </div>
       <button :disabled="loading" @click="createStore">创建门店</button>
 
-      <div v-if="lastCreated" class="created">
-        <p>✅ 已创建「{{ lastCreated.storeName }}」，商家账号：<b>{{ lastCreated.account }}</b></p>
+      <div v-if="lastCreated" class="created" role="status">
+        <p>已创建「{{ lastCreated.storeName }}」，商家账号：<b>{{ lastCreated.account }}</b></p>
         <p>UUID：<code>{{ lastCreated.uuid }}</code></p>
         <p class="row" style="gap: 8px; align-items: center">
           写入 NFC 的链接：<code style="flex: 1; word-break: break-all">{{ lastCreated.landingUrl }}</code>
@@ -378,7 +378,49 @@ onMounted(loadAll)
 .muted { color: #6b7280; font-size: 13px; margin: 0 0 10px; }
 .fld { display: block; margin-bottom: 10px; font-size: 13px; color: #374151; }
 .fld input, .fld select { display: block; width: 100%; margin-top: 4px; }
-.created { margin-top: 14px; padding: 12px; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; font-size: 13px; }
-.created code { background: #fff; padding: 2px 6px; border-radius: 4px; }
-.link { background: none; border: none; color: #2563eb; cursor: pointer; font-size: 12px; padding: 0 0 0 8px; }
+.created {
+  margin-top: 14px;
+  padding: 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.created p {
+  margin: 0 0 8px;
+}
+.created p:last-child {
+  margin-bottom: 0;
+}
+.created code {
+  background: #fff;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  margin-left: 6px;
+  padding: 0 10px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #2563eb;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 640px) {
+  .created .row {
+    align-items: stretch;
+  }
+  .link {
+    width: 100%;
+    min-height: 44px;
+    margin: 8px 0 0;
+  }
+}
 </style>

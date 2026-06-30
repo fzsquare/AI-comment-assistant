@@ -277,7 +277,7 @@ onMounted(loadAll)
         <h2>图片管理</h2>
         <p class="muted" style="margin: 0 0 8px">上传店铺/菜品图片，顾客落地页会展示，可长按保存：</p>
         <label class="upload-btn">
-          <span>📷 上传图片</span>
+          <span>上传图片</span>
           <input type="file" accept="image/*" :disabled="loading" @change="onPickImage" style="display: none" />
         </label>
         <details style="margin: 10px 0">
@@ -289,7 +289,7 @@ onMounted(loadAll)
         </details>
         <div class="row">
           <div v-for="item in images" :key="item.id" class="image-item">
-            <img :src="item.thumbnailUrl || item.imageUrl" />
+            <img :src="item.thumbnailUrl || item.imageUrl" alt="店铺图片" />
             <button class="danger" :disabled="loading" @click="deleteImage(item.id)">删除</button>
           </div>
         </div>
@@ -350,24 +350,30 @@ onMounted(loadAll)
 .upload-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: center;
+  min-height: 48px;
+  min-width: 132px;
   padding: 10px 16px;
   background: #3b82f6;
   color: #fff;
   border-radius: 10px;
   cursor: pointer;
   font-size: 15px;
+  font-weight: 700;
+  touch-action: manipulation;
 }
 .upload-btn:hover {
   background: #2563eb;
 }
 .suggest-chip {
-  padding: 7px 14px;
+  min-height: 40px;
+  padding: 8px 14px;
   border-radius: 999px;
   border: 1px dashed #93c5fd;
   background: #f0f7ff;
   color: #1d4ed8;
   font-size: 13px;
+  font-weight: 700;
   cursor: pointer;
 }
 .suggest-chip:hover {
@@ -375,5 +381,15 @@ onMounted(loadAll)
 }
 .suggest-chip:disabled {
   opacity: 0.6;
+}
+
+@media (max-width: 640px) {
+  .upload-btn {
+    width: 100%;
+  }
+  .suggest-chip {
+    flex: 1 1 calc(50% - 8px);
+    min-height: 44px;
+  }
 }
 </style>

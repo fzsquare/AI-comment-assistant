@@ -187,6 +187,7 @@ onMounted(load)
             class="choice"
             :class="{ active: selectedPlatform?.platformCode === link.platformCode }"
             :disabled="switching"
+            :aria-pressed="selectedPlatform?.platformCode === link.platformCode"
             @click="choosePlatform(link)"
           >{{ link.platformName || link.buttonText }}</button>
         </div>
@@ -203,6 +204,7 @@ onMounted(load)
             class="chip"
             :class="{ active: selectedTag === kw.keyword }"
             :disabled="switching"
+            :aria-pressed="selectedTag === kw.keyword"
             @click="pickByTag(kw.keyword)"
           >{{ kw.keyword }}</button>
         </div>
@@ -216,10 +218,10 @@ onMounted(load)
             :disabled="switching"
             placeholder="正在生成…"
           ></textarea>
-          <div class="busy-mask" v-if="switching">换文案中…</div>
+          <div class="busy-mask" v-if="switching" role="status">换文案中…</div>
         </div>
         <div class="actions">
-          <button class="act-switch" :disabled="switching" @click="switchReview">🔄 换一换</button>
+          <button class="act-switch" :disabled="switching" @click="switchReview">换一换</button>
           <div class="act-row">
             <button class="act-copy" :disabled="!editedContent.trim() || switching" @click="copyReview">复制</button>
             <button class="act-go" :disabled="!editedContent.trim() || switching" @click="jump(selectedPlatform)">
@@ -240,7 +242,7 @@ onMounted(load)
             target="_blank"
             rel="noreferrer"
           >
-            <img :src="image.thumbnailUrl || image.imageUrl || image.url" loading="lazy" alt="" />
+            <img :src="image.thumbnailUrl || image.imageUrl || image.url" loading="lazy" alt="店铺配图" />
           </a>
         </div>
       </section>
@@ -253,7 +255,10 @@ onMounted(load)
   max-width: 640px;
   margin: 0 auto;
   padding: 16px 14px;
+  padding-left: max(14px, env(safe-area-inset-left));
+  padding-right: max(14px, env(safe-area-inset-right));
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  min-height: 100dvh;
 }
 
 .store-head {
@@ -275,6 +280,7 @@ onMounted(load)
   background: #fff;
   border-radius: 16px;
   padding: 18px 16px;
+  border: 1px solid rgba(219, 228, 240, 0.72);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
   margin-bottom: 14px;
 }
@@ -317,13 +323,14 @@ onMounted(load)
   gap: 10px;
 }
 .choice {
-  min-height: 52px;
+  min-height: 54px;
   border: 1.5px solid #e2e8f0;
   border-radius: 12px;
   background: #f8fafc;
   color: #1f2937;
   font-size: 15px;
   font-weight: 600;
+  touch-action: manipulation;
 }
 .choice.active {
   border-color: #3b82f6;
@@ -341,13 +348,14 @@ onMounted(load)
   gap: 10px;
 }
 .chip {
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 16px;
   border-radius: 999px;
   border: 1.5px solid #e2e8f0;
   background: #fff;
   color: #334155;
   font-size: 14px;
+  touch-action: manipulation;
 }
 .chip.active {
   border-color: #3b82f6;
@@ -361,6 +369,7 @@ onMounted(load)
 }
 .review-box {
   width: 100%;
+  min-height: 224px;
   font-size: 16px;
   line-height: 1.75;
   padding: 14px;
@@ -386,7 +395,7 @@ onMounted(load)
 }
 .act-switch {
   width: 100%;
-  min-height: 44px;
+  min-height: 48px;
   background: #eef2ff;
   color: #1e40af;
   border: none;
@@ -400,7 +409,7 @@ onMounted(load)
 }
 .act-copy {
   flex: 0 0 96px;
-  min-height: 50px;
+  min-height: 52px;
   background: #eef2ff;
   color: #1e40af;
   border: none;
@@ -410,7 +419,7 @@ onMounted(load)
 }
 .act-go {
   flex: 1;
-  min-height: 50px;
+  min-height: 52px;
   background: #3b82f6;
   color: #fff;
   border: none;
@@ -429,6 +438,9 @@ onMounted(load)
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   padding-bottom: 4px;
+}
+.img-row a {
+  flex: 0 0 auto;
 }
 .img-row img {
   width: 150px;
@@ -471,5 +483,17 @@ onMounted(load)
 @keyframes sk {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
+}
+
+@media (max-width: 380px) {
+  .choice-grid {
+    grid-template-columns: 1fr;
+  }
+  .act-row {
+    flex-direction: column;
+  }
+  .act-copy {
+    flex: 1 1 auto;
+  }
 }
 </style>
