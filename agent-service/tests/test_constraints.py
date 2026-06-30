@@ -22,15 +22,18 @@ from app.content_normalizer import normalize_generated_content  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
 from app.internal_auth import check_internal_token  # noqa: E402
 from app.jsonutil import extract_json  # noqa: E402
+from app.prompts.writer import build_writer_user  # noqa: E402
 from app.reviewer_logic import reviewer_passes  # noqa: E402
 
 try:
-    from app.schemas import GenerateRequest, ReviewItem  # noqa: E402
+    from app.schemas import FeedbackExamples, GenerateRequest, ReviewItem, StoreContext  # noqa: E402
 except ModuleNotFoundError as exc:
     if exc.name != "pydantic":
         raise
+    FeedbackExamples = None
     GenerateRequest = None
     ReviewItem = None
+    StoreContext = None
 
 
 def test_hard_violations_catches_real_banned():
@@ -231,6 +234,28 @@ def test_generate_request_rejects_oversized_keywords():
     except Exception:
         return
     raise AssertionError("应拒绝过多 keywords")
+
+
+def test_writer_prompt_uses_feedback_examples():
+    if FeedbackExamples is None:
+        print("SKIP  pydantic 未安装，跳过 feedback prompt 测试")
+        return
+    spec = get_spec("meituan")
+    user = build_writer_user(
+        spec,
+        StoreContext(store_name="七欣天香辣蟹"),
+        ["香辣蟹"],
+        "比较满意",
+        0,
+        feedback=FeedbackExamples(
+            accepted=["蟹肉饱满，服务员会主动换盘。"],
+            rejected=["太像广告，夸得太满。"],
+        ),
+    )
+    assert "用户喜欢的评论样本" in user
+    assert "蟹肉饱满，服务员会主动换盘。" in user
+    assert "用户不喜欢的评论样本" in user
+    assert "太像广告，夸得太满。" in user
 
 
 def test_generate_request_rejects_long_store_name():

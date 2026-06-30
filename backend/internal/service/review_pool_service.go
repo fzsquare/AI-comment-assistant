@@ -46,6 +46,7 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 
 	var keywords []model.StoreKeyword
 	s.DB.Where("store_id = ?", storeID).Order("sort_no asc, id asc").Find(&keywords)
+	feedback := s.feedbackExamples(storeID, platformCode)
 
 	task := model.ReviewGenerationTask{
 		StoreID:       storeID,
@@ -58,7 +59,13 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 		return err
 	}
 
-	reviews, err := s.Generator.Generate(store, keywords, targetCount)
+	var reviews []model.ReviewItem
+	var err error
+	if generator, ok := s.Generator.(FeedbackAwareReviewGenerator); ok {
+		reviews, err = generator.GenerateWithFeedback(store, keywords, feedback, targetCount)
+	} else {
+		reviews, err = s.Generator.Generate(store, keywords, targetCount)
+	}
 	if err != nil {
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = err.Error()
@@ -94,6 +101,40 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	task.SuccessCount = len(reviews)
 	task.Status = model.TaskStatusSuccess
 	return s.DB.Save(&task).Error
+}
+
+func (s *ReviewPoolService) feedbackExamples(storeID uint, platformCode string) ReviewGenerationFeedback {
+	return ReviewGenerationFeedback{
+		Accepted: s.feedbackContentExamples(storeID, platformCode, model.ReviewFeedbackAccepted, 8),
+		Rejected: s.feedbackContentExamples(storeID, platformCode, model.ReviewFeedbackRejected, 8),
+	}
+}
+
+func (s *ReviewPoolService) feedbackContentExamples(storeID uint, platformCode string, feedbackType string, limit int) []string {
+	if s.DB == nil || storeID == 0 || platformCode == "" || limit <= 0 {
+		return nil
+	}
+
+	var rows []model.ReviewFeedback
+	if err := s.DB.
+		Where("store_id = ? AND platform_code = ? AND feedback_type = ?", storeID, platformCode, feedbackType).
+		Order("id desc").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil
+	}
+
+	examples := make([]string, 0, len(rows))
+	for _, row := range rows {
+		content := strings.TrimSpace(row.EditedContent)
+		if content == "" {
+			content = strings.TrimSpace(row.ContentSnapshot)
+		}
+		if content != "" {
+			examples = append(examples, content)
+		}
+	}
+	return examples
 }
 
 func (s *ReviewPoolService) EnsureDispatchableStock(storeID uint, platformCode string) error {

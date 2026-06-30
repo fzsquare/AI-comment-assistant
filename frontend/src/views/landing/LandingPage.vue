@@ -27,6 +27,7 @@ const selectedTag = ref('')
 const selectedPlatform = ref<LandingData['platformLinks'][number] | null>(null)
 // 顾客可在发布前编辑成自己的话
 const editedContent = ref('')
+const acceptedReviewIds = ref<number[]>([])
 
 async function trackEvent(payloadData: Record<string, unknown>) {
   try {
@@ -75,6 +76,16 @@ async function pickByTag(keyword: string) {
 
 async function switchReview() {
   if (!payload.value || !selectedPlatform.value || switching.value) return
+  const currentReview = payload.value.review
+  if (currentReview && !acceptedReviewIds.value.includes(currentReview.id)) {
+    await trackEvent({
+      sessionId: payload.value.sessionId,
+      reviewItemId: currentReview.id,
+      actionType: 'review_reject',
+      platformCode: selectedPlatform.value.platformCode,
+      editedContent: editedContent.value.trim()
+    })
+  }
   await fetchReview(selectedTag.value, 'review_switch')
 }
 
@@ -82,6 +93,7 @@ async function choosePlatform(link: LandingData['platformLinks'][number]) {
   if (!payload.value || switching.value) return
   if (selectedPlatform.value?.platformCode === link.platformCode && payload.value.review) return
   selectedPlatform.value = link
+  acceptedReviewIds.value = []
   selectedTag.value = ''
   payload.value.review = null
   editedContent.value = ''
@@ -118,10 +130,13 @@ async function copyReview() {
   if (!payload.value || !payload.value.review || !text) return
   const ok = await copyToClipboard(text)
   if (ok) {
+    acceptedReviewIds.value = [...acceptedReviewIds.value, payload.value.review.id]
     await trackEvent({
       sessionId: payload.value.sessionId,
       reviewItemId: payload.value.review.id,
-      actionType: 'review_copy'
+      actionType: 'review_copy',
+      platformCode: selectedPlatform.value?.platformCode,
+      editedContent: text
     })
     alert('已复制，可直接去平台发布')
   } else {
@@ -139,8 +154,10 @@ async function jump(link: { platformCode: string; targetUrl: string; backupUrl?:
     sessionId: payload.value.sessionId,
     reviewItemId: payload.value.review.id,
     actionType: 'platform_link_click',
-    platformCode: link.platformCode
+    platformCode: link.platformCode,
+    editedContent: text
   })
+  acceptedReviewIds.value = [...acceptedReviewIds.value, payload.value.review.id]
   // deeplink 唤起对应 App，唤不起回退商家网页链接
   if (!link.targetUrl && !link.backupUrl) {
     alert('该平台还没配置链接，请联系商家')

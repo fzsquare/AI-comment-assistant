@@ -85,7 +85,7 @@ async def _generate_one(
     index: int,
     industry: IndustrySpec,
 ) -> ReviewItem:
-    user = build_writer_user(spec, req.store, req.keywords, req.satisfaction, index, industry)
+    user = build_writer_user(spec, req.store, req.keywords, req.satisfaction, index, industry, feedback=req.feedback)
     best: ReviewItem | None = None
     best_clean = False  # best 是否无硬违规
 

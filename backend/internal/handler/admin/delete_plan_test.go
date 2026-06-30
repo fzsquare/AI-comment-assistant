@@ -11,6 +11,7 @@ func TestStoreDeletionPlanClearsChildrenBeforeDeletingStore(t *testing.T) {
 
 	want := []string{
 		"unbind_nfc_tags",
+		"delete_review_feedbacks",
 		"delete_review_display_logs",
 		"delete_review_generation_tasks",
 		"delete_review_items",

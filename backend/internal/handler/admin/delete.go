@@ -13,6 +13,7 @@ import (
 func storeDeletionPlan(includeMerchant bool) []string {
 	steps := []string{
 		"unbind_nfc_tags",
+		"delete_review_feedbacks",
 		"delete_review_display_logs",
 		"delete_review_generation_tasks",
 		"delete_review_items",
@@ -41,6 +42,8 @@ func executeStoreDeletionPlan(tx *gorm.DB, store model.Store, includeMerchant bo
 				}).Error
 		case "delete_review_display_logs":
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewDisplayLog{}).Error
+		case "delete_review_feedbacks":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewFeedback{}).Error
 		case "delete_review_generation_tasks":
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewGenerationTask{}).Error
 		case "delete_review_items":

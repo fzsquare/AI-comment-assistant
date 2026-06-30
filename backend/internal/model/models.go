@@ -15,6 +15,11 @@ const (
 )
 
 const (
+	ReviewFeedbackAccepted = "accepted"
+	ReviewFeedbackRejected = "rejected"
+)
+
+const (
 	TaskStatusPending       = "pending"
 	TaskStatusRunning       = "running"
 	TaskStatusSuccess       = "success"
@@ -142,6 +147,21 @@ type ReviewDisplayLog struct {
 	ClientIP     string    `gorm:"size:64" json:"clientIp"`
 	UserAgent    string    `gorm:"size:255" json:"userAgent"`
 	CreatedAt    time.Time `json:"createdAt"`
+}
+
+type ReviewFeedback struct {
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	StoreID         uint      `gorm:"index;not null" json:"storeId"`
+	ReviewItemID    uint      `gorm:"index;not null" json:"reviewItemId"`
+	SessionID       string    `gorm:"size:128;index;not null" json:"sessionId"`
+	PlatformCode    string    `gorm:"size:64;not null" json:"platformCode"`
+	FeedbackType    string    `gorm:"size:32;not null" json:"feedbackType"`
+	SourceAction    string    `gorm:"size:64;not null" json:"sourceAction"`
+	ContentSnapshot string    `gorm:"type:text;not null" json:"contentSnapshot"`
+	EditedContent   string    `gorm:"type:text" json:"editedContent"`
+	ClientIP        string    `gorm:"size:64" json:"clientIp"`
+	UserAgent       string    `gorm:"size:255" json:"userAgent"`
+	CreatedAt       time.Time `json:"createdAt"`
 }
 
 type ReviewGenerationTask struct {

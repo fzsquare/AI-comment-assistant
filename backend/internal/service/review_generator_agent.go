@@ -46,11 +46,17 @@ type agentStore struct {
 }
 
 type agentRequest struct {
-	Store        agentStore `json:"store"`
-	Keywords     []string   `json:"keywords"`
-	Platform     string     `json:"platform"`
-	Count        int        `json:"count"`
-	Satisfaction string     `json:"satisfaction"`
+	Store        agentStore     `json:"store"`
+	Keywords     []string       `json:"keywords"`
+	Platform     string         `json:"platform"`
+	Count        int            `json:"count"`
+	Satisfaction string         `json:"satisfaction"`
+	Feedback     *agentFeedback `json:"feedback,omitempty"`
+}
+
+type agentFeedback struct {
+	Accepted []string `json:"accepted,omitempty"`
+	Rejected []string `json:"rejected,omitempty"`
 }
 
 type agentItem struct {
@@ -70,6 +76,10 @@ var validPlatforms = map[string]bool{"dianping": true, "meituan": true, "xiaohon
 var gradeRank = map[string]int{"D": 0, "C": 1, "B": 2, "A": 3, "S": 4}
 
 func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.StoreKeyword, targetCount int) ([]model.ReviewItem, error) {
+	return g.GenerateWithFeedback(store, keywords, ReviewGenerationFeedback{}, targetCount)
+}
+
+func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords []model.StoreKeyword, feedback ReviewGenerationFeedback, targetCount int) ([]model.ReviewItem, error) {
 	if !strings.HasPrefix(g.BaseURL, "http://") && !strings.HasPrefix(g.BaseURL, "https://") {
 		return nil, fmt.Errorf("非法的文案服务地址: %q", g.BaseURL)
 	}
@@ -96,6 +106,7 @@ func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.Stor
 		Platform:     platform,
 		Count:        targetCount,
 		Satisfaction: "比较满意",
+		Feedback:     agentFeedbackFrom(feedback),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("构造文案请求失败: %w", err)
@@ -143,4 +154,14 @@ func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.Stor
 		})
 	}
 	return items, nil
+}
+
+func agentFeedbackFrom(feedback ReviewGenerationFeedback) *agentFeedback {
+	if len(feedback.Accepted) == 0 && len(feedback.Rejected) == 0 {
+		return nil
+	}
+	return &agentFeedback{
+		Accepted: feedback.Accepted,
+		Rejected: feedback.Rejected,
+	}
 }

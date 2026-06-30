@@ -20,6 +20,11 @@ class StoreContext(BaseModel):
     address: str = Field(default="", max_length=200)
 
 
+class FeedbackExamples(BaseModel):
+    accepted: List[str] = Field(default_factory=list, max_length=12)
+    rejected: List[str] = Field(default_factory=list, max_length=12)
+
+
 class GenerateRequest(BaseModel):
     store: StoreContext
     # 菜品/场景标签来源（复用 Go 侧的 StoreKeyword）。生成时据此打 tag，
@@ -29,6 +34,9 @@ class GenerateRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=50)
     # 默认“比较满意”——辅助真实到店顾客发真实好评，不是极端吹捧。
     satisfaction: SatisfactionLevel = "比较满意"
+    # 历史反馈：accepted 来自复制/发布，rejected 来自“换一换”前的文案。
+    # writer 只能学习风格和细节方向，不能照抄样本。
+    feedback: FeedbackExamples = Field(default_factory=FeedbackExamples)
 
 
 class ReviewItem(BaseModel):

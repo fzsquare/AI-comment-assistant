@@ -2,6 +2,7 @@ package public
 
 import (
 	"net/http"
+	"strings"
 
 	"ppk/backend/internal/model"
 	"ppk/backend/internal/pkg/response"
@@ -49,13 +50,16 @@ func (h *Handler) switchReview(c *gin.Context) {
 	response.Success(c, gin.H{"review": item, "remainingDispatchableCount": remaining})
 }
 
+type eventRequest struct {
+	SessionID     string `json:"sessionId"`
+	ReviewItemID  uint   `json:"reviewItemId"`
+	ActionType    string `json:"actionType"`
+	PlatformCode  string `json:"platformCode"`
+	EditedContent string `json:"editedContent"`
+}
+
 func (h *Handler) createEvent(c *gin.Context) {
-	var req struct {
-		SessionID    string `json:"sessionId"`
-		ReviewItemID uint   `json:"reviewItemId"`
-		ActionType   string `json:"actionType"`
-		PlatformCode string `json:"platformCode"`
-	}
+	var req eventRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Error(c, http.StatusBadRequest, "参数错误")
 		return
@@ -66,10 +70,101 @@ func (h *Handler) createEvent(c *gin.Context) {
 		return
 	}
 	// uuid 落地：URL 为门店级，不区分具体卡片，nfc_tag_id 记 0（无特定卡）。
-	log := model.ReviewDisplayLog{StoreID: store.ID, ReviewItemID: req.ReviewItemID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
-	if err := h.DB.Create(&log).Error; err != nil {
+	if err := h.DB.Transaction(func(tx *gorm.DB) error {
+		log := model.ReviewDisplayLog{StoreID: store.ID, ReviewItemID: req.ReviewItemID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+		if err := tx.Create(&log).Error; err != nil {
+			return err
+		}
+		return h.recordFeedback(tx, store, req, c.ClientIP(), c.Request.UserAgent())
+	}); err != nil {
 		response.Error(c, http.StatusInternalServerError, "保存失败")
 		return
 	}
 	response.Success(c, gin.H{"saved": true})
+}
+
+func (h *Handler) recordFeedback(tx *gorm.DB, store model.Store, req eventRequest, clientIP string, userAgent string) error {
+	feedbackType, tracked := feedbackTypeForAction(req.ActionType)
+	if !tracked {
+		return nil
+	}
+	if req.ReviewItemID == 0 {
+		return nil
+	}
+
+	var review model.ReviewItem
+	if err := tx.Where("id = ? AND store_id = ?", req.ReviewItemID, store.ID).First(&review).Error; err != nil {
+		return err
+	}
+
+	platformCode := strings.TrimSpace(req.PlatformCode)
+	if platformCode == "" {
+		platformCode = review.PlatformStyle
+	}
+	if platformCode == "" {
+		platformCode = store.PrimaryPlatformStyle
+	}
+
+	var acceptedCount int64
+	if err := tx.Model(&model.ReviewFeedback{}).
+		Where("store_id = ? AND review_item_id = ? AND session_id = ? AND feedback_type = ?", store.ID, req.ReviewItemID, req.SessionID, model.ReviewFeedbackAccepted).
+		Count(&acceptedCount).Error; err != nil {
+		return err
+	}
+	if feedbackType == model.ReviewFeedbackRejected && acceptedCount > 0 {
+		return nil
+	}
+
+	var existingCount int64
+	if err := tx.Model(&model.ReviewFeedback{}).
+		Where("store_id = ? AND review_item_id = ? AND session_id = ? AND feedback_type = ?", store.ID, req.ReviewItemID, req.SessionID, feedbackType).
+		Count(&existingCount).Error; err != nil {
+		return err
+	}
+	if existingCount == 0 {
+		feedback := model.ReviewFeedback{
+			StoreID:         store.ID,
+			ReviewItemID:    req.ReviewItemID,
+			SessionID:       req.SessionID,
+			PlatformCode:    platformCode,
+			FeedbackType:    feedbackType,
+			SourceAction:    req.ActionType,
+			ContentSnapshot: review.Content,
+			EditedContent:   strings.TrimSpace(req.EditedContent),
+			ClientIP:        clientIP,
+			UserAgent:       userAgent,
+		}
+		if err := tx.Create(&feedback).Error; err != nil {
+			return err
+		}
+	}
+
+	if status, ok := reviewStatusForFeedback(feedbackType); ok && review.Status != status {
+		return tx.Model(&model.ReviewItem{}).
+			Where("id = ? AND store_id = ?", review.ID, store.ID).
+			Update("status", status).Error
+	}
+	return nil
+}
+
+func feedbackTypeForAction(action string) (string, bool) {
+	switch strings.TrimSpace(action) {
+	case "review_copy", "platform_link_click":
+		return model.ReviewFeedbackAccepted, true
+	case "review_reject":
+		return model.ReviewFeedbackRejected, true
+	default:
+		return "", false
+	}
+}
+
+func reviewStatusForFeedback(feedbackType string) (string, bool) {
+	switch feedbackType {
+	case model.ReviewFeedbackAccepted:
+		return model.ReviewStatusDeleted, true
+	case model.ReviewFeedbackRejected:
+		return model.ReviewStatusDisabled, true
+	default:
+		return "", false
+	}
 }
