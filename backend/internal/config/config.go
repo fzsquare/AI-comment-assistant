@@ -34,7 +34,7 @@ type Config struct {
 	JWTSecret string
 	// 允许访问公开 API 的浏览器 Origin；生产环境必须显式配置且不能使用通配符。
 	AllowedOrigins []string
-	// 文案 agent 服务（Python）地址；为空则回退到内置 Mock 生成器
+	// 文案 agent 服务（Python）地址；为空时评论生成直接失败，不回退 mock
 	AgentServiceURL string
 	// Go 后端调用本地/内网 Python agent-service 时携带的内部令牌
 	AgentInternalToken string

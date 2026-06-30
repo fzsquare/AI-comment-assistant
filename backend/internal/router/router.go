@@ -2,6 +2,7 @@ package router
 
 import (
 	"os"
+	"strings"
 
 	"ppk/backend/internal/config"
 	adminHandler "ppk/backend/internal/handler/admin"
@@ -23,17 +24,7 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	r.Static("/uploads", cfg.UploadDir)
 
 	authService := &service.AuthService{DB: db, Config: cfg}
-
-	// 主生成器：有 agent 服务地址就走 Python 文案 agent，否则回退内置 Mock。
-	var generator service.ReviewGenerator = &service.MockReviewGenerator{}
-	if cfg.AgentServiceURL != "" {
-		generator = service.NewAgentReviewGenerator(cfg.AgentServiceURL, cfg.AgentMinGrade, cfg.AgentInternalToken)
-	}
-	reviewPoolService := &service.ReviewPoolService{
-		DB:        db,
-		Generator: generator,
-		Fallback:  &service.MockReviewGenerator{}, // 池空且 agent 不可用时即时兜底，避免白屏
-	}
+	reviewPoolService := buildReviewPoolService(cfg, db)
 
 	merchant := merchantHandler.NewHandler(db, cfg, authService, reviewPoolService)
 	admin := adminHandler.NewHandler(db, cfg, authService, reviewPoolService)
@@ -47,4 +38,15 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 	}
 
 	return r
+}
+
+func buildReviewPoolService(cfg config.Config, db *gorm.DB) *service.ReviewPoolService {
+	var generator service.ReviewGenerator = service.NewUnavailableReviewGenerator("AGENT_SERVICE_URL is required")
+	if strings.TrimSpace(cfg.AgentServiceURL) != "" {
+		generator = service.NewAgentReviewGenerator(cfg.AgentServiceURL, cfg.AgentMinGrade, cfg.AgentInternalToken)
+	}
+	return &service.ReviewPoolService{
+		DB:        db,
+		Generator: generator,
+	}
 }

@@ -16,9 +16,6 @@ import (
 type ReviewPoolService struct {
 	DB        *gorm.DB
 	Generator ReviewGenerator
-	// Fallback 在评价池为空且主生成器（agent）不可用时，即时产出一条兜底文案，
-	// 保证落地页不白屏。通常注入内置 MockReviewGenerator。
-	Fallback ReviewGenerator
 
 	refillMu       sync.Mutex
 	refillInFlight map[string]struct{}
@@ -195,41 +192,15 @@ func (s *ReviewPoolService) dispatchOne(storeID uint, platformCode string, tag s
 	return nil, gorm.ErrRecordNotFound
 }
 
-// ensureViaFallback 在池为空时用 Mock 即时补 1 条可发放文案，保证不白屏。
-func (s *ReviewPoolService) ensureViaFallback(store model.Store, platformCode string) error {
-	if s.Fallback == nil {
-		return errors.New("无兜底生成器")
-	}
-	store.PrimaryPlatformStyle = platformCode
-	var keywords []model.StoreKeyword
-	s.DB.Where("store_id = ?", store.ID).Find(&keywords)
-	// 只补 1 条：仅为不白屏兜底，避免把低质 Mock 文案大量混入池子
-	reviews, err := s.Fallback.Generate(store, keywords, 1)
-	if err != nil || len(reviews) == 0 {
-		return errors.New("兜底生成失败")
-	}
-	for i := range reviews {
-		reviews[i].StoreID = store.ID
-		reviews[i].PlatformStyle = platformCode
-		reviews[i].SourceType = "fallback"
-		reviews[i].GenerationBatchNo = "fallback_" + utils.RandomString(8)
-		reviews[i].Status = model.ReviewStatusAvailable
-	}
-	return s.DB.Create(&reviews).Error
-}
-
-// dispatchWithFallback 先正常取；池空则兜底补一条再取一次。
-func (s *ReviewPoolService) dispatchWithFallback(store model.Store, platformCode string, tag string) (*model.ReviewItem, error) {
+func (s *ReviewPoolService) dispatchAvailable(store model.Store, platformCode string, tag string) (*model.ReviewItem, error) {
 	review, err := s.dispatchOne(store.ID, platformCode, tag)
 	if err == nil {
 		return review, nil
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if fbErr := s.ensureViaFallback(store, platformCode); fbErr == nil {
-			return s.dispatchOne(store.ID, platformCode, tag)
-		}
+		return nil, errors.New("暂无可用评论，请先在商家后台使用 AI agent 生成评价")
 	}
-	return nil, errors.New("暂无推荐文案，请稍后再试")
+	return nil, err
 }
 
 func (s *ReviewPoolService) activeStoreByID(storeID uint) (*model.Store, error) {
@@ -290,7 +261,7 @@ func (s *ReviewPoolService) SwitchReview(uuid string, platformCode string, tag s
 		return nil, 0, err
 	}
 
-	review, err := s.dispatchWithFallback(*store, platformCode, tag)
+	review, err := s.dispatchAvailable(*store, platformCode, tag)
 	if err != nil {
 		return nil, 0, err
 	}

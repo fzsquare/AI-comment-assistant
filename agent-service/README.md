@@ -70,7 +70,8 @@ curl -X POST http://127.0.0.1:8090/generate-reviews \
   并放在 `content` 第一行，不带“标题：”前缀。
 - **入池阈值:** 本服务返回每条的 `score`/`grade`。Go backend 默认只保留
   `grade ∈ {S, A, B}`(即 score ≥ 70),C/D 丢弃；阈值可通过 `AGENT_MIN_GRADE` 调整。
-- 内置 mock 生成器只在评价池为空且 agent-service 不可用时兜底补 1 条,避免消费者落地页白屏。
+- 评论生成必须成功调用本服务；agent-service 不可用或未配置 LLM key 时，Go backend
+  会记录失败任务并返回错误，不会用 mock 文案兜底。
 
 ## 关键说明
 

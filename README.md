@@ -138,9 +138,9 @@ ppk/
   - 请求 `/generate-reviews` 时携带 `X-Agent-Internal-Token`
   - 默认只将 B 级及以上文案写入评价池
 
-- `review_generator_mock.go`
-  - 仅作为兜底生成器
-  - 当评价池为空且 agent-service 不可用时即时补 1 条，避免落地页白屏
+- `review_generator_unavailable.go`
+  - agent-service 未配置时返回明确错误
+  - 评论生成不再回退内置 mock；评价池为空时需要先用 agent-service 补池
 
 ### `internal/handler`
 HTTP 接口层，按角色拆分：
@@ -375,7 +375,7 @@ Pinia 状态管理，当前主要是：
 | `MYSQL_DSN` | MySQL 连接串，生产使用最小权限账号 | 本地开发 DSN |
 | `JWT_SECRET` | JWT 密钥，生产至少 32 字符 | 本地开发密钥 |
 | `ALLOWED_ORIGINS` | 允许访问 API 的前端 origin | 本地开发 origin |
-| `AGENT_SERVICE_URL` | backend 内部调用 agent-service 的地址 | `http://127.0.0.1:8090` |
+| `AGENT_SERVICE_URL` | backend 内部调用 agent-service 的地址；为空时评论生成直接失败，不使用 mock | `http://127.0.0.1:8090` |
 | `AGENT_INTERNAL_TOKEN` | backend 与 agent-service 共享的内部令牌 | 本地开发令牌 |
 
 建议启动时显式传入：
@@ -777,6 +777,7 @@ npm run dev -- --host 0.0.0.0 --port 5173
 - `frontend` 的 `npx vue-tsc -b --noEmit` 通过
 - `frontend` 已改为只通过 `VITE_API_BASE_URL` 访问 Go backend `/api`
 - 管理员后台已接入商家、门店、NFC 标签状态操作；商家后台已接入关键词、图片、平台入口与评价的删除/启停操作
+- 评论生成必须走 Go backend 调用内部 agent-service，不再使用后端内置 mock 或前端 mock 生成假评价
 - 消费者落地页已改为先选择平台，再按 `platformCode` 从平台隔离的评价池领取文案
 - 一键部署脚本会在启动后通过 `8989` 入口运行后台接口 smoke test
 - 当前工作区已移除被误提交的 `frontend/node_modules`、`frontend/dist` 与编译产物

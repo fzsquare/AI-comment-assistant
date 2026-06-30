@@ -227,6 +227,13 @@ function saveMockPlatformLink(storeId: number, platformCode: string, targetUrl?:
 
 // ---------------- 路由表 ----------------
 type Handler = (m: RegExpMatchArray, body: any) => unknown
+
+function mockFailure(status: number, message: string): never {
+  const err = new Error(message) as Error & { status?: number }
+  err.status = status
+  throw err
+}
+
 const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   // ----- 消费者落地页（重点）-----
   { method: 'GET', re: /\/public\/landing\/[^/]+\/init$/, handler: () => landingPayload() },
@@ -253,17 +260,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'GET', re: /\/merchant\/reviews$/, handler: () => merchantReviews },
   { method: 'POST', re: /\/merchant\/reviews$/, handler: (_m, b) => { const it = { id: nextId(), platformStyle: b.platformCode || 'xiaohongshu', content: b.content, tags: '', sourceType: 'manual', status: b.status || 'available' }; merchantReviews.unshift(it); return it } },
   { method: 'DELETE', re: /\/merchant\/reviews\/(\d+)$/, handler: (m) => { merchantReviews = merchantReviews.filter((r) => r.id !== Number(m[1])); return { deleted: true } } },
-  { method: 'POST', re: /\/merchant\/reviews\/generate$/, handler: (_m, b) => {
-      const n = b.targetCount || 10
-      const plat = b.platformCode || 'xiaohongshu'
-      const pool = reviewPool[plat] || reviewPool.dianping
-      // 生成的评价进“评论列表”，便于调试
-      for (let i = 0; i < Math.min(n, 3); i++) {
-        merchantReviews.unshift({ id: nextId(), platformStyle: plat, content: pool[i % pool.length].replace(/\{\{tag\}\}/g, '招牌菜'), tags: '招牌菜', sourceType: 'ai', status: 'available' })
-      }
-      tasks.unshift({ id: nextId(), storeId: 1, platformStyle: plat, triggerType: 'manual', targetCount: n, successCount: n, failedCount: 0, status: 'success' })
-      return { generated: n }
-    } },
+  { method: 'POST', re: /\/merchant\/reviews\/generate$/, handler: () => mockFailure(503, 'Mock 模式不生成评价，请连接真实后端和 agent-service') },
   { method: 'GET', re: /\/merchant\/review-generation-tasks$/, handler: () => tasks },
 
   // ----- 管理端 -----
@@ -340,13 +337,21 @@ export const mockAdapter: AxiosAdapter = async (config) => {
     if (route.method !== method) continue
     const m = url.match(route.re)
     if (m) {
-      return {
-        data: envelope(route.handler(m, body)),
-        status: 200,
-        statusText: 'OK',
-        headers: {},
-        config
-      } as AxiosResponse
+      try {
+        return {
+          data: envelope(route.handler(m, body)),
+          status: 200,
+          statusText: 'OK',
+          headers: {},
+          config
+        } as AxiosResponse
+      } catch (err: any) {
+        const status = err?.status || 500
+        return Promise.reject({
+          response: { status, data: { code: status, message: err?.message || 'Mock 请求失败' } },
+          config
+        })
+      }
     }
   }
 
