@@ -61,10 +61,11 @@ type agentFeedback struct {
 }
 
 type agentGenerationPreferences struct {
-	FocusKeywords    []string `json:"focus_keywords,omitempty"`
-	StyleCodes       []string `json:"style_codes,omitempty"`
-	ReferenceReviews []string `json:"reference_reviews,omitempty"`
-	LengthVariance   string   `json:"length_variance,omitempty"`
+	FocusKeywords       []string `json:"focus_keywords,omitempty"`
+	StyleCodes          []string `json:"style_codes,omitempty"`
+	DiversityDimensions []string `json:"diversity_dimensions,omitempty"`
+	ReferenceReviews    []string `json:"reference_reviews,omitempty"`
+	LengthVariance      string   `json:"length_variance,omitempty"`
 }
 
 type agentItem struct {
@@ -186,9 +187,10 @@ func agentPreferencesFrom(preferences GenerationPreferences) *agentGenerationPre
 		return nil
 	}
 	return &agentGenerationPreferences{
-		FocusKeywords:    preferences.FocusKeywords,
-		StyleCodes:       preferences.StyleCodes,
-		ReferenceReviews: preferences.ReferenceReviews,
-		LengthVariance:   preferences.LengthVariance,
+		FocusKeywords:       preferences.FocusKeywords,
+		StyleCodes:          preferences.StyleCodes,
+		DiversityDimensions: preferences.DiversityDimensions,
+		ReferenceReviews:    preferences.ReferenceReviews,
+		LengthVariance:      preferences.LengthVariance,
 	}
 }

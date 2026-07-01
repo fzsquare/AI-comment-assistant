@@ -12,10 +12,11 @@ type ReviewGenerationFeedback struct {
 }
 
 type GenerationPreferences struct {
-	FocusKeywords    []string
-	StyleCodes       []string
-	ReferenceReviews []string
-	LengthVariance   string
+	FocusKeywords       []string
+	StyleCodes          []string
+	DiversityDimensions []string
+	ReferenceReviews    []string
+	LengthVariance      string
 }
 
 func (p GenerationPreferences) WithDefaults() GenerationPreferences {
@@ -26,7 +27,11 @@ func (p GenerationPreferences) WithDefaults() GenerationPreferences {
 }
 
 func (p GenerationPreferences) HasAnyInput() bool {
-	return len(p.FocusKeywords) > 0 || len(p.StyleCodes) > 0 || len(p.ReferenceReviews) > 0 || p.LengthVariance != ""
+	return len(p.FocusKeywords) > 0 ||
+		len(p.StyleCodes) > 0 ||
+		len(p.DiversityDimensions) > 0 ||
+		len(p.ReferenceReviews) > 0 ||
+		p.LengthVariance != ""
 }
 
 type ReviewGenerationContext struct {

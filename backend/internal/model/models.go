@@ -179,14 +179,15 @@ type ReviewGenerationTask struct {
 }
 
 type StoreGenerationPreference struct {
-	ID               uint      `gorm:"primaryKey" json:"id"`
-	StoreID          uint      `gorm:"uniqueIndex;not null" json:"storeId"`
-	FocusKeywords    string    `gorm:"type:json;not null" json:"-"`
-	StyleCodes       string    `gorm:"type:json;not null" json:"-"`
-	ReferenceReviews string    `gorm:"type:json;not null" json:"-"`
-	LengthVariance   string    `gorm:"size:32;not null;default:'wide'" json:"lengthVariance"`
-	CreatedAt        time.Time `json:"createdAt"`
-	UpdatedAt        time.Time `json:"updatedAt"`
+	ID                  uint      `gorm:"primaryKey" json:"id"`
+	StoreID             uint      `gorm:"uniqueIndex;not null" json:"storeId"`
+	FocusKeywords       string    `gorm:"type:json;not null" json:"-"`
+	StyleCodes          string    `gorm:"type:json;not null" json:"-"`
+	DiversityDimensions string    `gorm:"type:json;not null" json:"-"`
+	ReferenceReviews    string    `gorm:"type:json;not null" json:"-"`
+	LengthVariance      string    `gorm:"size:32;not null;default:'wide'" json:"lengthVariance"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
 type NFCTag struct {

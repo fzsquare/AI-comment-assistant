@@ -179,6 +179,7 @@ CREATE TABLE IF NOT EXISTS store_generation_preferences (
   store_id BIGINT UNSIGNED NOT NULL,
   focus_keywords JSON NOT NULL,
   style_codes JSON NOT NULL,
+  diversity_dimensions JSON NOT NULL,
   reference_reviews JSON NOT NULL,
   length_variance VARCHAR(32) NOT NULL DEFAULT 'wide',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

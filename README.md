@@ -11,6 +11,7 @@
 - 前端应用：Vue 3 + Vite + Pinia + Axios
 - 数据库脚本：MySQL schema / seed
 - 部署与运维文档：`README.md`、`README-DEPLOY.md`、`agent-service/README.md`
+- 产品设计文档：`docs/merchant-review-generation-optimization.md`
 
 云端访问边界：
 
@@ -65,9 +66,11 @@ ppk/
 │   ├── vite.config.ts
 │   └── tsconfig.json
 ├── database/                   # MySQL 初始化脚本
+│   ├── migrations/             # 增量迁移脚本
 │   ├── schema.sql
-│   ├── seed.sql
-│   └── migration-2026-platform-review-pool.sql
+│   └── seed.sql
+├── docs/                       # 产品与技术设计文档
+│   └── merchant-review-generation-optimization.md
 ├── agent-service/              # 内部 Python agent 服务，不直接暴露给浏览器
 └── README.md
 ```

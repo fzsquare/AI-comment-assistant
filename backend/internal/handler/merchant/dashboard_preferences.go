@@ -186,19 +186,21 @@ func formatDate(t time.Time) string {
 }
 
 type generationPreferenceRequest struct {
-	FocusKeywords    []string `json:"focusKeywords"`
-	StyleCodes       []string `json:"styleCodes"`
-	ReferenceReviews []string `json:"referenceReviews"`
-	LengthVariance   string   `json:"lengthVariance"`
+	FocusKeywords       []string `json:"focusKeywords"`
+	StyleCodes          []string `json:"styleCodes"`
+	DiversityDimensions []string `json:"diversityDimensions"`
+	ReferenceReviews    []string `json:"referenceReviews"`
+	LengthVariance      string   `json:"lengthVariance"`
 }
 
 type generationPreferenceResponse struct {
-	Configured       bool     `json:"configured"`
-	FocusKeywords    []string `json:"focusKeywords"`
-	StyleCodes       []string `json:"styleCodes"`
-	ReferenceReviews []string `json:"referenceReviews"`
-	LengthVariance   string   `json:"lengthVariance"`
-	UpdatedAt        string   `json:"updatedAt,omitempty"`
+	Configured          bool     `json:"configured"`
+	FocusKeywords       []string `json:"focusKeywords"`
+	StyleCodes          []string `json:"styleCodes"`
+	DiversityDimensions []string `json:"diversityDimensions"`
+	ReferenceReviews    []string `json:"referenceReviews"`
+	LengthVariance      string   `json:"lengthVariance"`
+	UpdatedAt           string   `json:"updatedAt,omitempty"`
 }
 
 func (h *Handler) getGenerationPreferences(c *gin.Context) {
@@ -233,17 +235,19 @@ func (h *Handler) saveGenerationPreferences(c *gin.Context) {
 	}
 	focusKeywords, _ := json.Marshal(prefs.FocusKeywords)
 	styleCodes, _ := json.Marshal(prefs.StyleCodes)
+	diversityDimensions, _ := json.Marshal(prefs.DiversityDimensions)
 	referenceReviews, _ := json.Marshal(prefs.ReferenceReviews)
 
 	var row model.StoreGenerationPreference
 	err = h.DB.Where("store_id = ?", store.ID).First(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = model.StoreGenerationPreference{
-			StoreID:          store.ID,
-			FocusKeywords:    string(focusKeywords),
-			StyleCodes:       string(styleCodes),
-			ReferenceReviews: string(referenceReviews),
-			LengthVariance:   prefs.LengthVariance,
+			StoreID:             store.ID,
+			FocusKeywords:       string(focusKeywords),
+			StyleCodes:          string(styleCodes),
+			DiversityDimensions: string(diversityDimensions),
+			ReferenceReviews:    string(referenceReviews),
+			LengthVariance:      prefs.LengthVariance,
 		}
 		if err := h.DB.Create(&row).Error; err != nil {
 			response.Error(c, http.StatusInternalServerError, "生成方向保存失败")
@@ -258,6 +262,7 @@ func (h *Handler) saveGenerationPreferences(c *gin.Context) {
 	}
 	row.FocusKeywords = string(focusKeywords)
 	row.StyleCodes = string(styleCodes)
+	row.DiversityDimensions = string(diversityDimensions)
 	row.ReferenceReviews = string(referenceReviews)
 	row.LengthVariance = prefs.LengthVariance
 	if err := h.DB.Save(&row).Error; err != nil {
@@ -272,10 +277,11 @@ func (h *Handler) loadGenerationPreferenceResponse(storeID uint) (generationPref
 	if err := h.DB.Where("store_id = ?", storeID).First(&row).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return generationPreferenceResponse{
-				Configured:     false,
-				FocusKeywords:  []string{},
-				StyleCodes:     []string{"natural"},
-				LengthVariance: "wide",
+				Configured:          false,
+				FocusKeywords:       []string{},
+				StyleCodes:          []string{"natural"},
+				DiversityDimensions: []string{"customer_identity"},
+				LengthVariance:      "wide",
 			}, nil
 		}
 		return generationPreferenceResponse{}, err
@@ -284,13 +290,18 @@ func (h *Handler) loadGenerationPreferenceResponse(storeID uint) (generationPref
 }
 
 func preferenceResponseFromRow(row model.StoreGenerationPreference, configured bool) generationPreferenceResponse {
+	diversityDimensions := decodePreferenceList(row.DiversityDimensions)
+	if len(diversityDimensions) == 0 {
+		diversityDimensions = []string{"customer_identity"}
+	}
 	return generationPreferenceResponse{
-		Configured:       configured,
-		FocusKeywords:    decodePreferenceList(row.FocusKeywords),
-		StyleCodes:       decodePreferenceList(row.StyleCodes),
-		ReferenceReviews: decodePreferenceList(row.ReferenceReviews),
-		LengthVariance:   service.GenerationPreferences{LengthVariance: row.LengthVariance}.WithDefaults().LengthVariance,
-		UpdatedAt:        row.UpdatedAt.Format(time.RFC3339),
+		Configured:          configured,
+		FocusKeywords:       decodePreferenceList(row.FocusKeywords),
+		StyleCodes:          decodePreferenceList(row.StyleCodes),
+		DiversityDimensions: diversityDimensions,
+		ReferenceReviews:    decodePreferenceList(row.ReferenceReviews),
+		LengthVariance:      service.GenerationPreferences{LengthVariance: row.LengthVariance}.WithDefaults().LengthVariance,
+		UpdatedAt:           row.UpdatedAt.Format(time.RFC3339),
 	}
 }
 
@@ -300,6 +311,10 @@ func normalizeGenerationPreferenceRequest(req generationPreferenceRequest) (serv
 		return service.GenerationPreferences{}, err
 	}
 	styles, err := normalizeStyleCodes(req.StyleCodes)
+	if err != nil {
+		return service.GenerationPreferences{}, err
+	}
+	diversityDimensions, err := normalizeDiversityDimensions(req.DiversityDimensions)
 	if err != nil {
 		return service.GenerationPreferences{}, err
 	}
@@ -315,10 +330,11 @@ func normalizeGenerationPreferenceRequest(req generationPreferenceRequest) (serv
 		return service.GenerationPreferences{}, errors.New("字数波动参数不支持")
 	}
 	return service.GenerationPreferences{
-		FocusKeywords:    focus,
-		StyleCodes:       styles,
-		ReferenceReviews: references,
-		LengthVariance:   lengthVariance,
+		FocusKeywords:       focus,
+		StyleCodes:          styles,
+		DiversityDimensions: diversityDimensions,
+		ReferenceReviews:    references,
+		LengthVariance:      lengthVariance,
 	}, nil
 }
 
@@ -343,6 +359,28 @@ func normalizeStyleCodes(values []string) ([]string, error) {
 		}
 	}
 	return styles, nil
+}
+
+func normalizeDiversityDimensions(values []string) ([]string, error) {
+	allowed := map[string]bool{
+		"customer_identity":    true,
+		"dining_scene":         true,
+		"content_angle":        true,
+		"expression_structure": true,
+	}
+	dimensions, err := normalizeLimitedList(values, 4, 40, "多样化方向")
+	if err != nil {
+		return nil, err
+	}
+	if len(dimensions) == 0 {
+		return []string{"customer_identity"}, nil
+	}
+	for _, dimension := range dimensions {
+		if !allowed[dimension] {
+			return nil, errors.New("多样化方向不支持")
+		}
+	}
+	return dimensions, nil
 }
 
 func normalizeLimitedList(values []string, maxItems int, maxRunes int, label string) ([]string, error) {

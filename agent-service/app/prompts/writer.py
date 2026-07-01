@@ -11,6 +11,25 @@ from ..constraints.personas import IDENTITY_ELEMENTS, persona_block
 from ..constraints.platforms.base import PlatformSpec
 from ..schemas import FeedbackExamples, GenerationPreferences, StoreContext
 
+_DIVERSITY_DIMENSIONS = {
+    "customer_identity": (
+        "顾客身份",
+        ["新客第一次来尝鲜", "老顾客回访", "附近上班族", "朋友聚餐同行者", "情侣约会的一方", "家庭聚餐成员", "外地游客或顺路打卡"],
+    ),
+    "dining_scene": (
+        "到店场景",
+        ["工作日午餐", "下班后晚餐", "周末小聚", "临时路过", "朋友约饭", "家庭聚餐", "排队后入座"],
+    ),
+    "content_angle": (
+        "内容角度",
+        ["先写招牌菜记忆点", "先写服务细节", "先写环境感受", "先写性价比", "先写出餐速度", "先写复购理由", "先写小缺点再转整体满意"],
+    ),
+    "expression_structure": (
+        "表达结构",
+        ["从到店原因开头", "从第一口感受开头", "从同行人反应开头", "从和预期对比开头", "从下次还想点什么结尾", "用两段短评结构", "用一句短结论收尾"],
+    ),
+}
+
 
 def build_writer_system(spec: PlatformSpec, satisfaction: str, industry: IndustrySpec = RESTAURANT) -> str:
     # 行业有自己的范例就用行业的（足疗/理发/美甲），否则回退平台自带的餐饮范例
@@ -123,6 +142,9 @@ def _generation_preference_note(
         parts.append("本批重点想让顾客自然提到：" + "、".join(preferences.focus_keywords[:8]))
     if preferences.style_codes:
         parts.append("本批语气方向：" + "、".join(_style_label(code) for code in preferences.style_codes[:3]))
+    diversity_hint = _diversity_hint(preferences.diversity_dimensions, index)
+    if diversity_hint:
+        parts.append(diversity_hint)
     if preferences.reference_reviews:
         parts.append("商家提供的真实参考评论（学习句子节奏、细节密度和口语程度，严禁照抄整句）：")
         parts.extend(f"- {_clip_feedback(item)}" for item in preferences.reference_reviews[:5] if item.strip())
@@ -140,6 +162,25 @@ def _style_label(code: str) -> str:
         "regular_customer": "像老顾客",
     }
     return labels.get(code, code)
+
+
+def _diversity_hint(dimensions: List[str], index: int) -> str:
+    selected = []
+    seen = set()
+    for code in dimensions[:4]:
+        if code in _DIVERSITY_DIMENSIONS and code not in seen:
+            selected.append(code)
+            seen.add(code)
+    if not selected:
+        return ""
+
+    lines = ["本条多样化视角（商家只选大方向，具体小方向由系统分配，避免同批同质化）："]
+    for offset, code in enumerate(selected):
+        label, options = _DIVERSITY_DIMENSIONS[code]
+        value = options[(index + offset * 3) % len(options)]
+        lines.append(f"- {label}：{value}")
+    lines.append("这些是写作视角，不要机械自我介绍；如与真实门店信息冲突，以门店信息为准。")
+    return "\n".join(lines)
 
 
 def _length_hint(spec: PlatformSpec, index: int) -> str:

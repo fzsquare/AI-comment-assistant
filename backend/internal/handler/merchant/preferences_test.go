@@ -4,10 +4,11 @@ import "testing"
 
 func TestNormalizeGenerationPreferencesDefaultsAndDedupes(t *testing.T) {
 	prefs, err := normalizeGenerationPreferenceRequest(generationPreferenceRequest{
-		FocusKeywords:    []string{" 香辣蟹 ", "服务热情", "香辣蟹", ""},
-		StyleCodes:       []string{},
-		ReferenceReviews: []string{"  蟹很入味，服务员会主动帮忙换盘。  "},
-		LengthVariance:   "",
+		FocusKeywords:       []string{" 香辣蟹 ", "服务热情", "香辣蟹", ""},
+		StyleCodes:          []string{},
+		DiversityDimensions: []string{" customer_identity ", "content_angle", "customer_identity"},
+		ReferenceReviews:    []string{"  蟹很入味，服务员会主动帮忙换盘。  "},
+		LengthVariance:      "",
 	})
 	if err != nil {
 		t.Fatalf("normalizeGenerationPreferenceRequest returned error: %v", err)
@@ -17,6 +18,9 @@ func TestNormalizeGenerationPreferencesDefaultsAndDedupes(t *testing.T) {
 	}
 	if got := prefs.StyleCodes; len(got) != 1 || got[0] != "natural" {
 		t.Fatalf("style codes got %#v, want default natural", got)
+	}
+	if got := prefs.DiversityDimensions; len(got) != 2 || got[0] != "customer_identity" || got[1] != "content_angle" {
+		t.Fatalf("diversity dimensions got %#v", got)
 	}
 	if got := prefs.ReferenceReviews; len(got) != 1 || got[0] != "蟹很入味，服务员会主动帮忙换盘。" {
 		t.Fatalf("reference reviews got %#v", got)
@@ -48,6 +52,14 @@ func TestNormalizeGenerationPreferencesRejectsTooManyAndTooLong(t *testing.T) {
 	}
 	if _, err := normalizeGenerationPreferenceRequest(unknownStyle); err == nil {
 		t.Fatal("expected unknown style code to be rejected")
+	}
+
+	unknownDimension := generationPreferenceRequest{
+		StyleCodes:          []string{"natural"},
+		DiversityDimensions: []string{"fake_identity"},
+	}
+	if _, err := normalizeGenerationPreferenceRequest(unknownDimension); err == nil {
+		t.Fatal("expected unknown diversity dimension to be rejected")
 	}
 }
 

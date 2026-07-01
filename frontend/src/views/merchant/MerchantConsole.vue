@@ -36,6 +36,7 @@ const preferenceForm = reactive<GenerationPreferences>({
   configured: false,
   focusKeywords: [],
   styleCodes: ['natural'],
+  diversityDimensions: ['customer_identity'],
   referenceReviews: [''],
   lengthVariance: 'wide'
 })
@@ -59,7 +60,15 @@ const styleOptions = [
   { code: 'regular_customer', label: '像老顾客' }
 ]
 
+const diversityOptions = [
+  { code: 'customer_identity', label: '顾客身份', sample: '新客 / 老客 / 上班族' },
+  { code: 'dining_scene', label: '到店场景', sample: '午餐 / 聚餐 / 路过' },
+  { code: 'content_angle', label: '内容角度', sample: '菜品 / 服务 / 环境' },
+  { code: 'expression_structure', label: '表达结构', sample: '开头 / 转折 / 收尾' }
+]
+
 const styleLabels = computed(() => Object.fromEntries(styleOptions.map((item) => [item.code, item.label])))
+const diversityLabels = computed(() => Object.fromEntries(diversityOptions.map((item) => [item.code, item.label])))
 const availableSuggestions = computed(() =>
   suggestedTags.value.filter((t) => !keywords.value.some((k) => k.keyword === t))
 )
@@ -70,10 +79,13 @@ const preferenceKeywordOptions = computed(() => {
 const selectedStyleLabels = computed(() =>
   preferenceForm.styleCodes.map((code) => styleLabels.value[code] || code).join('、') || '自然随手写'
 )
+const selectedDiversityLabels = computed(() =>
+  preferenceForm.diversityDimensions.map((code) => diversityLabels.value[code] || code).join('、') || '顾客身份'
+)
 const preferenceSummary = computed(() => {
   const focus = preferenceForm.focusKeywords.length ? preferenceForm.focusKeywords.join('、') : '未设置重点'
   const refs = cleanReferenceReviews().length
-  return `重点：${focus}；语气：${selectedStyleLabels.value}；参考评论 ${refs} 条`
+  return `重点：${focus}；方向：${selectedDiversityLabels.value}；语气：${selectedStyleLabels.value}；参考评论 ${refs} 条`
 })
 const storeInitial = computed(() => (storeForm.storeName || '店').trim().slice(0, 1))
 const trendSeries = computed(() => {
@@ -302,6 +314,7 @@ function applyPreferences(data: GenerationPreferences) {
   preferenceForm.configured = !!data.configured
   preferenceForm.focusKeywords = [...(data.focusKeywords || [])]
   preferenceForm.styleCodes = data.styleCodes?.length ? [...data.styleCodes] : ['natural']
+  preferenceForm.diversityDimensions = data.diversityDimensions?.length ? [...data.diversityDimensions] : ['customer_identity']
   preferenceForm.referenceReviews = data.referenceReviews?.length ? [...data.referenceReviews] : ['']
   preferenceForm.lengthVariance = data.lengthVariance || 'wide'
   preferenceForm.updatedAt = data.updatedAt
@@ -311,6 +324,7 @@ function preferencePayload(): GenerationPreferences {
   return {
     focusKeywords: preferenceForm.focusKeywords.map((v) => v.trim()).filter(Boolean).slice(0, 8),
     styleCodes: preferenceForm.styleCodes.length ? preferenceForm.styleCodes.slice(0, 3) : ['natural'],
+    diversityDimensions: preferenceForm.diversityDimensions.length ? preferenceForm.diversityDimensions.slice(0, 4) : ['customer_identity'],
     referenceReviews: cleanReferenceReviews(),
     lengthVariance: 'wide'
   }
@@ -350,6 +364,20 @@ function toggleStyle(code: string) {
     return
   }
   preferenceForm.styleCodes.push(code)
+}
+
+function toggleDiversityDimension(code: string) {
+  const i = preferenceForm.diversityDimensions.indexOf(code)
+  if (i >= 0) {
+    if (preferenceForm.diversityDimensions.length === 1) return
+    preferenceForm.diversityDimensions.splice(i, 1)
+    return
+  }
+  if (preferenceForm.diversityDimensions.length >= 4) {
+    error.value = '多样化方向最多选择 4 个'
+    return
+  }
+  preferenceForm.diversityDimensions.push(code)
 }
 
 function addReferenceReview() {
@@ -546,6 +574,24 @@ onMounted(loadAll)
           <div class="row action-row compact-row">
             <input id="custom-focus" v-model="customFocusKeyword" maxlength="40" placeholder="新增重点，如 上菜快" />
             <button type="button" class="secondary" @click="addCustomFocusKeyword">添加重点</button>
+          </div>
+        </div>
+
+        <div class="form-block">
+          <p class="field-label">多样化方向</p>
+          <div class="tag-grid dimension-grid">
+            <button
+              v-for="item in diversityOptions"
+              :key="item.code"
+              type="button"
+              class="select-chip dimension-chip"
+              :class="{ selected: preferenceForm.diversityDimensions.includes(item.code) }"
+              :aria-pressed="preferenceForm.diversityDimensions.includes(item.code)"
+              @click="toggleDiversityDimension(item.code)"
+            >
+              <span>{{ item.label }}</span>
+              <small>{{ item.sample }}</small>
+            </button>
           </div>
         </div>
 
@@ -1006,6 +1052,27 @@ onMounted(loadAll)
   color: var(--primary-strong);
   font-weight: 800;
 }
+.dimension-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.dimension-chip {
+  align-items: flex-start;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  min-height: 58px;
+  text-align: left;
+}
+.dimension-chip small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.dimension-chip.selected small {
+  color: #1d4ed8;
+}
 .compact-row {
   margin-top: 10px;
 }
@@ -1218,6 +1285,9 @@ onMounted(loadAll)
   .select-chip {
     flex: 1 1 calc(50% - 8px);
     min-height: 44px;
+  }
+  .dimension-grid {
+    grid-template-columns: 1fr;
   }
   .link-actions {
     display: grid;

@@ -70,6 +70,7 @@ let generationPreferences = {
   configured: true,
   focusKeywords: ['招牌椒麻鸡', '服务热情'],
   styleCodes: ['natural', 'detail_rich'],
+  diversityDimensions: ['customer_identity', 'content_angle'],
   referenceReviews: ['椒麻鸡麻香挺自然，服务员会主动加水。'],
   lengthVariance: 'wide',
   updatedAt: new Date().toISOString()
@@ -304,7 +305,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'POST', re: /\/merchant\/reviews$/, handler: (_m, b) => { const it = { id: nextId(), platformStyle: b.platformCode || 'xiaohongshu', content: b.content, tags: '', sourceType: 'manual', status: b.status || 'available' }; merchantReviews.unshift(it); return it } },
   { method: 'DELETE', re: /\/merchant\/reviews\/(\d+)$/, handler: (m) => { merchantReviews = merchantReviews.filter((r) => r.id !== Number(m[1])); return { deleted: true } } },
   { method: 'GET', re: /\/merchant\/review-generation-preferences$/, handler: () => generationPreferences },
-  { method: 'PUT', re: /\/merchant\/review-generation-preferences$/, handler: (_m, b) => { generationPreferences = { configured: true, focusKeywords: b.focusKeywords || [], styleCodes: b.styleCodes || ['natural'], referenceReviews: b.referenceReviews || [], lengthVariance: b.lengthVariance || 'wide', updatedAt: new Date().toISOString() }; return generationPreferences } },
+  { method: 'PUT', re: /\/merchant\/review-generation-preferences$/, handler: (_m, b) => { generationPreferences = { configured: true, focusKeywords: b.focusKeywords || [], styleCodes: b.styleCodes || ['natural'], diversityDimensions: b.diversityDimensions || ['customer_identity'], referenceReviews: b.referenceReviews || [], lengthVariance: b.lengthVariance || 'wide', updatedAt: new Date().toISOString() }; return generationPreferences } },
   { method: 'POST', re: /\/merchant\/reviews\/generate$/, handler: () => mockFailure(503, 'Mock 模式不生成评价，请连接真实后端和 agent-service') },
   { method: 'GET', re: /\/merchant\/review-generation-tasks$/, handler: () => tasks },
 

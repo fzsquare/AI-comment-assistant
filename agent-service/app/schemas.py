@@ -9,6 +9,7 @@ PlatformCode = Literal["dianping", "meituan", "xiaohongshu", "douyin"]
 SatisfactionLevel = Literal["非常满意", "比较满意", "一般", "有点失望", "非常失望"]
 Grade = Literal["", "S", "A", "B", "C", "D"]
 StyleCode = Literal["natural", "detail_rich", "young_casual", "restrained", "regular_customer"]
+DiversityDimension = Literal["customer_identity", "dining_scene", "content_angle", "expression_structure"]
 LengthVariance = Literal["default", "wide"]
 Keyword = Annotated[str, Field(min_length=1, max_length=40)]
 Tag = Annotated[str, Field(min_length=1, max_length=40)]
@@ -31,6 +32,7 @@ class FeedbackExamples(BaseModel):
 class GenerationPreferences(BaseModel):
     focus_keywords: List[Keyword] = Field(default_factory=list, max_length=8)
     style_codes: List[StyleCode] = Field(default_factory=list, max_length=3)
+    diversity_dimensions: List[DiversityDimension] = Field(default_factory=lambda: ["customer_identity"], max_length=4)
     reference_reviews: List[ReferenceReview] = Field(default_factory=list, max_length=5)
     length_variance: LengthVariance = "wide"
 

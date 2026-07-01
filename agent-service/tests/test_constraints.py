@@ -270,12 +270,14 @@ def test_generate_request_accepts_generation_preferences():
         generation_preferences={
             "focus_keywords": ["香辣蟹", "服务热情"],
             "style_codes": ["natural", "detail_rich"],
+            "diversity_dimensions": ["customer_identity", "content_angle"],
             "reference_reviews": ["蟹很入味，服务员会主动帮忙换盘。"],
             "length_variance": "wide",
         },
     )
     assert req.generation_preferences.focus_keywords == ["香辣蟹", "服务热情"]
     assert req.generation_preferences.style_codes == ["natural", "detail_rich"]
+    assert req.generation_preferences.diversity_dimensions == ["customer_identity", "content_angle"]
     assert req.generation_preferences.length_variance == "wide"
 
 
@@ -293,6 +295,7 @@ def test_writer_prompt_uses_generation_preferences():
         generation_preferences=GenerationPreferences(
             focus_keywords=["香辣蟹", "服务热情"],
             style_codes=["natural", "detail_rich"],
+            diversity_dimensions=["customer_identity"],
             reference_reviews=["蟹很入味，服务员会主动帮忙换盘。"],
             length_variance="wide",
         ),
@@ -300,6 +303,8 @@ def test_writer_prompt_uses_generation_preferences():
     assert "商家生成方向" in user
     assert "香辣蟹、服务热情" in user
     assert "自然随手写、细节丰富" in user
+    assert "本条多样化视角" in user
+    assert "顾客身份：附近上班族" in user
     assert "蟹很入味，服务员会主动帮忙换盘。" in user
     assert "本条字数目标" in user
 

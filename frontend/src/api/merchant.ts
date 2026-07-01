@@ -28,6 +28,7 @@ export type GenerationPreferences = {
   configured?: boolean
   focusKeywords: string[]
   styleCodes: string[]
+  diversityDimensions: string[]
   referenceReviews: string[]
   lengthVariance: string
   updatedAt?: string

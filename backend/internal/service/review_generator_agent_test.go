@@ -141,10 +141,11 @@ func TestAgentReviewGeneratorSendsGenerationPreferences(t *testing.T) {
 				Accepted: []string{"接受样本：服务员会主动换盘。"},
 			},
 			Preferences: GenerationPreferences{
-				FocusKeywords:    []string{"香辣蟹", "服务热情"},
-				StyleCodes:       []string{"natural", "detail_rich"},
-				ReferenceReviews: []string{"蟹很入味，服务员会主动帮忙换盘。"},
-				LengthVariance:   "wide",
+				FocusKeywords:       []string{"香辣蟹", "服务热情"},
+				StyleCodes:          []string{"natural", "detail_rich"},
+				DiversityDimensions: []string{"customer_identity", "content_angle"},
+				ReferenceReviews:    []string{"蟹很入味，服务员会主动帮忙换盘。"},
+				LengthVariance:      "wide",
 			},
 		},
 		1,
@@ -160,6 +161,9 @@ func TestAgentReviewGeneratorSendsGenerationPreferences(t *testing.T) {
 	}
 	if got := gotPayload.GenerationPreferences.StyleCodes; len(got) != 2 || got[0] != "natural" || got[1] != "detail_rich" {
 		t.Fatalf("style codes got %#v", got)
+	}
+	if got := gotPayload.GenerationPreferences.DiversityDimensions; len(got) != 2 || got[0] != "customer_identity" || got[1] != "content_angle" {
+		t.Fatalf("diversity dimensions got %#v", got)
 	}
 	if gotPayload.GenerationPreferences.LengthVariance != "wide" {
 		t.Fatalf("length variance got %q, want wide", gotPayload.GenerationPreferences.LengthVariance)
