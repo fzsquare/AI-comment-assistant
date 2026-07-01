@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { publicApi } from '../../api/public'
 import { openPlatform } from '../../utils/deeplink'
@@ -28,6 +28,13 @@ const selectedPlatform = ref<LandingData['platformLinks'][number] | null>(null)
 // 顾客可在发布前编辑成自己的话
 const editedContent = ref('')
 const acceptedReviewIds = ref<number[]>([])
+
+function platformDisplayName(link?: LandingData['platformLinks'][number] | null) {
+  return link?.platformName || link?.buttonText || '平台'
+}
+
+const platformActionLabel = computed(() => `复制并打开${platformDisplayName(selectedPlatform.value)}`)
+const tagSummaryLabel = computed(() => selectedTag.value ? `已按“${selectedTag.value}”调整` : '可选：按这次体验换个角度')
 
 async function trackEvent(payloadData: Record<string, unknown>) {
   try {
@@ -138,7 +145,7 @@ async function copyReview() {
       platformCode: selectedPlatform.value?.platformCode,
       editedContent: text
     })
-    alert('已复制，可直接去平台发布')
+    alert('已复制，可以粘贴到平台里再改。')
   } else {
     alert('复制失败，请手动长按选中文案复制')
   }
@@ -148,7 +155,7 @@ async function jump(link: { platformCode: string; targetUrl: string; backupUrl?:
   const text = editedContent.value.trim()
   if (!payload.value || !payload.value.review || !text) return
   if (!(await copyToClipboard(text))) {
-    alert('文案未自动复制，请手动复制后发布')
+    alert('文案未自动复制，请长按文案手动复制')
   }
   await trackEvent({
     sessionId: payload.value.sessionId,
@@ -191,12 +198,12 @@ onMounted(load)
     <template v-else-if="payload">
       <header class="store-head">
         <h1 class="store-name">{{ payload.storeName }}</h1>
-        <p class="sub">碰一碰，几秒生成一条你的真实评价，可改成自己的话再发</p>
+        <p class="sub">系统先帮你整理一版评价草稿，你可以改成自己的话</p>
       </header>
 
       <!-- 步骤 1：选平台 -->
       <section class="card">
-        <h2 class="step"><span class="no">1</span>选择要发布的平台</h2>
+        <h2 class="step"><span class="no">1</span>选择你想评价的平台</h2>
         <div v-if="payload.platformLinks.length" class="choice-grid">
           <button
             v-for="link in payload.platformLinks"
@@ -211,39 +218,44 @@ onMounted(load)
         <p v-else class="muted">当前门店还没有配置可用平台，请联系商家。</p>
       </section>
 
-      <!-- 步骤 2 + 3：选体验 + 文案 -->
-      <section class="card" v-if="selectedPlatform && payload.review">
-        <h2 class="step"><span class="no">2</span>你点了什么 / 体验如何</h2>
-        <div v-if="payload.keywords && payload.keywords.length" class="chips">
-          <button
-            v-for="kw in payload.keywords"
-            :key="kw.id"
-            class="chip"
-            :class="{ active: selectedTag === kw.keyword }"
-            :disabled="switching"
-            :aria-pressed="selectedTag === kw.keyword"
-            @click="pickByTag(kw.keyword)"
-          >{{ kw.keyword }}</button>
+      <!-- 步骤 2：直接给出可编辑文案，体验标签折叠为可选项 -->
+      <section class="card review-card" v-if="selectedPlatform && payload.review">
+        <div class="review-heading">
+          <h2 class="step"><span class="no">2</span>评价草稿</h2>
+          <span class="platform-badge">{{ platformDisplayName(selectedPlatform) }}</span>
         </div>
-
-        <h2 class="step mt"><span class="no">3</span>推荐文案（可改成你自己的话）</h2>
+        <p class="helper">可直接用，也可以改成你自己的话。</p>
         <div class="review-wrap" :class="{ busy: switching }">
           <textarea
             v-model="editedContent"
             class="review-box"
             rows="9"
             :disabled="switching"
-            placeholder="正在生成…"
+            placeholder="正在整理…"
           ></textarea>
           <div class="busy-mask" v-if="switching" role="status">换文案中…</div>
         </div>
+        <details class="tag-panel" v-if="payload.keywords && payload.keywords.length">
+          <summary>{{ tagSummaryLabel }}</summary>
+          <div class="chips">
+            <button
+              v-for="kw in payload.keywords"
+              :key="kw.id"
+              class="chip"
+              :class="{ active: selectedTag === kw.keyword }"
+              :disabled="switching"
+              :aria-pressed="selectedTag === kw.keyword"
+              @click="pickByTag(kw.keyword)"
+            >{{ kw.keyword }}</button>
+          </div>
+        </details>
         <div class="actions">
-          <button class="act-switch" :disabled="switching" @click="switchReview">换一换</button>
-          <div class="act-row">
-            <button class="act-copy" :disabled="!editedContent.trim() || switching" @click="copyReview">复制</button>
-            <button class="act-go" :disabled="!editedContent.trim() || switching" @click="jump(selectedPlatform)">
-              {{ selectedPlatform.buttonText || '去发布' }}
-            </button>
+          <button class="act-go" :disabled="!editedContent.trim() || switching" @click="jump(selectedPlatform)">
+            {{ platformActionLabel }}
+          </button>
+          <div class="act-row secondary-actions">
+            <button class="act-switch" :disabled="switching" @click="switchReview">换个说法</button>
+            <button class="act-copy" :disabled="!editedContent.trim() || switching" @click="copyReview">仅复制</button>
           </div>
         </div>
       </section>
@@ -358,7 +370,68 @@ onMounted(load)
   opacity: 0.6;
 }
 
+.review-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.review-heading .step {
+  margin-bottom: 0;
+}
+.platform-badge {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 600;
+}
+.helper {
+  margin: 10px 0 12px;
+  color: #667085;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 /* 体验标签 chips */
+.tag-panel {
+  margin-top: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.tag-panel summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  color: #475569;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  list-style: none;
+}
+.tag-panel summary::-webkit-details-marker {
+  display: none;
+}
+.tag-panel summary::after {
+  content: '展开';
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 600;
+}
+.tag-panel[open] summary {
+  border-bottom: 1px solid #e2e8f0;
+}
+.tag-panel[open] summary::after {
+  content: '收起';
+}
+.tag-panel .chips {
+  padding: 12px;
+}
 .chips {
   display: flex;
   flex-wrap: wrap;
@@ -386,7 +459,7 @@ onMounted(load)
 }
 .review-box {
   width: 100%;
-  min-height: 224px;
+  min-height: 180px;
   font-size: 16px;
   line-height: 1.75;
   padding: 14px;
@@ -411,31 +484,32 @@ onMounted(load)
   margin-top: 14px;
 }
 .act-switch {
-  width: 100%;
+  flex: 1 1 0;
   min-height: 48px;
-  background: #eef2ff;
-  color: #1e40af;
+  background: #f1f5f9;
+  color: #334155;
   border: none;
   border-radius: 12px;
   font-size: 15px;
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 .act-row {
   display: flex;
   gap: 10px;
+  margin-top: 10px;
 }
 .act-copy {
-  flex: 0 0 96px;
-  min-height: 52px;
-  background: #eef2ff;
-  color: #1e40af;
+  flex: 1 1 0;
+  min-height: 48px;
+  background: #f1f5f9;
+  color: #334155;
   border: none;
   border-radius: 12px;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
 }
 .act-go {
-  flex: 1;
+  width: 100%;
   min-height: 52px;
   background: #3b82f6;
   color: #fff;
@@ -503,9 +577,6 @@ onMounted(load)
 }
 
 @media (max-width: 380px) {
-  .choice-grid {
-    grid-template-columns: 1fr;
-  }
   .act-row {
     flex-direction: column;
   }
