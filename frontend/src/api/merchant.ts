@@ -13,6 +13,9 @@ export const merchantApi = {
   listKeywords() {
     return http.get('/merchant/store/keywords')
   },
+  getKeywordSuggestions() {
+    return http.get('/merchant/store/keyword-suggestions')
+  },
   createKeyword(payload: { keyword: string; sortNo: number }) {
     return http.post('/merchant/store/keywords', payload)
   },
@@ -25,6 +28,11 @@ export const merchantApi = {
   createImage(payload: { imageUrl: string; thumbnailUrl: string; sortNo: number }) {
     return http.post('/merchant/store/images/upload', payload)
   },
+  uploadImageFile(file: File) {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post('/merchant/store/images/upload-file', form)
+  },
   deleteImage(id: number) {
     return http.delete(`/merchant/store/images/${id}`)
   },
@@ -33,6 +41,9 @@ export const merchantApi = {
   },
   createPlatformLink(payload: Record<string, unknown>) {
     return http.post('/merchant/store/platform-links', payload)
+  },
+  updatePlatformLink(id: number, payload: Record<string, unknown>) {
+    return http.put(`/merchant/store/platform-links/${id}`, payload)
   },
   updatePlatformLinkStatus(id: number, status: number) {
     return http.put(`/merchant/store/platform-links/${id}/status`, { status })
@@ -43,14 +54,14 @@ export const merchantApi = {
   listReviews() {
     return http.get('/merchant/reviews')
   },
-  createReview(payload: { content: string; status: string }) {
+  createReview(payload: { content: string; status: string; platformCode: string }) {
     return http.post('/merchant/reviews', payload)
   },
   deleteReview(id: number) {
     return http.delete(`/merchant/reviews/${id}`)
   },
-  generateReviews(targetCount = 10) {
-    return http.post('/merchant/reviews/generate', { targetCount })
+  generateReviews(platformCode: string, targetCount = 10) {
+    return http.post('/merchant/reviews/generate', { targetCount, platformCode }, { timeout: 180000 })
   },
   listTasks() {
     return http.get('/merchant/review-generation-tasks')

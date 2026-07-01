@@ -10,16 +10,58 @@ export const adminApi = {
   updateMerchantStatus(id: number, status: number) {
     return http.put(`/admin/merchants/${id}/status`, { status })
   },
+  deleteMerchant(id: number) {
+    return http.delete(`/admin/merchants/${id}`)
+  },
+  listStoreTypes() {
+    return http.get('/admin/store-types')
+  },
+  createStoreType(payload: { name: string; industryCode: string }) {
+    return http.post('/admin/store-types', payload)
+  },
   listStores() {
     return http.get('/admin/stores')
+  },
+  createStore(payload: {
+    account: string
+    password: string
+    merchantName?: string
+    contactName?: string
+    typeId: number
+    storeName: string
+    storeIntro?: string
+    address?: string
+    primaryPlatformStyle?: string
+    brandTone?: string
+    platformUrl?: string
+  }) {
+    return http.post('/admin/stores', payload)
+  },
+  updateStore(id: number, payload: {
+    account: string
+    password?: string
+    merchantName?: string
+    contactName?: string
+    typeId: number
+    storeName: string
+    storeIntro?: string
+    address?: string
+    primaryPlatformStyle?: string
+    brandTone?: string
+    platformUrl?: string
+  }) {
+    return http.put(`/admin/stores/${id}`, payload)
   },
   updateStoreStatus(id: number, status: number) {
     return http.put(`/admin/stores/${id}/status`, { status })
   },
-  listTags() {
-    return http.get('/admin/nfc-tags')
+  deleteStore(id: number) {
+    return http.delete(`/admin/stores/${id}`)
   },
-  createTag(payload: { tagCode?: string; remark?: string }) {
+  listTags(storeId?: number) {
+    return http.get('/admin/nfc-tags', storeId ? { params: { storeId } } : undefined)
+  },
+  createTag(payload: { tagCode?: string; remark?: string; storeId?: number }) {
     return http.post('/admin/nfc-tags', payload)
   },
   bindTag(id: number, storeId: number) {

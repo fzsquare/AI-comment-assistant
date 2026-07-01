@@ -18,18 +18,20 @@ const maxAgentRespBytes = 8 << 20 // 8MB
 // AgentReviewGenerator 通过 HTTP 调用 Python 文案 agent 服务生成评价，
 // 实现 ReviewGenerator 接口。只把达到入池等级（默认 B 及以上）的文案返回。
 type AgentReviewGenerator struct {
-	BaseURL  string
-	MinGrade string
-	Client   *http.Client
+	BaseURL       string
+	MinGrade      string
+	InternalToken string
+	Client        *http.Client
 }
 
-func NewAgentReviewGenerator(baseURL, minGrade string) *AgentReviewGenerator {
+func NewAgentReviewGenerator(baseURL, minGrade, internalToken string) *AgentReviewGenerator {
 	if minGrade == "" {
 		minGrade = "B"
 	}
 	return &AgentReviewGenerator{
-		BaseURL:  strings.TrimRight(baseURL, "/"),
-		MinGrade: minGrade,
+		BaseURL:       strings.TrimRight(baseURL, "/"),
+		MinGrade:      minGrade,
+		InternalToken: internalToken,
 		// 自评循环 + 批量，单次可能较慢，给足超时
 		Client: &http.Client{Timeout: 180 * time.Second},
 	}
@@ -44,11 +46,17 @@ type agentStore struct {
 }
 
 type agentRequest struct {
-	Store        agentStore `json:"store"`
-	Keywords     []string   `json:"keywords"`
-	Platform     string     `json:"platform"`
-	Count        int        `json:"count"`
-	Satisfaction string     `json:"satisfaction"`
+	Store        agentStore     `json:"store"`
+	Keywords     []string       `json:"keywords"`
+	Platform     string         `json:"platform"`
+	Count        int            `json:"count"`
+	Satisfaction string         `json:"satisfaction"`
+	Feedback     *agentFeedback `json:"feedback,omitempty"`
+}
+
+type agentFeedback struct {
+	Accepted []string `json:"accepted,omitempty"`
+	Rejected []string `json:"rejected,omitempty"`
 }
 
 type agentItem struct {
@@ -64,10 +72,14 @@ type agentResponse struct {
 	Items    []agentItem `json:"items"`
 }
 
-var validPlatforms = map[string]bool{"dianping": true, "xiaohongshu": true, "douyin": true}
+var validPlatforms = map[string]bool{"dianping": true, "meituan": true, "xiaohongshu": true, "douyin": true}
 var gradeRank = map[string]int{"D": 0, "C": 1, "B": 2, "A": 3, "S": 4}
 
 func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.StoreKeyword, targetCount int) ([]model.ReviewItem, error) {
+	return g.GenerateWithFeedback(store, keywords, ReviewGenerationFeedback{}, targetCount)
+}
+
+func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords []model.StoreKeyword, feedback ReviewGenerationFeedback, targetCount int) ([]model.ReviewItem, error) {
 	if !strings.HasPrefix(g.BaseURL, "http://") && !strings.HasPrefix(g.BaseURL, "https://") {
 		return nil, fmt.Errorf("非法的文案服务地址: %q", g.BaseURL)
 	}
@@ -94,12 +106,22 @@ func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.Stor
 		Platform:     platform,
 		Count:        targetCount,
 		Satisfaction: "比较满意",
+		Feedback:     agentFeedbackFrom(feedback),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("构造文案请求失败: %w", err)
 	}
 
-	resp, err := g.Client.Post(g.BaseURL+"/generate-reviews", "application/json", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, g.BaseURL+"/generate-reviews", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("构造文案 HTTP 请求失败: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if g.InternalToken != "" {
+		req.Header.Set("X-Agent-Internal-Token", g.InternalToken)
+	}
+
+	resp, err := g.Client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("调用文案服务失败: %w", err)
 	}
@@ -132,4 +154,14 @@ func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.Stor
 		})
 	}
 	return items, nil
+}
+
+func agentFeedbackFrom(feedback ReviewGenerationFeedback) *agentFeedback {
+	if len(feedback.Accepted) == 0 && len(feedback.Rejected) == 0 {
+		return nil
+	}
+	return &agentFeedback{
+		Accepted: feedback.Accepted,
+		Rejected: feedback.Rejected,
+	}
 }

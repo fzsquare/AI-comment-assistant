@@ -1,15 +1,18 @@
 # 多平台文案生成 Agent 服务
 
-独立的 Python 服务，用 **OpenAI Agents SDK + 任意 OpenAI 兼容端点**（当前接 GPT 代理，
-也可换 DeepSeek 等），按《多平台文案生成约束手册》
-为大众点评 / 小红书 / 抖音评论生成**优质、合规、拟人化**的真实评价文案。Go 后端通过
-HTTP 调用本服务来填充评价池。
+独立的 Python 服务，用 **OpenAI Agents SDK + 任意 OpenAI 兼容端点**（OpenAI、GPT 代理、
+DeepSeek 等），按《多平台文案生成约束手册》
+为大众点评 / 美团 / 小红书 / 抖音评论生成**优质、合规、拟人化**的真实评价文案。Go 后端通过
+HTTP 调用本服务来填充评价池；当前项目的主 AI 生成路径已经切到本服务。
+
+本服务是内部服务，默认监听 `127.0.0.1:8090`。生产环境只允许 Go backend 通过
+`X-Agent-Internal-Token` 调用，不直接暴露给浏览器、前端服务商或公网网关。
 
 ## 设计
 
 ```
-Go 核心(现有 MVP) ──POST /generate-reviews──▶ 本服务
-                  ◀──  {items:[{content,tags,score,grade}]} ──
+Go backend ──POST /generate-reviews + X-Agent-Internal-Token──▶ 本服务
+           ◀──  {items:[{content,tags,score,grade}]} ───────────
 
 本服务内部：
   按 platform 选 writer 专家 agent(各自 instructions + few-shot)
@@ -22,6 +25,7 @@ Go 核心(现有 MVP) ──POST /generate-reviews──▶ 本服务
 
 约束手册的落点：
 - `constraints/platforms/*.py` —— 各平台结构/风格/标签(手册第一、二、三部分)
+- `meituan` 当前复用大众点评约束，平台编码仍会原样返回给 Go backend 写入评价池
 - `constraints/personas.py` —— 拟人化:身份/情感↔满意度/缺点↔满意度/口语化(第四部分)
 - `constraints/banned_words.py` —— 禁用词硬过滤 + 软约束(第五部分)
 - `prompts/reviewer.py` —— 100 分评分表 + 15 项自检(第六部分)
@@ -32,18 +36,21 @@ Go 核心(现有 MVP) ──POST /generate-reviews──▶ 本服务
 cd agent-service
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # 填入 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL
-python -m app.main            # 默认 http://0.0.0.0:8090
+cp .env.example .env          # 填入 LLM_API_KEY / LLM_BASE_URL / LLM_MODEL / AGENT_INTERNAL_TOKEN
+python -m app.main            # 默认 http://127.0.0.1:8090
 ```
 
 健康检查：
 ```bash
-curl localhost:8090/health
+curl http://127.0.0.1:8090/health
 ```
 
 生成示例：
 ```bash
-curl -X POST localhost:8090/generate-reviews -H 'Content-Type: application/json' -d '{
+curl -X POST http://127.0.0.1:8090/generate-reviews \
+  -H 'Content-Type: application/json' \
+  -H 'X-Agent-Internal-Token: replace-with-shared-internal-token' \
+  -d '{
   "store": {"store_name": "示例川菜馆", "industry_type": "餐饮", "brand_tone": "轻松自然"},
   "keywords": ["招牌椒麻鸡", "环境舒服", "适合聚餐"],
   "platform": "xiaohongshu",
@@ -55,8 +62,16 @@ curl -X POST localhost:8090/generate-reviews -H 'Content-Type: application/json'
 ## 接入 Go
 
 - Go 侧只认这个 HTTP 契约,不含任何 provider 字眼;换模型/换 OpenAI 只改本服务内部。
-- **入池阈值建议:** 本服务返回每条的 `score`/`grade`。Go 填池时建议只保留
-  `grade ∈ {S, A, B}`(即 score ≥ 70),C/D 丢弃。阈值可在 Go 侧配置。
+- Go 侧会把商家/消费者选择的 `platformCode` 传入本服务，并用同一个平台编码写入 `review_items.platform_style`。
+- Go backend 的 `AGENT_SERVICE_URL` 指向本机或私有网络地址,并通过
+  `X-Agent-Internal-Token` 传入与本服务一致的 `AGENT_INTERNAL_TOKEN`。
+- 前端只请求 Go backend 的 `/api`,不要配置或调用本服务地址。
+- 标题规则：大众点评 / 美团 / 抖音等普通评论不保留标题；只有小红书允许标题，
+  并放在 `content` 第一行，不带“标题：”前缀。
+- **入池阈值:** 本服务返回每条的 `score`/`grade`。Go backend 默认只保留
+  `grade ∈ {S, A, B}`(即 score ≥ 70),C/D 丢弃；阈值可通过 `AGENT_MIN_GRADE` 调整。
+- 评论生成必须成功调用本服务；agent-service 不可用或未配置 LLM key 时，Go backend
+  会记录失败任务并返回错误，不会用 mock 文案兜底。
 
 ## 关键说明
 

@@ -2,11 +2,65 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PPK NFC 评价系统</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#3b82f6" />
+    <!-- 评价正文里若含数字，别被 iOS 自动识别成电话 -->
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%233b82f6'/%3E%3Cpath d='M18 22h28v6H18zm0 10h20v6H18zm0 10h28v6H18z' fill='white'/%3E%3C/svg%3E"
+    />
+    <title>评价助手</title>
+    <style>
+      /* 首屏占位：JS/Vue 挂载前就有反馈，避免碰卡后一片白屏 */
+      #app-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f5f7fb;
+      }
+      #app-splash i {
+        width: 9px;
+        height: 9px;
+        margin: 0 4px;
+        border-radius: 50%;
+        background: #3b82f6;
+        display: inline-block;
+        animation: splash-bounce 1s infinite ease-in-out both;
+      }
+      #app-splash i:nth-child(2) {
+        animation-delay: 0.16s;
+      }
+      #app-splash i:nth-child(3) {
+        animation-delay: 0.32s;
+      }
+      @keyframes splash-bounce {
+        0%,
+        80%,
+        100% {
+          opacity: 0.25;
+          transform: scale(0.8);
+        }
+        40% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <!-- Vue 挂载后会替换掉它 -->
+      <div id="app-splash"><i></i><i></i><i></i></div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

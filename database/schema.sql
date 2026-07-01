@@ -1,6 +1,3 @@
-CREATE DATABASE IF NOT EXISTS ppk CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE ppk;
-
 CREATE TABLE IF NOT EXISTS admin_users (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   account VARCHAR(64) NOT NULL UNIQUE,
@@ -22,9 +19,38 @@ CREATE TABLE IF NOT EXISTS merchant_users (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- 门店类型标签：预置 9 行业 + 管理员可自定义。industry_code 为生成/隔离基准
+-- （对应 agent-service 的 9 行业 code）；store.industry_type 写类型中文名（含别名），
+-- 保证 Python 串味隔离与 Go 推荐标签的中文子串匹配仍命中。
+CREATE TABLE IF NOT EXISTS store_types (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  code VARCHAR(64) NOT NULL UNIQUE,
+  name VARCHAR(64) NOT NULL,
+  industry_code VARCHAR(64) NOT NULL DEFAULT 'restaurant',
+  is_preset TINYINT NOT NULL DEFAULT 0,
+  status TINYINT NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- 9 个预置类型（参考数据，非演示数据：即使不导入 seed 也需要它们才能建店）。
+INSERT INTO store_types (code, name, industry_code, is_preset, status) VALUES
+  ('restaurant', '餐饮', 'restaurant', 1, 1),
+  ('footmassage', '足疗按摩', 'footmassage', 1, 1),
+  ('hairsalon', '理发美发', 'hairsalon', 1, 1),
+  ('nailsalon', '美甲美睫', 'nailsalon', 1, 1),
+  ('beauty', '美容护肤', 'beauty', 1, 1),
+  ('fitness', '健身运动', 'fitness', 1, 1),
+  ('entertainment', '休闲娱乐', 'entertainment', 1, 1),
+  ('pet', '宠物服务', 'pet', 1, 1),
+  ('auto', '汽车服务', 'auto', 1, 1)
+ON DUPLICATE KEY UPDATE name = VALUES(name), industry_code = VALUES(industry_code), is_preset = VALUES(is_preset);
+
 CREATE TABLE IF NOT EXISTS stores (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   merchant_user_id BIGINT UNSIGNED NOT NULL UNIQUE,
+  uuid CHAR(36) NOT NULL UNIQUE,
+  type_id BIGINT UNSIGNED NULL,
   store_name VARCHAR(128) NOT NULL,
   industry_type VARCHAR(64) DEFAULT '',
   store_intro TEXT,
@@ -34,7 +60,8 @@ CREATE TABLE IF NOT EXISTS stores (
   status TINYINT NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  CONSTRAINT fk_store_merchant FOREIGN KEY (merchant_user_id) REFERENCES merchant_users(id)
+  CONSTRAINT fk_store_merchant FOREIGN KEY (merchant_user_id) REFERENCES merchant_users(id),
+  CONSTRAINT fk_store_type FOREIGN KEY (type_id) REFERENCES store_types(id)
 );
 
 CREATE TABLE IF NOT EXISTS store_keywords (
@@ -90,6 +117,7 @@ CREATE TABLE IF NOT EXISTS review_items (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_review_items_store_id (store_id),
   INDEX idx_review_items_dispatch (store_id, status, is_dispatched),
+  INDEX idx_review_items_dispatch_platform (store_id, platform_style, status, is_dispatched),
   CONSTRAINT fk_review_store FOREIGN KEY (store_id) REFERENCES stores(id)
 );
 
@@ -109,6 +137,26 @@ CREATE TABLE IF NOT EXISTS review_display_logs (
   CONSTRAINT fk_log_store FOREIGN KEY (store_id) REFERENCES stores(id)
 );
 
+CREATE TABLE IF NOT EXISTS review_feedbacks (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  review_item_id BIGINT UNSIGNED NOT NULL,
+  session_id VARCHAR(128) NOT NULL,
+  platform_code VARCHAR(64) NOT NULL,
+  feedback_type VARCHAR(32) NOT NULL,
+  source_action VARCHAR(64) NOT NULL,
+  content_snapshot TEXT NOT NULL,
+  edited_content TEXT,
+  client_ip VARCHAR(64) DEFAULT '',
+  user_agent VARCHAR(255) DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_review_feedbacks_store_platform_type (store_id, platform_code, feedback_type),
+  INDEX idx_review_feedbacks_review_item_id (review_item_id),
+  UNIQUE KEY uk_review_feedback_once (store_id, review_item_id, session_id, feedback_type),
+  CONSTRAINT fk_feedback_store FOREIGN KEY (store_id) REFERENCES stores(id),
+  CONSTRAINT fk_feedback_review_item FOREIGN KEY (review_item_id) REFERENCES review_items(id)
+);
+
 CREATE TABLE IF NOT EXISTS review_generation_tasks (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   store_id BIGINT UNSIGNED NOT NULL,
@@ -125,11 +173,12 @@ CREATE TABLE IF NOT EXISTS review_generation_tasks (
   CONSTRAINT fk_task_store FOREIGN KEY (store_id) REFERENCES stores(id)
 );
 
+-- 卡片库存：一店可多卡。落地访问改用 store.uuid，landing_token 仅历史保留（可空、不唯一）。
 CREATE TABLE IF NOT EXISTS nfc_tags (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   tag_code VARCHAR(128) NOT NULL UNIQUE,
   store_id BIGINT UNSIGNED NULL,
-  landing_token VARCHAR(128) NOT NULL UNIQUE,
+  landing_token VARCHAR(128) NULL,
   status VARCHAR(32) NOT NULL DEFAULT 'unbound',
   remark VARCHAR(255) DEFAULT '',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -3,22 +3,25 @@
 要点（任意 OpenAI 兼容端点接入）：
 - 多数第三方端点只实现 /chat/completions，不实现 OpenAI 的 Responses API，
   所以用 OpenAIChatCompletionsModel（走 chat completions），不能用默认那条。
-- 第三方端点没有 OpenAI 的 tracing，必须 set_tracing_disabled(True)，
-  否则 SDK 会尝试把 trace 传回 OpenAI 并报缺 key。
+- 第三方端点没有 OpenAI 的 tracing，必须在导入 agents 前设置
+  OPENAI_AGENTS_DISABLE_TRACING，否则 SDK 可能初始化 trace exporter。
 """
 from __future__ import annotations
 
-from agents import OpenAIChatCompletionsModel, set_tracing_disabled
-from openai import AsyncOpenAI
+import os
+
+# 必须在导入 agents 前设置；否则 SDK 可能先初始化 tracing exporter。
+os.environ.setdefault("OPENAI_AGENTS_DISABLE_TRACING", "true")
+
+from agents import OpenAIChatCompletionsModel
+from openai import AsyncOpenAI, DefaultAsyncHttpxClient
 
 from .config import settings
-
-# 关闭 tracing —— 第三方 key 用不了 OpenAI 的 trace 上报
-set_tracing_disabled(True)
 
 _llm_client = AsyncOpenAI(
     base_url=settings.base_url,
     api_key=settings.api_key or "placeholder",  # 启动期允许空，调用前再校验
+    http_client=DefaultAsyncHttpxClient(trust_env=False),
 )
 
 

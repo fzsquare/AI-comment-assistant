@@ -8,6 +8,7 @@ from .platforms.xiaohongshu import XIAOHONGSHU
 
 _REGISTRY = {
     DIANPING.code: DIANPING,
+    "meituan": DIANPING,
     XIAOHONGSHU.code: XIAOHONGSHU,
     DOUYIN.code: DOUYIN,
 }

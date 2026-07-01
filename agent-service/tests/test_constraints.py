@@ -12,7 +12,28 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.constraints.banned_words import find_hard_violations  # noqa: E402
+from app.constraints.humanizer import find_ai_tells  # noqa: E402
+from app.constraints.industries import (  # noqa: E402
+    find_cross_industry_leak,
+    match_industry,
+)
+from app.constraints.registry import get_spec  # noqa: E402
+from app.content_normalizer import normalize_generated_content  # noqa: E402
+from app.config import Settings, load_settings  # noqa: E402
+from app.internal_auth import check_internal_token  # noqa: E402
 from app.jsonutil import extract_json  # noqa: E402
+from app.prompts.writer import build_writer_user  # noqa: E402
+from app.reviewer_logic import reviewer_passes  # noqa: E402
+
+try:
+    from app.schemas import FeedbackExamples, GenerateRequest, ReviewItem, StoreContext  # noqa: E402
+except ModuleNotFoundError as exc:
+    if exc.name != "pydantic":
+        raise
+    FeedbackExamples = None
+    GenerateRequest = None
+    ReviewItem = None
+    StoreContext = None
 
 
 def test_hard_violations_catches_real_banned():
@@ -26,6 +47,51 @@ def test_hard_violations_no_false_positive_on_diyi_ci():
     assert find_hard_violations("第一次来这家店，体验不错", "dianping") == []
 
 
+def test_ai_tells_catches_cliche_and_dash():
+    assert "总而言之" in find_ai_tells("菜不错，总而言之很满意")
+    assert "回味无穷" in find_ai_tells("那道鱼回味无穷")
+    assert "破折号——" in find_ai_tells("环境很好——尤其是灯光")
+
+
+def test_ai_tells_no_false_positive_on_plain_review():
+    # 真人随手写、无套话无破折号 → 不该误报
+    assert find_ai_tells("上周三和朋友来的，点了酸菜鱼，鱼挺嫩，就是上菜有点慢。") == []
+
+
+def test_match_industry_routes_store_types():
+    assert match_industry("足疗按摩").code == "footmassage"
+    assert match_industry("美发沙龙").code == "hairsalon"
+    assert match_industry("美甲店").code == "nailsalon"
+    assert match_industry("川菜/餐饮").code == "restaurant"
+    assert match_industry("").code == "restaurant"  # 未填默认餐饮
+    # 各行业的 item_word 已正确区分
+    assert match_industry("美甲").item_word != match_industry("川菜").item_word
+
+
+def test_match_industry_extended_types():
+    assert match_industry("健身房").code == "fitness"
+    assert match_industry("KTV").code == "entertainment"
+    assert match_industry("剧本杀").code == "entertainment"
+    assert match_industry("宠物美容").code == "pet"
+    assert match_industry("洗车养护").code == "auto"
+    assert match_industry("皮肤管理").code == "beauty"
+
+
+def test_cross_industry_leak_detection():
+    nail = match_industry("美甲店")
+    restaurant = match_industry("餐饮")
+    foot = match_industry("足疗")
+    # 美甲文案里混进餐饮/足疗标志词 → 判定串味
+    assert "上菜" in find_cross_industry_leak("做完美甲顺便上菜了", nail)
+    assert "推拿" in find_cross_industry_leak("美甲师还帮我推拿了肩颈", nail)
+    # 干净的美甲文案 → 不串味
+    assert find_cross_industry_leak("卸甲很轻，光疗做得扎实，款式好看", nail) == []
+    # 餐饮文案里混进美甲标志词 → 判定串味
+    assert "美甲师" in find_cross_industry_leak("菜不错，美甲师手法也好", restaurant)
+    # 足疗自身词不算串味
+    assert find_cross_industry_leak("技师推拿到位，采耳也舒服", foot) == []
+
+
 def test_hard_violations_no_false_positive_on_common_words():
     assert find_hard_violations("最近和朋友来的，老板赠送了小菜", "dianping") == []
 
@@ -34,6 +100,45 @@ def test_platform_specific_medical_word():
     assert "祛痘" in find_hard_violations("这个能祛痘", "xiaohongshu")
     # 点评平台不带小红书的医疗词表
     assert find_hard_violations("这个能祛痘", "dianping") == []
+
+
+def test_meituan_platform_uses_dianping_constraints():
+    if GenerateRequest is None:
+        return
+    req = GenerateRequest(
+        store={"store_name": "示例餐厅"},
+        keywords=[],
+        platform="meituan",
+        count=1,
+    )
+    assert req.platform == "meituan"
+    assert get_spec("meituan").display_name == "大众点评"
+
+
+def test_non_xiaohongshu_generated_content_strips_explicit_title():
+    content = "标题：适合朋友聚餐的小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("dianping", content) == "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+
+
+def test_non_xiaohongshu_generated_content_keeps_normal_sentence_with_title_word():
+    content = "标题取得普通一点反而真实，上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("dianping", content) == content
+
+
+def test_xiaohongshu_generated_content_keeps_title_without_label():
+    content = "标题：人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("xiaohongshu", content) == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+
+
+def test_xiaohongshu_generated_content_can_prepend_json_title():
+    assert (
+        normalize_generated_content(
+            "xiaohongshu",
+            "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。",
+            title="人均70挖到宝藏小店",
+        )
+        == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    )
 
 
 def test_extract_json_plain():
@@ -60,6 +165,126 @@ def test_extract_json_raises_on_garbage():
     except ValueError:
         return
     raise AssertionError("应抛 ValueError")
+
+
+def test_internal_token_missing_configuration_returns_503():
+    settings = Settings(internal_token="")
+    ok, status, detail = check_internal_token("anything", settings)
+    assert ok is False
+    assert status == 503
+    assert "AGENT_INTERNAL_TOKEN" in detail
+
+
+def test_internal_token_rejects_missing_or_wrong_header():
+    settings = Settings(internal_token="expected-token")
+    assert check_internal_token(None, settings)[:2] == (False, 401)
+    assert check_internal_token("wrong-token", settings)[:2] == (False, 401)
+
+
+def test_internal_token_accepts_exact_match():
+    settings = Settings(internal_token="expected-token")
+    assert check_internal_token("expected-token", settings) == (True, 200, "ok")
+
+
+def test_load_settings_defaults_to_loopback_host():
+    settings = load_settings({})
+    assert settings.host == "127.0.0.1"
+
+
+def test_load_settings_rejects_invalid_ranges_with_context():
+    bad_env = {
+        "MIN_PASS_SCORE": "101",
+        "MAX_REVISE_ROUNDS": "-1",
+        "MAX_CONCURRENCY": "0",
+    }
+    try:
+        load_settings(bad_env)
+    except RuntimeError as exc:
+        msg = str(exc)
+        assert "MIN_PASS_SCORE" in msg
+        assert "MAX_REVISE_ROUNDS" in msg
+        assert "MAX_CONCURRENCY" in msg
+        return
+    raise AssertionError("应抛 RuntimeError")
+
+
+def test_reviewer_pass_string_false_is_false_even_with_good_score():
+    assert reviewer_passes("false", 95, 80) is False
+
+
+def test_reviewer_pass_true_requires_minimum_score():
+    assert reviewer_passes(True, 79, 80) is False
+    assert reviewer_passes("true", 80, 80) is True
+
+
+def test_reviewer_pass_missing_uses_score_threshold():
+    assert reviewer_passes(None, 79, 80) is False
+    assert reviewer_passes(None, 80, 80) is True
+
+
+def test_generate_request_rejects_oversized_keywords():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 schema 边界测试")
+        return
+    try:
+        GenerateRequest(
+            store={"store_name": "测试店"},
+            keywords=["标签"] * 21,
+        )
+    except Exception:
+        return
+    raise AssertionError("应拒绝过多 keywords")
+
+
+def test_writer_prompt_uses_feedback_examples():
+    if FeedbackExamples is None:
+        print("SKIP  pydantic 未安装，跳过 feedback prompt 测试")
+        return
+    spec = get_spec("meituan")
+    user = build_writer_user(
+        spec,
+        StoreContext(store_name="七欣天香辣蟹"),
+        ["香辣蟹"],
+        "比较满意",
+        0,
+        feedback=FeedbackExamples(
+            accepted=["蟹肉饱满，服务员会主动换盘。"],
+            rejected=["太像广告，夸得太满。"],
+        ),
+    )
+    assert "用户喜欢的评论样本" in user
+    assert "蟹肉饱满，服务员会主动换盘。" in user
+    assert "用户不喜欢的评论样本" in user
+    assert "太像广告，夸得太满。" in user
+
+
+def test_generate_request_rejects_long_store_name():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 schema 边界测试")
+        return
+    try:
+        GenerateRequest(
+            store={"store_name": "店" * 121},
+            keywords=[],
+        )
+    except Exception:
+        return
+    raise AssertionError("应拒绝过长 store_name")
+
+
+def test_review_item_rejects_invalid_score_and_grade():
+    if ReviewItem is None:
+        print("SKIP  pydantic 未安装，跳过 schema 边界测试")
+        return
+    for kwargs in (
+        {"content": "内容", "score": 101, "grade": "A"},
+        {"content": "内容", "score": 90, "grade": "Z"},
+    ):
+        try:
+            ReviewItem(**kwargs)
+        except Exception:
+            continue
+        raise AssertionError(f"应拒绝非法输出边界：{kwargs!r}")
 
 
 def _run_all() -> int:
