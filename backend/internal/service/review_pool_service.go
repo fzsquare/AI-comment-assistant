@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -47,6 +48,7 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	var keywords []model.StoreKeyword
 	s.DB.Where("store_id = ?", storeID).Order("sort_no asc, id asc").Find(&keywords)
 	feedback := s.feedbackExamples(storeID, platformCode)
+	preferences := s.generationPreferences(storeID)
 
 	task := model.ReviewGenerationTask{
 		StoreID:       storeID,
@@ -61,7 +63,12 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 
 	var reviews []model.ReviewItem
 	var err error
-	if generator, ok := s.Generator.(FeedbackAwareReviewGenerator); ok {
+	if generator, ok := s.Generator.(PreferenceAwareReviewGenerator); ok {
+		reviews, err = generator.GenerateWithContext(store, keywords, ReviewGenerationContext{
+			Feedback:    feedback,
+			Preferences: preferences,
+		}, targetCount)
+	} else if generator, ok := s.Generator.(FeedbackAwareReviewGenerator); ok {
 		reviews, err = generator.GenerateWithFeedback(store, keywords, feedback, targetCount)
 	} else {
 		reviews, err = s.Generator.Generate(store, keywords, targetCount)
@@ -101,6 +108,43 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	task.SuccessCount = len(reviews)
 	task.Status = model.TaskStatusSuccess
 	return s.DB.Save(&task).Error
+}
+
+func (s *ReviewPoolService) generationPreferences(storeID uint) GenerationPreferences {
+	preferences := GenerationPreferences{LengthVariance: "wide"}
+	if s.DB == nil || storeID == 0 {
+		return preferences
+	}
+	var row model.StoreGenerationPreference
+	if err := s.DB.Where("store_id = ?", storeID).First(&row).Error; err != nil {
+		return preferences
+	}
+	preferences.FocusKeywords = decodeJSONStringSlice(row.FocusKeywords)
+	preferences.StyleCodes = decodeJSONStringSlice(row.StyleCodes)
+	preferences.ReferenceReviews = decodeJSONStringSlice(row.ReferenceReviews)
+	if strings.TrimSpace(row.LengthVariance) != "" {
+		preferences.LengthVariance = strings.TrimSpace(row.LengthVariance)
+	}
+	return preferences.WithDefaults()
+}
+
+func decodeJSONStringSlice(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var values []string
+	if err := json.Unmarshal([]byte(raw), &values); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func (s *ReviewPoolService) feedbackExamples(storeID uint, platformCode string) ReviewGenerationFeedback {

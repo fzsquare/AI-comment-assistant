@@ -66,6 +66,15 @@ let tasks = [
   { id: 1, storeId: 1, platformStyle: 'xiaohongshu', triggerType: 'manual', targetCount: 10, successCount: 8, failedCount: 2, status: 'success' }
 ]
 
+let generationPreferences = {
+  configured: true,
+  focusKeywords: ['招牌椒麻鸡', '服务热情'],
+  styleCodes: ['natural', 'detail_rich'],
+  referenceReviews: ['椒麻鸡麻香挺自然，服务员会主动加水。'],
+  lengthVariance: 'wide',
+  updatedAt: new Date().toISOString()
+}
+
 let nfcTags = [
   { id: 1, tagCode: 'TAG-DEMO-001', storeId: 1, landingToken: 'mock-demo-001', status: 'bound', remark: '演示标签' }
 ]
@@ -186,6 +195,39 @@ function deleteMerchantById(id: number) {
   return { deleted: true }
 }
 
+function mockPublishStats() {
+  const weeklyCounts = [3, 5, 0, 8, 12, 9, 14, 18, 15, 21, 17, 24]
+  const monthlyCounts = [22, 28, 31, 35, 42, 40, 46, 51, 48, 56, 61, 66]
+  const today = new Date()
+  const weeklySeries = weeklyCounts.map((count, index) => {
+    const start = new Date(today)
+    start.setDate(today.getDate() - (weeklyCounts.length - 1 - index) * 7 - today.getDay() + 1)
+    const end = new Date(start)
+    end.setDate(start.getDate() + 6)
+    return { weekStart: start.toISOString().slice(0, 10), weekEnd: end.toISOString().slice(0, 10), count }
+  })
+  const monthlySeries = monthlyCounts.map((count, index) => {
+    const month = new Date(today.getFullYear(), today.getMonth() - (monthlyCounts.length - 1 - index), 1)
+    return { month: month.toISOString().slice(0, 7), count }
+  })
+  return {
+    totalPublishClicks: weeklyCounts.reduce((sum, count) => sum + count, 0),
+    currentWeekPublishClicks: weeklyCounts[weeklyCounts.length - 1],
+    currentMonthPublishClicks: monthlyCounts[monthlyCounts.length - 1],
+    updatedAt: new Date().toISOString(),
+    timezone: 'Asia/Shanghai',
+    currentWeekStart: weeklySeries[weeklySeries.length - 1].weekStart,
+    currentWeekEnd: weeklySeries[weeklySeries.length - 1].weekEnd,
+    currentMonthStart: `${monthlySeries[monthlySeries.length - 1].month}-01`,
+    currentMonthEnd: `${monthlySeries[monthlySeries.length - 1].month}-30`,
+    platformLinksConfigured: platformLinks.some((link) => link.status === 1),
+    activePlatformLinkCount: platformLinks.filter((link) => link.status === 1).length,
+    weeklySeries,
+    monthlySeries,
+    partialErrors: []
+  }
+}
+
 function platformName(code: string) {
   return ({ dianping: '大众点评', meituan: '美团', xiaohongshu: '小红书', douyin: '抖音' } as Record<string, string>)[code] || code
 }
@@ -244,6 +286,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'POST', re: /\/merchant\/auth\/login$/, handler: () => ({ token: 'mock-merchant-token' }) },
   { method: 'GET', re: /\/merchant\/store\/detail$/, handler: () => store },
   { method: 'PUT', re: /\/merchant\/store\/detail$/, handler: (_m, b) => Object.assign(store, b) },
+  { method: 'GET', re: /\/merchant\/dashboard\/publish-stats$/, handler: () => mockPublishStats() },
   { method: 'GET', re: /\/merchant\/store\/keyword-suggestions$/, handler: () => ({ tags: suggestTagsByIndustry(store.industryType) }) },
   { method: 'GET', re: /\/merchant\/store\/keywords$/, handler: () => keywords },
   { method: 'POST', re: /\/merchant\/store\/keywords$/, handler: (_m, b) => { const it = { id: nextId(), keyword: b.keyword, sortNo: b.sortNo || 0 }; keywords.push(it); return it } },
@@ -260,6 +303,8 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'GET', re: /\/merchant\/reviews$/, handler: () => merchantReviews },
   { method: 'POST', re: /\/merchant\/reviews$/, handler: (_m, b) => { const it = { id: nextId(), platformStyle: b.platformCode || 'xiaohongshu', content: b.content, tags: '', sourceType: 'manual', status: b.status || 'available' }; merchantReviews.unshift(it); return it } },
   { method: 'DELETE', re: /\/merchant\/reviews\/(\d+)$/, handler: (m) => { merchantReviews = merchantReviews.filter((r) => r.id !== Number(m[1])); return { deleted: true } } },
+  { method: 'GET', re: /\/merchant\/review-generation-preferences$/, handler: () => generationPreferences },
+  { method: 'PUT', re: /\/merchant\/review-generation-preferences$/, handler: (_m, b) => { generationPreferences = { configured: true, focusKeywords: b.focusKeywords || [], styleCodes: b.styleCodes || ['natural'], referenceReviews: b.referenceReviews || [], lengthVariance: b.lengthVariance || 'wide', updatedAt: new Date().toISOString() }; return generationPreferences } },
   { method: 'POST', re: /\/merchant\/reviews\/generate$/, handler: () => mockFailure(503, 'Mock 模式不生成评价，请连接真实后端和 agent-service') },
   { method: 'GET', re: /\/merchant\/review-generation-tasks$/, handler: () => tasks },
 

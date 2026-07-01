@@ -138,15 +138,15 @@ type ReviewItem struct {
 
 type ReviewDisplayLog struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
-	StoreID      uint      `gorm:"index;not null" json:"storeId"`
+	StoreID      uint      `gorm:"index;index:idx_review_logs_store_action_created,priority:1;not null" json:"storeId"`
 	ReviewItemID uint      `gorm:"index" json:"reviewItemId"`
 	NFCTagID     uint      `gorm:"index" json:"nfcTagId"`
 	SessionID    string    `gorm:"size:128;index;not null" json:"sessionId"`
-	ActionType   string    `gorm:"size:64;not null" json:"actionType"`
+	ActionType   string    `gorm:"size:64;index:idx_review_logs_store_action_created,priority:2;not null" json:"actionType"`
 	PlatformCode string    `gorm:"size:64" json:"platformCode"`
 	ClientIP     string    `gorm:"size:64" json:"clientIp"`
 	UserAgent    string    `gorm:"size:255" json:"userAgent"`
-	CreatedAt    time.Time `json:"createdAt"`
+	CreatedAt    time.Time `gorm:"index:idx_review_logs_store_action_created,priority:3" json:"createdAt"`
 }
 
 type ReviewFeedback struct {
@@ -176,6 +176,17 @@ type ReviewGenerationTask struct {
 	ErrorMessage  string    `gorm:"type:text" json:"errorMessage"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
+}
+
+type StoreGenerationPreference struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	StoreID          uint      `gorm:"uniqueIndex;not null" json:"storeId"`
+	FocusKeywords    string    `gorm:"type:json;not null" json:"-"`
+	StyleCodes       string    `gorm:"type:json;not null" json:"-"`
+	ReferenceReviews string    `gorm:"type:json;not null" json:"-"`
+	LengthVariance   string    `gorm:"size:32;not null;default:'wide'" json:"lengthVariance"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
 
 type NFCTag struct {

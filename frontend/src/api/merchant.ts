@@ -1,5 +1,38 @@
 import http from './http'
 
+export type PublishTrendPoint = {
+  weekStart?: string
+  weekEnd?: string
+  month?: string
+  count: number
+}
+
+export type PublishStats = {
+  totalPublishClicks: number
+  currentWeekPublishClicks: number
+  currentMonthPublishClicks: number
+  updatedAt: string
+  timezone: string
+  currentWeekStart: string
+  currentWeekEnd: string
+  currentMonthStart: string
+  currentMonthEnd: string
+  platformLinksConfigured: boolean
+  activePlatformLinkCount: number
+  weeklySeries: PublishTrendPoint[]
+  monthlySeries: PublishTrendPoint[]
+  partialErrors: string[]
+}
+
+export type GenerationPreferences = {
+  configured?: boolean
+  focusKeywords: string[]
+  styleCodes: string[]
+  referenceReviews: string[]
+  lengthVariance: string
+  updatedAt?: string
+}
+
 export const merchantApi = {
   login(payload: { account: string; password: string }) {
     return http.post('/merchant/auth/login', payload)
@@ -9,6 +42,9 @@ export const merchantApi = {
   },
   updateStoreDetail(payload: Record<string, unknown>) {
     return http.put('/merchant/store/detail', payload)
+  },
+  getPublishStats() {
+    return http.get<{ code: number; message: string; data: PublishStats }>('/merchant/dashboard/publish-stats')
   },
   listKeywords() {
     return http.get('/merchant/store/keywords')
@@ -59,6 +95,12 @@ export const merchantApi = {
   },
   deleteReview(id: number) {
     return http.delete(`/merchant/reviews/${id}`)
+  },
+  getGenerationPreferences() {
+    return http.get<{ code: number; message: string; data: GenerationPreferences }>('/merchant/review-generation-preferences')
+  },
+  saveGenerationPreferences(payload: GenerationPreferences) {
+    return http.put<{ code: number; message: string; data: GenerationPreferences }>('/merchant/review-generation-preferences', payload)
   },
   generateReviews(platformCode: string, targetCount = 10) {
     return http.post('/merchant/reviews/generate', { targetCount, platformCode }, { timeout: 180000 })

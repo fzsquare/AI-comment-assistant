@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { merchantApi } from '../../api/merchant'
+import type { GenerationPreferences, PublishStats, PublishTrendPoint } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -21,13 +22,23 @@ const reviewPlatformCode = ref('')
 const keywords = ref<any[]>([])
 const suggestedTags = ref<string[]>([])
 const images = ref<any[]>([])
-// 还没添加的推荐标签
-const availableSuggestions = computed(() =>
-  suggestedTags.value.filter((t) => !keywords.value.some((k) => k.keyword === t))
-)
 const links = ref<any[]>([])
 const reviews = ref<any[]>([])
 const tasks = ref<any[]>([])
+const dashboard = ref<PublishStats | null>(null)
+const activeTrend = ref<'week' | 'month'>('week')
+const optimizationOpen = ref(false)
+const customFocusKeyword = ref('')
+const preferenceSaving = ref(false)
+const generating = ref(false)
+const generationNotice = ref('')
+const preferenceForm = reactive<GenerationPreferences>({
+  configured: false,
+  focusKeywords: [],
+  styleCodes: ['natural'],
+  referenceReviews: [''],
+  lengthVariance: 'wide'
+})
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -40,6 +51,59 @@ const platformPresets: Record<string, { name: string; buttonText: string }> = {
   douyin: { name: '抖音', buttonText: '去抖音发布' }
 }
 
+const styleOptions = [
+  { code: 'natural', label: '自然随手写' },
+  { code: 'detail_rich', label: '细节丰富' },
+  { code: 'young_casual', label: '年轻口语' },
+  { code: 'restrained', label: '稍微克制' },
+  { code: 'regular_customer', label: '像老顾客' }
+]
+
+const styleLabels = computed(() => Object.fromEntries(styleOptions.map((item) => [item.code, item.label])))
+const availableSuggestions = computed(() =>
+  suggestedTags.value.filter((t) => !keywords.value.some((k) => k.keyword === t))
+)
+const preferenceKeywordOptions = computed(() => {
+  const all = [...keywords.value.map((k) => k.keyword), ...suggestedTags.value]
+  return Array.from(new Set(all.map((v) => String(v || '').trim()).filter(Boolean))).slice(0, 24)
+})
+const selectedStyleLabels = computed(() =>
+  preferenceForm.styleCodes.map((code) => styleLabels.value[code] || code).join('、') || '自然随手写'
+)
+const preferenceSummary = computed(() => {
+  const focus = preferenceForm.focusKeywords.length ? preferenceForm.focusKeywords.join('、') : '未设置重点'
+  const refs = cleanReferenceReviews().length
+  return `重点：${focus}；语气：${selectedStyleLabels.value}；参考评论 ${refs} 条`
+})
+const storeInitial = computed(() => (storeForm.storeName || '店').trim().slice(0, 1))
+const trendSeries = computed(() => {
+  const source = activeTrend.value === 'week' ? dashboard.value?.weeklySeries : dashboard.value?.monthlySeries
+  return (source || []).map((item) => ({
+    label: activeTrend.value === 'week' ? `${shortDate(item.weekStart)}-${shortDate(item.weekEnd)}` : item.month || '',
+    count: item.count || 0
+  }))
+})
+const trendHasData = computed(() => trendSeries.value.some((item) => item.count > 0))
+const chartPoints = computed(() => buildChartPoints(trendSeries.value))
+const chartPolyline = computed(() => chartPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
+const chartAria = computed(() => {
+  const mode = activeTrend.value === 'week' ? '按周' : '按月'
+  const total = trendSeries.value.reduce((sum, item) => sum + item.count, 0)
+  return `${mode}引导发布趋势，共 ${trendSeries.value.length} 个数据点，合计 ${total} 次`
+})
+const dashboardStatusText = computed(() => {
+  if (!dashboard.value) return '数据加载中'
+  if (!dashboard.value.platformLinksConfigured) return '先配置平台链接，顾客才能去发布'
+  if (dashboard.value.totalPublishClicks === 0) return '平台链接已启用，等待顾客点击去发布'
+  return `累计引导顾客去发布 ${formatNumber(dashboard.value.totalPublishClicks)} 次`
+})
+const updatedText = computed(() => {
+  if (!dashboard.value?.updatedAt) return ''
+  const d = new Date(dashboard.value.updatedAt)
+  if (Number.isNaN(d.getTime())) return ''
+  return `数据更新至 ${d.toLocaleString('zh-CN', { hour12: false })}`
+})
+
 function messageFrom(err: any, fallback: string) {
   return err?.response?.data?.message || err?.message || fallback
 }
@@ -48,14 +112,16 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, taskRes] = await Promise.all([
+    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, taskRes, statsRes, prefRes] = await Promise.all([
       merchantApi.getStoreDetail(),
       merchantApi.listKeywords(),
       merchantApi.getKeywordSuggestions(),
       merchantApi.listImages(),
       merchantApi.listPlatformLinks(),
       merchantApi.listReviews(),
-      merchantApi.listTasks()
+      merchantApi.listTasks(),
+      merchantApi.getPublishStats(),
+      merchantApi.getGenerationPreferences()
     ])
     Object.assign(storeForm, storeRes.data.data)
     keywords.value = keywordRes.data.data
@@ -64,8 +130,10 @@ async function loadAll() {
     links.value = linkRes.data.data
     reviews.value = reviewRes.data.data
     tasks.value = taskRes.data.data
+    dashboard.value = statsRes.data.data
+    applyPreferences(prefRes.data.data)
     if (!reviewPlatformCode.value && links.value.length > 0) {
-      reviewPlatformCode.value = links.value[0].platformCode
+      reviewPlatformCode.value = links.value.find((item) => item.status === 1)?.platformCode || links.value[0].platformCode
     }
   } catch (err: any) {
     error.value = messageFrom(err, '商家后台数据加载失败')
@@ -142,7 +210,7 @@ async function onPickImage(e: Event) {
     return
   }
   await runAction(() => merchantApi.uploadImageFile(file), '图片已上传')
-  input.value = '' // 允许再次选同一文件
+  input.value = ''
 }
 
 function editPlatformLink(item: any) {
@@ -197,7 +265,110 @@ async function generateReviews() {
     error.value = '请先选择评价平台'
     return
   }
-  await runAction(() => merchantApi.generateReviews(reviewPlatformCode.value, 10), '评价生成任务已完成')
+  generating.value = true
+  generationNotice.value = ''
+  try {
+    await merchantApi.generateReviews(reviewPlatformCode.value, 10)
+    generationNotice.value = '已按当前生成方向新增可用评论'
+    notice.value = '评价生成任务已完成'
+    await loadAll()
+  } catch (err: any) {
+    error.value = messageFrom(err, '评价生成失败，已保存的生成方向不会丢失')
+  } finally {
+    generating.value = false
+  }
+}
+
+async function savePreferences(generateAfter = false) {
+  error.value = ''
+  notice.value = ''
+  preferenceSaving.value = true
+  try {
+    const payload = preferencePayload()
+    const res = await merchantApi.saveGenerationPreferences(payload)
+    applyPreferences(res.data.data)
+    notice.value = generateAfter ? '生成方向已保存，正在生成评论' : '生成方向已保存'
+    if (generateAfter) {
+      await generateReviews()
+    }
+  } catch (err: any) {
+    error.value = messageFrom(err, '生成方向保存失败')
+  } finally {
+    preferenceSaving.value = false
+  }
+}
+
+function applyPreferences(data: GenerationPreferences) {
+  preferenceForm.configured = !!data.configured
+  preferenceForm.focusKeywords = [...(data.focusKeywords || [])]
+  preferenceForm.styleCodes = data.styleCodes?.length ? [...data.styleCodes] : ['natural']
+  preferenceForm.referenceReviews = data.referenceReviews?.length ? [...data.referenceReviews] : ['']
+  preferenceForm.lengthVariance = data.lengthVariance || 'wide'
+  preferenceForm.updatedAt = data.updatedAt
+}
+
+function preferencePayload(): GenerationPreferences {
+  return {
+    focusKeywords: preferenceForm.focusKeywords.map((v) => v.trim()).filter(Boolean).slice(0, 8),
+    styleCodes: preferenceForm.styleCodes.length ? preferenceForm.styleCodes.slice(0, 3) : ['natural'],
+    referenceReviews: cleanReferenceReviews(),
+    lengthVariance: 'wide'
+  }
+}
+
+function toggleFocusKeyword(tag: string) {
+  tag = tag.trim()
+  if (!tag) return
+  const i = preferenceForm.focusKeywords.indexOf(tag)
+  if (i >= 0) {
+    preferenceForm.focusKeywords.splice(i, 1)
+    return
+  }
+  if (preferenceForm.focusKeywords.length >= 8) {
+    error.value = '重点方向最多选择 8 个'
+    return
+  }
+  preferenceForm.focusKeywords.push(tag)
+}
+
+function addCustomFocusKeyword() {
+  const value = customFocusKeyword.value.trim()
+  if (!value) return
+  toggleFocusKeyword(value)
+  customFocusKeyword.value = ''
+}
+
+function toggleStyle(code: string) {
+  const i = preferenceForm.styleCodes.indexOf(code)
+  if (i >= 0) {
+    if (preferenceForm.styleCodes.length === 1) return
+    preferenceForm.styleCodes.splice(i, 1)
+    return
+  }
+  if (preferenceForm.styleCodes.length >= 3) {
+    error.value = '语气最多选择 3 个'
+    return
+  }
+  preferenceForm.styleCodes.push(code)
+}
+
+function addReferenceReview() {
+  if (preferenceForm.referenceReviews.length >= 5) {
+    error.value = '参考评论最多 5 条'
+    return
+  }
+  preferenceForm.referenceReviews.push('')
+}
+
+function removeReferenceReview(index: number) {
+  preferenceForm.referenceReviews.splice(index, 1)
+  if (preferenceForm.referenceReviews.length === 0) {
+    preferenceForm.referenceReviews.push('')
+  }
+}
+
+function cleanReferenceReviews() {
+  return preferenceForm.referenceReviews.map((v) => v.trim()).filter(Boolean).slice(0, 5)
 }
 
 async function deleteKeyword(id: number) {
@@ -230,6 +401,29 @@ function numericStatusText(status: number) {
   return status === 1 ? '启用' : '禁用'
 }
 
+function formatNumber(value: number | undefined) {
+  return Number(value || 0).toLocaleString('zh-CN')
+}
+
+function shortDate(value?: string) {
+  if (!value) return ''
+  const parts = value.split('-')
+  return parts.length === 3 ? `${parts[1]}.${parts[2]}` : value
+}
+
+function buildChartPoints(series: { label: string; count: number }[]) {
+  if (!series.length) return []
+  const width = 320
+  const top = 18
+  const bottom = 96
+  const max = Math.max(...series.map((item) => item.count), 1)
+  return series.map((item, index) => {
+    const x = series.length === 1 ? width / 2 : 18 + (index * (width - 36)) / (series.length - 1)
+    const y = bottom - (item.count / max) * (bottom - top)
+    return { ...item, x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) }
+  })
+}
+
 function logout() {
   auth.clear()
   location.href = import.meta.env.BASE_URL + 'merchant/login'
@@ -250,94 +444,226 @@ onMounted(loadAll)
     <p v-if="error" class="alert">{{ error }}</p>
     <p v-else-if="notice" class="notice">{{ notice }}</p>
 
-    <div class="focus-grid">
-      <div class="card">
-        <h2>客户端跳转链接</h2>
-        <p class="muted card-subtitle">顾客从落地页点按钮时打开这里配置的商家链接。</p>
-        <input v-model.trim="platformForm.platformCode" list="platform-codes" placeholder="平台编码，如 dianping" @change="applyPlatformPreset" />
-        <datalist id="platform-codes">
-          <option value="dianping">大众点评</option>
-          <option value="meituan">美团</option>
-          <option value="xiaohongshu">小红书</option>
-          <option value="douyin">抖音</option>
-        </datalist>
-        <div class="field-gap"></div>
-        <input v-model="platformForm.platformName" placeholder="平台名称" />
-        <div class="field-gap"></div>
-        <input v-model="platformForm.buttonText" placeholder="按钮文案" />
-        <div class="field-gap"></div>
-        <input v-model.trim="platformForm.targetUrl" placeholder="客户端跳转链接" />
-        <div class="field-gap"></div>
-        <input v-model.trim="platformForm.backupUrl" placeholder="备用链接（选填）" />
-        <div class="field-gap"></div>
-        <div class="row action-row">
-          <button :disabled="loading" @click="savePlatformLink">
-            {{ isEditingPlatformLink ? '保存跳转链接' : '新增跳转链接' }}
-          </button>
-          <button v-if="isEditingPlatformLink" class="secondary" :disabled="loading" @click="resetPlatformForm">取消编辑</button>
+    <section class="value-shell" aria-labelledby="publish-title">
+      <div class="store-strip">
+        <div class="store-mark" aria-hidden="true">{{ storeInitial }}</div>
+        <div class="store-copy">
+          <p class="eyebrow">{{ storeForm.industryType || '商家' }}</p>
+          <h2 id="publish-title">{{ storeForm.storeName || '商家价值看板' }}</h2>
         </div>
-        <ul class="link-list">
-          <li v-for="item in links" :key="item.id" class="list-action">
-            <span>{{ item.buttonText }} - {{ item.targetUrl }}（{{ numericStatusText(item.status) }}）</span>
-            <span class="row link-actions">
-              <button class="secondary" :disabled="loading" @click="editPlatformLink(item)">编辑</button>
-              <button class="secondary" :disabled="loading" @click="togglePlatformLinkStatus(item)">
-                {{ item.status === 1 ? '禁用' : '启用' }}
-              </button>
-              <button class="danger" :disabled="loading" @click="deletePlatformLink(item.id)">删除</button>
-            </span>
-          </li>
-        </ul>
+        <p class="updated">{{ updatedText }}</p>
       </div>
 
-      <div class="card">
-        <h2>AI 生成任务</h2>
-        <p class="muted card-subtitle">选择平台后生成一批可投放的评价文案。</p>
-        <select v-model="reviewPlatformCode">
-          <option value="" disabled>选择评价平台</option>
-          <option v-for="item in links" :key="item.id" :value="item.platformCode">
-            {{ item.platformName || item.platformCode }}
-          </option>
-        </select>
-        <div class="field-gap"></div>
-        <button :disabled="loading" @click="generateReviews">生成 10 条评价</button>
-        <table>
-          <thead><tr><th>ID</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
-          <tbody>
-            <tr v-for="task in tasks" :key="task.id">
-              <td>{{ task.id }}</td>
-              <td>{{ task.triggerType }}</td>
-              <td>{{ task.status }}</td>
-              <td>{{ task.successCount }}</td>
-            </tr>
-          </tbody>
-        </table>
+      <div class="metric-zone" :aria-busy="loading && !dashboard">
+        <div>
+          <p class="metric-label">累计引导发布</p>
+          <p class="hero-number">{{ formatNumber(dashboard?.totalPublishClicks) }}</p>
+          <p class="metric-status">{{ dashboardStatusText }}</p>
+        </div>
+        <div class="secondary-metrics">
+          <div>
+            <span>本周</span>
+            <strong>{{ formatNumber(dashboard?.currentWeekPublishClicks) }}</strong>
+          </div>
+          <div>
+            <span>本月</span>
+            <strong>{{ formatNumber(dashboard?.currentMonthPublishClicks) }}</strong>
+          </div>
+        </div>
       </div>
-    </div>
+
+      <div class="trend-section">
+        <div class="trend-head">
+          <div>
+            <h3>发布趋势</h3>
+            <p class="muted">
+              {{ activeTrend === 'week' ? '最近 12 周' : '最近 12 个月' }}
+            </p>
+          </div>
+          <div class="trend-tabs" role="tablist" aria-label="趋势维度">
+            <button type="button" :class="{ active: activeTrend === 'week' }" :aria-pressed="activeTrend === 'week'" @click="activeTrend = 'week'">按周</button>
+            <button type="button" :class="{ active: activeTrend === 'month' }" :aria-pressed="activeTrend === 'month'" @click="activeTrend = 'month'">按月</button>
+          </div>
+        </div>
+
+        <div class="chart-wrap">
+          <svg viewBox="0 0 320 120" role="img" :aria-label="chartAria">
+            <line x1="18" y1="96" x2="302" y2="96" class="axis" />
+            <polyline v-if="chartPoints.length" :points="chartPolyline" class="trend-line" fill="none" />
+            <g v-for="point in chartPoints" :key="point.label">
+              <circle :cx="point.x" :cy="point.y" r="3.6" class="trend-dot" />
+              <text v-if="point.count > 0" :x="point.x" :y="point.y - 8" text-anchor="middle" class="point-label">{{ point.count }}</text>
+            </g>
+          </svg>
+          <div class="chart-labels" aria-hidden="true">
+            <span v-for="item in trendSeries.filter((_, i) => i === 0 || i === trendSeries.length - 1 || i === Math.floor(trendSeries.length / 2))" :key="item.label">
+              {{ item.label }}
+            </span>
+          </div>
+          <p v-if="!trendHasData" class="empty-note">
+            {{ dashboard?.platformLinksConfigured ? '有顾客点击去发布后，这里会出现趋势' : '先新增平台链接，顾客才能去发布' }}
+          </p>
+          <table class="sr-only">
+            <caption>{{ activeTrend === 'week' ? '按周引导发布数据' : '按月引导发布数据' }}</caption>
+            <tbody>
+              <tr v-for="item in trendSeries" :key="item.label">
+                <th>{{ item.label }}</th>
+                <td>{{ item.count }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="optimization-panel">
+        <div>
+          <h3>优化下一批评论</h3>
+          <p class="muted">{{ preferenceSummary }}</p>
+          <p v-if="generationNotice" class="inline-success">{{ generationNotice }}</p>
+        </div>
+        <div class="row optimization-actions">
+          <button class="secondary" type="button" @click="optimizationOpen = !optimizationOpen">
+            {{ optimizationOpen ? '收起' : '去优化' }}
+          </button>
+          <button type="button" :disabled="preferenceSaving || generating" @click="savePreferences(true)">保存并生成 10 条</button>
+        </div>
+      </div>
+
+      <div v-if="optimizationOpen" class="preference-form">
+        <div class="form-block">
+          <label class="field-label" for="custom-focus">重点方向</label>
+          <div class="tag-grid">
+            <button
+              v-for="tag in preferenceKeywordOptions"
+              :key="tag"
+              type="button"
+              class="select-chip"
+              :class="{ selected: preferenceForm.focusKeywords.includes(tag) }"
+              :aria-pressed="preferenceForm.focusKeywords.includes(tag)"
+              @click="toggleFocusKeyword(tag)"
+            >{{ tag }}</button>
+          </div>
+          <div class="row action-row compact-row">
+            <input id="custom-focus" v-model="customFocusKeyword" maxlength="40" placeholder="新增重点，如 上菜快" />
+            <button type="button" class="secondary" @click="addCustomFocusKeyword">添加重点</button>
+          </div>
+        </div>
+
+        <div class="form-block">
+          <p class="field-label">语气</p>
+          <div class="tag-grid">
+            <button
+              v-for="item in styleOptions"
+              :key="item.code"
+              type="button"
+              class="select-chip"
+              :class="{ selected: preferenceForm.styleCodes.includes(item.code) }"
+              :aria-pressed="preferenceForm.styleCodes.includes(item.code)"
+              @click="toggleStyle(item.code)"
+            >{{ item.label }}</button>
+          </div>
+        </div>
+
+        <div class="form-block">
+          <div class="row form-title-row">
+            <label class="field-label">参考评论</label>
+            <button type="button" class="secondary small-btn" @click="addReferenceReview">新增一条</button>
+          </div>
+          <div class="reference-list">
+            <div v-for="(_, index) in preferenceForm.referenceReviews" :key="index" class="reference-row">
+              <textarea v-model="preferenceForm.referenceReviews[index]" maxlength="300" placeholder="贴一条真实顾客评论，AI 只学习表达方式"></textarea>
+              <button type="button" class="danger small-btn" @click="removeReferenceReview(index)">删除</button>
+            </div>
+          </div>
+          <p class="privacy-note">请勿粘贴手机号、微信号、订单号等个人信息。</p>
+        </div>
+
+        <div class="row form-actions">
+          <button type="button" :disabled="preferenceSaving" @click="savePreferences(false)">
+            {{ preferenceSaving ? '保存中' : '保存生成方向' }}
+          </button>
+          <button type="button" class="secondary" :disabled="preferenceSaving || generating" @click="savePreferences(true)">
+            {{ generating ? '生成中' : '保存并生成 10 条' }}
+          </button>
+        </div>
+      </div>
+    </section>
 
     <div class="fold-grid">
       <details class="card fold-card">
         <summary>
           <span>
-            <strong>店铺信息</strong>
-            <small>门店名称、行业、地址和品牌语气</small>
+            <strong>跳转链接</strong>
+            <small>顾客点击去发布时打开的商家链接</small>
           </span>
           <span class="fold-hint">展开</span>
         </summary>
         <div class="fold-body">
-          <input v-model="storeForm.storeName" placeholder="门店名称" />
+          <input v-model.trim="platformForm.platformCode" list="platform-codes" placeholder="平台编码，如 dianping" @change="applyPlatformPreset" />
+          <datalist id="platform-codes">
+            <option value="dianping">大众点评</option>
+            <option value="meituan">美团</option>
+            <option value="xiaohongshu">小红书</option>
+            <option value="douyin">抖音</option>
+          </datalist>
           <div class="field-gap"></div>
-          <input v-model="storeForm.industryType" placeholder="行业类型" />
+          <input v-model="platformForm.platformName" placeholder="平台名称" />
           <div class="field-gap"></div>
-          <input v-model="storeForm.address" placeholder="门店地址" />
+          <input v-model="platformForm.buttonText" placeholder="按钮文案" />
           <div class="field-gap"></div>
-          <input v-model="storeForm.primaryPlatformStyle" placeholder="主平台风格" />
+          <input v-model.trim="platformForm.targetUrl" placeholder="客户端跳转链接" />
           <div class="field-gap"></div>
-          <textarea v-model="storeForm.storeIntro" placeholder="门店简介"></textarea>
+          <input v-model.trim="platformForm.backupUrl" placeholder="备用链接（选填）" />
           <div class="field-gap"></div>
-          <input v-model="storeForm.brandTone" placeholder="品牌调性" />
+          <div class="row action-row">
+            <button :disabled="loading" @click="savePlatformLink">
+              {{ isEditingPlatformLink ? '保存跳转链接' : '新增跳转链接' }}
+            </button>
+            <button v-if="isEditingPlatformLink" class="secondary" :disabled="loading" @click="resetPlatformForm">取消编辑</button>
+          </div>
+          <ul class="link-list">
+            <li v-for="item in links" :key="item.id" class="list-action">
+              <span>{{ item.buttonText }} - {{ item.targetUrl }}（{{ numericStatusText(item.status) }}）</span>
+              <span class="row link-actions">
+                <button class="secondary" :disabled="loading" @click="editPlatformLink(item)">编辑</button>
+                <button class="secondary" :disabled="loading" @click="togglePlatformLinkStatus(item)">
+                  {{ item.status === 1 ? '禁用' : '启用' }}
+                </button>
+                <button class="danger" :disabled="loading" @click="deletePlatformLink(item.id)">删除</button>
+              </span>
+            </li>
+          </ul>
+        </div>
+      </details>
+
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>AI 生成任务</strong>
+            <small>按当前生成方向补充评价池</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <select v-model="reviewPlatformCode">
+            <option value="" disabled>选择评价平台</option>
+            <option v-for="item in links" :key="item.id" :value="item.platformCode">
+              {{ item.platformName || item.platformCode }}
+            </option>
+          </select>
           <div class="field-gap"></div>
-          <button :disabled="loading" @click="saveStore">保存</button>
+          <button :disabled="loading || generating" @click="generateReviews">{{ generating ? '生成中' : '生成 10 条评价' }}</button>
+          <table>
+            <thead><tr><th>ID</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
+            <tbody>
+              <tr v-for="task in tasks" :key="task.id">
+                <td>{{ task.id }}</td>
+                <td>{{ task.triggerType }}</td>
+                <td>{{ task.status }}</td>
+                <td>{{ task.successCount }}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </details>
 
@@ -407,6 +733,31 @@ onMounted(loadAll)
       <details class="card fold-card">
         <summary>
           <span>
+            <strong>店铺信息</strong>
+            <small>门店名称、行业、地址和品牌语气</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <input v-model="storeForm.storeName" placeholder="门店名称" />
+          <div class="field-gap"></div>
+          <input v-model="storeForm.industryType" placeholder="行业类型" />
+          <div class="field-gap"></div>
+          <input v-model="storeForm.address" placeholder="门店地址" />
+          <div class="field-gap"></div>
+          <input v-model="storeForm.primaryPlatformStyle" placeholder="主平台风格" />
+          <div class="field-gap"></div>
+          <textarea v-model="storeForm.storeIntro" placeholder="门店简介"></textarea>
+          <div class="field-gap"></div>
+          <input v-model="storeForm.brandTone" placeholder="品牌调性" />
+          <div class="field-gap"></div>
+          <button :disabled="loading" @click="saveStore">保存</button>
+        </div>
+      </details>
+
+      <details class="card fold-card">
+        <summary>
+          <span>
             <strong>评价管理</strong>
             <small>手工补充和维护可用评价</small>
           </span>
@@ -443,13 +794,246 @@ onMounted(loadAll)
 .header-actions {
   align-items: center;
 }
-.focus-grid {
-  display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+.merchant-console .card {
+  border-radius: 8px;
+  box-shadow: none;
 }
-.card-subtitle {
-  margin: 0 0 10px;
+.value-shell {
+  background: var(--surface);
+  border: 1px solid rgba(219, 228, 240, 0.9);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 20px;
+}
+.store-strip {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.store-mark {
+  align-items: center;
+  background: #0f172a;
+  border-radius: 8px;
+  color: #fff;
+  display: inline-flex;
+  font-size: 20px;
+  font-weight: 800;
+  height: 48px;
+  justify-content: center;
+  width: 48px;
+}
+.store-copy h2,
+.trend-head h3,
+.optimization-panel h3 {
+  margin: 0;
+}
+.eyebrow,
+.updated {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.updated {
+  text-align: right;
+}
+.metric-zone {
+  align-items: end;
+  border-bottom: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin: 18px 0;
+  padding: 18px 0;
+}
+.metric-label {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 4px;
+}
+.hero-number {
+  font-size: 56px;
+  font-weight: 850;
+  line-height: 1;
+  margin: 0;
+}
+.metric-status {
+  color: #334155;
+  margin: 8px 0 0;
+}
+.secondary-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+}
+.secondary-metrics div {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.secondary-metrics span {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+}
+.secondary-metrics strong {
+  display: block;
+  font-size: 24px;
+  line-height: 1.15;
+  margin-top: 2px;
+}
+.trend-section {
+  border-bottom: 1px solid var(--border-soft);
+  padding-bottom: 18px;
+}
+.trend-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.trend-head p {
+  margin: 2px 0 0;
+}
+.trend-tabs {
+  background: #f8fafc;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: inline-flex;
+  padding: 3px;
+}
+.trend-tabs button {
+  background: transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  min-height: 36px;
+  padding: 6px 12px;
+}
+.trend-tabs button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+}
+.chart-wrap {
+  position: relative;
+}
+.chart-wrap svg {
+  display: block;
+  height: 180px;
+  width: 100%;
+}
+.axis {
+  stroke: #cbd5e1;
+  stroke-width: 1;
+}
+.trend-line {
+  stroke: var(--primary);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+.trend-dot {
+  fill: var(--surface);
+  stroke: var(--primary-strong);
+  stroke-width: 2;
+}
+.point-label {
+  fill: var(--text);
+  font-size: 10px;
+  font-weight: 700;
+}
+.chart-labels {
+  color: var(--muted);
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  margin-top: -14px;
+}
+.empty-note {
+  color: var(--muted);
+  margin: 8px 0 0;
+}
+.optimization-panel {
+  align-items: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-top: 18px;
+}
+.optimization-panel p {
+  margin: 4px 0 0;
+}
+.optimization-actions {
+  justify-content: flex-end;
+}
+.inline-success {
+  color: var(--success-text);
+  font-weight: 700;
+}
+.preference-form {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 18px;
+  padding-top: 18px;
+}
+.form-block {
+  margin-bottom: 16px;
+}
+.field-label {
+  color: var(--text);
+  display: block;
+  font-size: 14px;
+  font-weight: 800;
+  margin: 0 0 8px;
+}
+.tag-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.select-chip {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: #334155;
+  min-height: 40px;
+  padding: 8px 12px;
+}
+.select-chip.selected {
+  background: var(--primary-soft);
+  border-color: #93c5fd;
+  color: var(--primary-strong);
+  font-weight: 800;
+}
+.compact-row {
+  margin-top: 10px;
+}
+.form-title-row {
+  align-items: center;
+  justify-content: space-between;
+}
+.reference-list {
+  display: grid;
+  gap: 10px;
+}
+.reference-row {
+  align-items: start;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.privacy-note {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 8px 0 0;
+}
+.small-btn {
+  min-height: 38px;
+  padding: 7px 12px;
+}
+.form-actions {
+  align-items: center;
 }
 .field-gap {
   height: 8px;
@@ -537,33 +1121,33 @@ onMounted(loadAll)
   padding: 14px 18px 18px;
 }
 .upload-btn {
-  display: inline-flex;
   align-items: center;
+  background: #3b82f6;
+  border-radius: 8px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 15px;
+  font-weight: 700;
   justify-content: center;
   min-height: 48px;
   min-width: 132px;
   padding: 10px 16px;
-  background: #3b82f6;
-  color: #fff;
-  border-radius: 10px;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 700;
   touch-action: manipulation;
 }
 .upload-btn:hover {
   background: #2563eb;
 }
 .suggest-chip {
-  min-height: 40px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px dashed #93c5fd;
   background: #f0f7ff;
+  border: 1px dashed #93c5fd;
+  border-radius: 8px;
   color: #1d4ed8;
+  cursor: pointer;
   font-size: 13px;
   font-weight: 700;
-  cursor: pointer;
+  min-height: 40px;
+  padding: 8px 14px;
 }
 .suggest-chip:hover {
   background: #dbeafe;
@@ -571,33 +1155,67 @@ onMounted(loadAll)
 .suggest-chip:disabled {
   opacity: 0.6;
 }
+.sr-only {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
   .merchant-header {
     display: grid;
     grid-template-columns: 1fr;
   }
   .header-actions,
-  .action-row {
+  .action-row,
+  .form-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
   .header-actions button,
-  .action-row button {
+  .action-row button,
+  .form-actions button {
     width: 100%;
   }
-  .action-row button:only-child {
-    grid-column: 1 / -1;
+  .store-strip,
+  .metric-zone,
+  .optimization-panel {
+    grid-template-columns: 1fr;
   }
-  .focus-grid,
+  .updated {
+    text-align: left;
+  }
+  .hero-number {
+    font-size: 44px;
+  }
+  .secondary-metrics,
   .fold-grid {
+    grid-template-columns: 1fr;
+  }
+  .trend-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .trend-tabs {
+    width: 100%;
+  }
+  .trend-tabs button {
+    flex: 1;
+  }
+  .optimization-actions {
+    justify-content: stretch;
+  }
+  .reference-row {
     grid-template-columns: 1fr;
   }
   .upload-btn {
     width: 100%;
   }
-  .suggest-chip {
+  .suggest-chip,
+  .select-chip {
     flex: 1 1 calc(50% - 8px);
     min-height: 44px;
   }

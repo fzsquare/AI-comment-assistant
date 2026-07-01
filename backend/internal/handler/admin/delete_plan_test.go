@@ -14,6 +14,7 @@ func TestStoreDeletionPlanClearsChildrenBeforeDeletingStore(t *testing.T) {
 		"delete_review_feedbacks",
 		"delete_review_display_logs",
 		"delete_review_generation_tasks",
+		"delete_store_generation_preferences",
 		"delete_review_items",
 		"delete_store_platform_links",
 		"delete_store_images",

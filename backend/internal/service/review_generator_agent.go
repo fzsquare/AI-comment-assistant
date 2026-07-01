@@ -46,17 +46,25 @@ type agentStore struct {
 }
 
 type agentRequest struct {
-	Store        agentStore     `json:"store"`
-	Keywords     []string       `json:"keywords"`
-	Platform     string         `json:"platform"`
-	Count        int            `json:"count"`
-	Satisfaction string         `json:"satisfaction"`
-	Feedback     *agentFeedback `json:"feedback,omitempty"`
+	Store                 agentStore                  `json:"store"`
+	Keywords              []string                    `json:"keywords"`
+	Platform              string                      `json:"platform"`
+	Count                 int                         `json:"count"`
+	Satisfaction          string                      `json:"satisfaction"`
+	Feedback              *agentFeedback              `json:"feedback,omitempty"`
+	GenerationPreferences *agentGenerationPreferences `json:"generation_preferences,omitempty"`
 }
 
 type agentFeedback struct {
 	Accepted []string `json:"accepted,omitempty"`
 	Rejected []string `json:"rejected,omitempty"`
+}
+
+type agentGenerationPreferences struct {
+	FocusKeywords    []string `json:"focus_keywords,omitempty"`
+	StyleCodes       []string `json:"style_codes,omitempty"`
+	ReferenceReviews []string `json:"reference_reviews,omitempty"`
+	LengthVariance   string   `json:"length_variance,omitempty"`
 }
 
 type agentItem struct {
@@ -80,6 +88,10 @@ func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.Stor
 }
 
 func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords []model.StoreKeyword, feedback ReviewGenerationFeedback, targetCount int) ([]model.ReviewItem, error) {
+	return g.GenerateWithContext(store, keywords, ReviewGenerationContext{Feedback: feedback}, targetCount)
+}
+
+func (g *AgentReviewGenerator) GenerateWithContext(store model.Store, keywords []model.StoreKeyword, context ReviewGenerationContext, targetCount int) ([]model.ReviewItem, error) {
 	if !strings.HasPrefix(g.BaseURL, "http://") && !strings.HasPrefix(g.BaseURL, "https://") {
 		return nil, fmt.Errorf("非法的文案服务地址: %q", g.BaseURL)
 	}
@@ -106,7 +118,10 @@ func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords 
 		Platform:     platform,
 		Count:        targetCount,
 		Satisfaction: "比较满意",
-		Feedback:     agentFeedbackFrom(feedback),
+		Feedback:     agentFeedbackFrom(context.Feedback),
+		GenerationPreferences: agentPreferencesFrom(
+			context.Preferences.WithDefaults(),
+		),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("构造文案请求失败: %w", err)
@@ -163,5 +178,17 @@ func agentFeedbackFrom(feedback ReviewGenerationFeedback) *agentFeedback {
 	return &agentFeedback{
 		Accepted: feedback.Accepted,
 		Rejected: feedback.Rejected,
+	}
+}
+
+func agentPreferencesFrom(preferences GenerationPreferences) *agentGenerationPreferences {
+	if !preferences.HasAnyInput() {
+		return nil
+	}
+	return &agentGenerationPreferences{
+		FocusKeywords:    preferences.FocusKeywords,
+		StyleCodes:       preferences.StyleCodes,
+		ReferenceReviews: preferences.ReferenceReviews,
+		LengthVariance:   preferences.LengthVariance,
 	}
 }

@@ -116,3 +116,55 @@ func TestAgentReviewGeneratorSendsFeedbackExamples(t *testing.T) {
 		t.Fatalf("rejected feedback got %#v", gotPayload.Feedback.Rejected)
 	}
 }
+
+func TestAgentReviewGeneratorSendsGenerationPreferences(t *testing.T) {
+	var gotPayload agentRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request failed: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: "dianping",
+			Produced: 1,
+			Items:    []agentItem{{Content: "蟹很入味，服务也自然。", Grade: "B"}},
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGenerator(srv.URL, "B", "agent-token")
+	_, err := generator.GenerateWithContext(
+		model.Store{PrimaryPlatformStyle: "dianping"},
+		nil,
+		ReviewGenerationContext{
+			Feedback: ReviewGenerationFeedback{
+				Accepted: []string{"接受样本：服务员会主动换盘。"},
+			},
+			Preferences: GenerationPreferences{
+				FocusKeywords:    []string{"香辣蟹", "服务热情"},
+				StyleCodes:       []string{"natural", "detail_rich"},
+				ReferenceReviews: []string{"蟹很入味，服务员会主动帮忙换盘。"},
+				LengthVariance:   "wide",
+			},
+		},
+		1,
+	)
+	if err != nil {
+		t.Fatalf("GenerateWithContext returned error: %v", err)
+	}
+	if gotPayload.GenerationPreferences == nil {
+		t.Fatal("expected generation_preferences payload")
+	}
+	if got := gotPayload.GenerationPreferences.FocusKeywords; len(got) != 2 || got[0] != "香辣蟹" || got[1] != "服务热情" {
+		t.Fatalf("focus keywords got %#v", got)
+	}
+	if got := gotPayload.GenerationPreferences.StyleCodes; len(got) != 2 || got[0] != "natural" || got[1] != "detail_rich" {
+		t.Fatalf("style codes got %#v", got)
+	}
+	if gotPayload.GenerationPreferences.LengthVariance != "wide" {
+		t.Fatalf("length variance got %q, want wide", gotPayload.GenerationPreferences.LengthVariance)
+	}
+	if gotPayload.Feedback == nil || len(gotPayload.Feedback.Accepted) != 1 {
+		t.Fatalf("feedback should still be sent with preferences, got %#v", gotPayload.Feedback)
+	}
+}

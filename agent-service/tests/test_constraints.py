@@ -26,12 +26,13 @@ from app.prompts.writer import build_writer_user  # noqa: E402
 from app.reviewer_logic import reviewer_passes  # noqa: E402
 
 try:
-    from app.schemas import FeedbackExamples, GenerateRequest, ReviewItem, StoreContext  # noqa: E402
+    from app.schemas import FeedbackExamples, GenerateRequest, GenerationPreferences, ReviewItem, StoreContext  # noqa: E402
 except ModuleNotFoundError as exc:
     if exc.name != "pydantic":
         raise
     FeedbackExamples = None
     GenerateRequest = None
+    GenerationPreferences = None
     ReviewItem = None
     StoreContext = None
 
@@ -256,6 +257,51 @@ def test_writer_prompt_uses_feedback_examples():
     assert "蟹肉饱满，服务员会主动换盘。" in user
     assert "用户不喜欢的评论样本" in user
     assert "太像广告，夸得太满。" in user
+
+
+def test_generate_request_accepts_generation_preferences():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 generation_preferences schema 测试")
+        return
+    req = GenerateRequest(
+        store={"store_name": "七欣天香辣蟹"},
+        keywords=["香辣蟹"],
+        platform="meituan",
+        generation_preferences={
+            "focus_keywords": ["香辣蟹", "服务热情"],
+            "style_codes": ["natural", "detail_rich"],
+            "reference_reviews": ["蟹很入味，服务员会主动帮忙换盘。"],
+            "length_variance": "wide",
+        },
+    )
+    assert req.generation_preferences.focus_keywords == ["香辣蟹", "服务热情"]
+    assert req.generation_preferences.style_codes == ["natural", "detail_rich"]
+    assert req.generation_preferences.length_variance == "wide"
+
+
+def test_writer_prompt_uses_generation_preferences():
+    if GenerationPreferences is None:
+        print("SKIP  pydantic 未安装，跳过 generation_preferences prompt 测试")
+        return
+    spec = get_spec("meituan")
+    user = build_writer_user(
+        spec,
+        StoreContext(store_name="七欣天香辣蟹"),
+        ["香辣蟹", "聚餐"],
+        "比较满意",
+        2,
+        generation_preferences=GenerationPreferences(
+            focus_keywords=["香辣蟹", "服务热情"],
+            style_codes=["natural", "detail_rich"],
+            reference_reviews=["蟹很入味，服务员会主动帮忙换盘。"],
+            length_variance="wide",
+        ),
+    )
+    assert "商家生成方向" in user
+    assert "香辣蟹、服务热情" in user
+    assert "自然随手写、细节丰富" in user
+    assert "蟹很入味，服务员会主动帮忙换盘。" in user
+    assert "本条字数目标" in user
 
 
 def test_generate_request_rejects_long_store_name():
