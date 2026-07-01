@@ -12,6 +12,7 @@ const AdminConsole = () => import('../views/admin/AdminConsole.vue')
 
 const TOKEN_KEY = 'ppk-token'
 const ROLE_KEY = 'ppk-role'
+const DEFAULT_TITLE = '评价助手'
 
 function loginPath(role?: Role) {
   return role === 'admin' ? '/admin/login' : '/merchant/login'
@@ -32,15 +33,19 @@ function clearAuth() {
   localStorage.removeItem(ROLE_KEY)
 }
 
+function routeTitle(title: unknown) {
+  return typeof title === 'string' && title.trim() ? title : DEFAULT_TITLE
+}
+
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', component: Portal },
-    { path: '/landing/:token', component: LandingPage },
-    { path: '/merchant/login', component: MerchantLogin },
-    { path: '/merchant/console', component: MerchantConsole, meta: { requiresAuth: true, role: 'merchant' } },
-    { path: '/admin/login', component: AdminLogin },
-    { path: '/admin/console', component: AdminConsole, meta: { requiresAuth: true, role: 'admin' } }
+    { path: '/', component: Portal, meta: { title: '评价助手 - 入口' } },
+    { path: '/landing/:token', component: LandingPage, meta: { title: '消费者评价页 - 评价助手' } },
+    { path: '/merchant/login', component: MerchantLogin, meta: { title: '商家登录 - 评价助手' } },
+    { path: '/merchant/console', component: MerchantConsole, meta: { requiresAuth: true, role: 'merchant', title: '商家后台 - 评价助手' } },
+    { path: '/admin/login', component: AdminLogin, meta: { title: '管理员登录 - 评价助手' } },
+    { path: '/admin/console', component: AdminConsole, meta: { requiresAuth: true, role: 'admin', title: '管理员后台 - 评价助手' } }
   ]
 })
 
@@ -78,6 +83,10 @@ router.beforeEach((to) => {
   }
 
   return true
+})
+
+router.afterEach((to) => {
+  document.title = routeTitle(to.meta.title)
 })
 
 export default router

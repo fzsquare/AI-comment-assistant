@@ -1,5 +1,6 @@
 .env.deploy
 .deploy/
+.cache/
 __pycache__/
 *.pyc
 .gstack/
