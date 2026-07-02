@@ -17,6 +17,8 @@ import (
 )
 
 type publishStatsResponse struct {
+	PlatformCode                string               `json:"platformCode"`
+	PlatformName                string               `json:"platformName"`
 	TotalPublishClicks          int64                `json:"totalPublishClicks"`
 	CurrentWeekPublishClicks    int64                `json:"currentWeekPublishClicks"`
 	CurrentMonthPublishClicks   int64                `json:"currentMonthPublishClicks"`
@@ -72,68 +74,77 @@ func (h *Handler) getPublishStats(c *gin.Context) {
 	now := time.Now().In(loc)
 	weekStart := startOfWeek(now)
 	monthStart := startOfMonth(now)
+	platformCode, platformName, err := h.resolveStatsPlatform(store.ID, c.Query("platformCode"))
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "平台未启用")
+		return
+	}
+	visitAction := service.ReviewActionPageView
+	if platformCode != "" {
+		visitAction = service.ReviewActionPlatformSelect
+	}
 
-	total, err := h.countPublishClicks(store.ID, time.Time{}, time.Time{})
+	total, err := h.countPublishClicks(store.ID, platformCode, time.Time{}, time.Time{})
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "发布次数加载失败")
 		return
 	}
-	currentWeek, err := h.countPublishClicks(store.ID, weekStart, weekStart.AddDate(0, 0, 7))
+	currentWeek, err := h.countPublishClicks(store.ID, platformCode, weekStart, weekStart.AddDate(0, 0, 7))
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "本周发布次数加载失败")
 		return
 	}
-	currentMonth, err := h.countPublishClicks(store.ID, monthStart, monthStart.AddDate(0, 1, 0))
+	currentMonth, err := h.countPublishClicks(store.ID, platformCode, monthStart, monthStart.AddDate(0, 1, 0))
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "本月发布次数加载失败")
 		return
 	}
-	previousWeek, err := h.countPublishClicks(store.ID, weekStart.AddDate(0, 0, -7), weekStart)
+	previousWeek, err := h.countPublishClicks(store.ID, platformCode, weekStart.AddDate(0, 0, -7), weekStart)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "上周发布次数加载失败")
 		return
 	}
-	previousMonth, err := h.countPublishClicks(store.ID, monthStart.AddDate(0, -1, 0), monthStart)
+	previousMonth, err := h.countPublishClicks(store.ID, platformCode, monthStart.AddDate(0, -1, 0), monthStart)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "上月发布次数加载失败")
 		return
 	}
-	totalVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, time.Time{}, time.Time{})
+	totalVisits, err := service.CountReviewLogActionByPlatform(h.DB, store.ID, visitAction, platformCode, time.Time{}, time.Time{})
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "访问次数加载失败")
 		return
 	}
-	currentWeekVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, weekStart, weekStart.AddDate(0, 0, 7))
+	currentWeekVisits, err := service.CountReviewLogActionByPlatform(h.DB, store.ID, visitAction, platformCode, weekStart, weekStart.AddDate(0, 0, 7))
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "本周访问次数加载失败")
 		return
 	}
-	currentMonthVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, monthStart, monthStart.AddDate(0, 1, 0))
+	currentMonthVisits, err := service.CountReviewLogActionByPlatform(h.DB, store.ID, visitAction, platformCode, monthStart, monthStart.AddDate(0, 1, 0))
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "本月访问次数加载失败")
 		return
 	}
-	previousWeekVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, weekStart.AddDate(0, 0, -7), weekStart)
+	previousWeekVisits, err := service.CountReviewLogActionByPlatform(h.DB, store.ID, visitAction, platformCode, weekStart.AddDate(0, 0, -7), weekStart)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "上周访问次数加载失败")
 		return
 	}
-	previousMonthVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, monthStart.AddDate(0, -1, 0), monthStart)
+	previousMonthVisits, err := service.CountReviewLogActionByPlatform(h.DB, store.ID, visitAction, platformCode, monthStart.AddDate(0, -1, 0), monthStart)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "上月访问次数加载失败")
 		return
 	}
-	deviceStats, err := service.DeviceStatsForReviewLogs(h.DB, store.ID, service.ReviewActionPageView, time.Time{}, time.Time{})
+	deviceStats, err := service.DeviceStatsForReviewLogsByPlatform(h.DB, store.ID, visitAction, platformCode, time.Time{}, time.Time{})
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "设备占比加载失败")
 		return
 	}
-	weekly, err := h.weeklyPublishSeries(store.ID, weekStart, 12)
+	weekly, err := h.weeklyPublishSeries(store.ID, platformCode, weekStart, 12)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "周趋势加载失败")
 		return
 	}
-	monthly, err := h.monthlyPublishSeries(store.ID, monthStart, 12)
+	monthly, err := h.monthlyPublishSeries(store.ID, platformCode, monthStart, 12)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "月趋势加载失败")
 		return
@@ -148,6 +159,7 @@ func (h *Handler) getPublishStats(c *gin.Context) {
 	shareStats := service.CrawlGuidedShareStats(
 		h.DB,
 		store.ID,
+		platformCode,
 		weekStart,
 		weekStart.AddDate(0, 0, 7),
 		monthStart,
@@ -155,6 +167,8 @@ func (h *Handler) getPublishStats(c *gin.Context) {
 	)
 
 	response.Success(c, publishStatsResponse{
+		PlatformCode:                platformCode,
+		PlatformName:                platformName,
 		TotalPublishClicks:          total,
 		CurrentWeekPublishClicks:    currentWeek,
 		CurrentMonthPublishClicks:   currentMonth,
@@ -190,8 +204,24 @@ func (h *Handler) getPublishStats(c *gin.Context) {
 	})
 }
 
-func (h *Handler) countPublishClicks(storeID uint, start time.Time, end time.Time) (int64, error) {
-	return service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPlatformLinkClick, start, end)
+func (h *Handler) resolveStatsPlatform(storeID uint, requested string) (string, string, error) {
+	platformCode := strings.TrimSpace(requested)
+	if platformCode == "" || platformCode == "all" {
+		return "", "全部平台", nil
+	}
+	var link model.StorePlatformLink
+	if err := h.DB.Where("store_id = ? AND platform_code = ? AND status = ?", storeID, platformCode, model.StatusEnabled).First(&link).Error; err != nil {
+		return "", "", err
+	}
+	name := strings.TrimSpace(link.PlatformName)
+	if name == "" {
+		name = platformCode
+	}
+	return platformCode, name, nil
+}
+
+func (h *Handler) countPublishClicks(storeID uint, platformCode string, start time.Time, end time.Time) (int64, error) {
+	return service.CountReviewLogActionByPlatform(h.DB, storeID, service.ReviewActionPlatformLinkClick, platformCode, start, end)
 }
 
 func growthPercent(current int64, previous int64) float64 {
@@ -204,13 +234,13 @@ func growthPercent(current int64, previous int64) float64 {
 	return float64(current-previous) / float64(previous) * 100
 }
 
-func (h *Handler) weeklyPublishSeries(storeID uint, currentWeekStart time.Time, weeks int) ([]weeklySeriesPoint, error) {
+func (h *Handler) weeklyPublishSeries(storeID uint, platformCode string, currentWeekStart time.Time, weeks int) ([]weeklySeriesPoint, error) {
 	points := make([]weeklySeriesPoint, 0, weeks)
 	first := currentWeekStart.AddDate(0, 0, -7*(weeks-1))
 	for i := 0; i < weeks; i++ {
 		start := first.AddDate(0, 0, 7*i)
 		end := start.AddDate(0, 0, 7)
-		count, err := h.countPublishClicks(storeID, start, end)
+		count, err := h.countPublishClicks(storeID, platformCode, start, end)
 		if err != nil {
 			return nil, err
 		}
@@ -223,13 +253,13 @@ func (h *Handler) weeklyPublishSeries(storeID uint, currentWeekStart time.Time, 
 	return points, nil
 }
 
-func (h *Handler) monthlyPublishSeries(storeID uint, currentMonthStart time.Time, months int) ([]monthlySeriesPoint, error) {
+func (h *Handler) monthlyPublishSeries(storeID uint, platformCode string, currentMonthStart time.Time, months int) ([]monthlySeriesPoint, error) {
 	points := make([]monthlySeriesPoint, 0, months)
 	first := currentMonthStart.AddDate(0, -(months - 1), 0)
 	for i := 0; i < months; i++ {
 		start := first.AddDate(0, i, 0)
 		end := start.AddDate(0, 1, 0)
-		count, err := h.countPublishClicks(storeID, start, end)
+		count, err := h.countPublishClicks(storeID, platformCode, start, end)
 		if err != nil {
 			return nil, err
 		}

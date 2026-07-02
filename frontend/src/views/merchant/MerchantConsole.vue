@@ -25,6 +25,7 @@ const images = ref<any[]>([])
 const links = ref<any[]>([])
 const reviews = ref<any[]>([])
 const dashboard = ref<PublishStats | null>(null)
+const analyticsPlatformCode = ref('')
 const activeTrend = ref<'week' | 'month'>('week')
 const optimizationOpen = ref(false)
 const customFocusKeyword = ref('')
@@ -87,6 +88,22 @@ const preferenceSummary = computed(() => {
   return `重点：${focus}；方向：${selectedDiversityLabels.value}；语气：${selectedStyleLabels.value}；参考评论 ${refs} 条`
 })
 const storeInitial = computed(() => (storeForm.storeName || '店').trim().slice(0, 1))
+const activePlatformLinks = computed(() =>
+  [...links.value]
+    .filter((item) => item.status === 1)
+    .sort((a, b) => Number(a.sortNo || 0) - Number(b.sortNo || 0))
+)
+const analyticsPlatformOptions = computed(() => [
+  { platformCode: '', platformName: '全部平台' },
+  ...activePlatformLinks.value.map((item) => ({
+    platformCode: item.platformCode || '',
+    platformName: item.platformName || item.platformCode || '未命名平台'
+  }))
+])
+const selectedAnalyticsPlatformLabel = computed(() => {
+  if (dashboard.value?.platformName) return dashboard.value.platformName
+  return analyticsPlatformOptions.value.find((item) => item.platformCode === analyticsPlatformCode.value)?.platformName || '全部平台'
+})
 const trendSeries = computed(() => {
   const source = activeTrend.value === 'week' ? dashboard.value?.weeklySeries : dashboard.value?.monthlySeries
   return (source || []).map((item) => ({
@@ -100,7 +117,7 @@ const chartPolyline = computed(() => chartPoints.value.map((p) => `${p.x},${p.y}
 const chartAria = computed(() => {
   const mode = activeTrend.value === 'week' ? '按周' : '按月'
   const total = trendSeries.value.reduce((sum, item) => sum + item.count, 0)
-  return `${mode}引导发布趋势，共 ${trendSeries.value.length} 个数据点，合计 ${total} 次`
+  return `${selectedAnalyticsPlatformLabel.value}${mode}引导发布趋势，共 ${trendSeries.value.length} 个数据点，合计 ${total} 次`
 })
 const dashboardStatusText = computed(() => {
   if (!dashboard.value) return '数据加载中'
@@ -126,7 +143,7 @@ const visitStatusText = computed(() => {
   if (!dashboard.value) return '数据加载中'
   if (dashboard.value.totalCustomerVisits === 0) return '等待顾客通过 NFC 或交付 URL 访问'
   if (!topDevice.value) return `累计客户访问 ${formatNumber(dashboard.value.totalCustomerVisits)} 次`
-  return `${topDevice.value.label}访问最多，占 ${formatPercent(topDevice.value.percent)}`
+  return `${selectedAnalyticsPlatformLabel.value}：${topDevice.value.label}访问最多，占 ${formatPercent(topDevice.value.percent)}`
 })
 const deviceChartAria = computed(() => {
   if (!deviceHasData.value) return '暂无顾客访问设备数据'
@@ -141,6 +158,7 @@ const monthlyShareText = computed(() => {
   if (!dashboard.value?.monthlyGuidedShareReady) return crawlAccumulatingText.value
   return formatPercent(dashboard.value.monthlyGuidedSharePercent)
 })
+const shouldShowPublishConversion = computed(() => analyticsPlatformCode.value === 'meituan')
 
 function messageFrom(err: any, fallback: string) {
   return err?.response?.data?.message || err?.message || fallback
@@ -150,14 +168,13 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, statsRes, prefRes] = await Promise.all([
+    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, prefRes] = await Promise.all([
       merchantApi.getStoreDetail(),
       merchantApi.listKeywords(),
       merchantApi.getKeywordSuggestions(),
       merchantApi.listImages(),
       merchantApi.listPlatformLinks(),
       merchantApi.listReviews(),
-      merchantApi.getPublishStats(),
       merchantApi.getGenerationPreferences()
     ])
     Object.assign(storeForm, storeRes.data.data)
@@ -166,7 +183,8 @@ async function loadAll() {
     images.value = imageRes.data.data
     links.value = linkRes.data.data
     reviews.value = reviewRes.data.data
-    dashboard.value = statsRes.data.data
+    syncAnalyticsPlatformSelection()
+    await loadDashboardStats(false)
     applyPreferences(prefRes.data.data)
     if (!reviewPlatformCode.value && links.value.length > 0) {
       reviewPlatformCode.value = links.value.find((item) => item.status === 1)?.platformCode || links.value[0].platformCode
@@ -176,6 +194,40 @@ async function loadAll() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadDashboardStats(updateLoading = true) {
+  if (updateLoading) {
+    loading.value = true
+    error.value = ''
+  }
+  try {
+    const statsRes = await merchantApi.getPublishStats(analyticsPlatformCode.value)
+    dashboard.value = statsRes.data.data
+  } catch (err: any) {
+    error.value = messageFrom(err, '看板数据加载失败')
+  } finally {
+    if (updateLoading) loading.value = false
+  }
+}
+
+function syncAnalyticsPlatformSelection() {
+  if (!analyticsPlatformCode.value) return
+  const exists = activePlatformLinks.value.some((item) => item.platformCode === analyticsPlatformCode.value)
+  if (!exists) {
+    analyticsPlatformCode.value = ''
+  }
+}
+
+async function selectAnalyticsPlatform(platformCode: string) {
+  if (analyticsPlatformCode.value === platformCode) return
+  analyticsPlatformCode.value = platformCode
+  await loadDashboardStats()
+}
+
+async function onAnalyticsPlatformChange(event: Event) {
+  const target = event.target as HTMLSelectElement
+  await selectAnalyticsPlatform(target.value)
 }
 
 async function runAction(action: () => Promise<unknown>, success: string, reload = true) {
@@ -529,9 +581,28 @@ onMounted(loadAll)
         <p class="updated">{{ updatedText }}</p>
       </div>
 
+      <div class="platform-filter" aria-label="数据平台筛选">
+        <div>
+          <span>数据平台</span>
+          <strong>{{ selectedAnalyticsPlatformLabel }}</strong>
+        </div>
+        <div class="platform-select-wrap">
+          <label for="analytics-platform">选择平台</label>
+          <select id="analytics-platform" :value="analyticsPlatformCode" :disabled="loading" @change="onAnalyticsPlatformChange">
+            <option
+              v-for="item in analyticsPlatformOptions"
+              :key="item.platformCode || 'all'"
+              :value="item.platformCode"
+            >
+              {{ item.platformName }}
+            </option>
+          </select>
+        </div>
+      </div>
+
       <div class="metric-zone" :aria-busy="loading && !dashboard">
         <div>
-          <p class="metric-label">累计客户访问</p>
+          <p class="metric-label">{{ selectedAnalyticsPlatformLabel }} · 累计客户访问</p>
           <p class="hero-number">{{ formatNumber(dashboard?.totalCustomerVisits) }}</p>
           <p class="metric-status">{{ visitStatusText }}</p>
         </div>
@@ -549,9 +620,10 @@ onMounted(loadAll)
           <div>
             <span>引导发布</span>
             <strong>{{ formatNumber(dashboard?.totalPublishClicks) }}</strong>
-            <small>
-              周 <b :class="growthClass(dashboard?.publishWeekGrowthPercent)">{{ formatGrowthPercent(dashboard?.publishWeekGrowthPercent) }}</b>
-              · 月 <b :class="growthClass(dashboard?.publishMonthGrowthPercent)">{{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</b>
+            <small class="growth-pair">
+              <span :class="growthClass(dashboard?.publishWeekGrowthPercent)">周 {{ formatGrowthPercent(dashboard?.publishWeekGrowthPercent) }}</span>
+              <span aria-hidden="true">·</span>
+              <span :class="growthClass(dashboard?.publishMonthGrowthPercent)">月 {{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</span>
             </small>
           </div>
           <div>
@@ -566,6 +638,7 @@ onMounted(loadAll)
           <div>
             <h3>发布趋势</h3>
             <p class="muted">
+              <span class="platform-chip">{{ selectedAnalyticsPlatformLabel }}</span>
               {{ activeTrend === 'week' ? '最近 12 周' : '最近 12 个月' }}
             </p>
           </div>
@@ -605,11 +678,11 @@ onMounted(loadAll)
       </div>
 
       <div class="dashboard-stack">
-        <section class="publish-summary" aria-labelledby="publish-summary-title">
+        <section v-if="shouldShowPublishConversion" class="publish-summary" aria-labelledby="publish-summary-title">
           <div class="insight-head">
             <div>
               <h3 id="publish-summary-title">发布转化</h3>
-              <p class="muted">{{ dashboardStatusText }}</p>
+              <p class="muted"><span class="platform-chip">{{ selectedAnalyticsPlatformLabel }}</span> {{ dashboardStatusText }}</p>
             </div>
           </div>
           <dl class="compact-metrics">
@@ -619,14 +692,14 @@ onMounted(loadAll)
               <small :class="growthClass(dashboard?.publishWeekGrowthPercent)">较上周 {{ formatGrowthPercent(dashboard?.publishWeekGrowthPercent) }}</small>
             </div>
             <div>
-              <dt>本月发布</dt>
-              <dd>{{ formatNumber(dashboard?.currentMonthPublishClicks) }}</dd>
-              <small :class="growthClass(dashboard?.publishMonthGrowthPercent)">较上月 {{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</small>
-            </div>
-            <div>
               <dt>本周占比</dt>
               <dd>{{ weeklyShareText }}</dd>
               <small>引导发布在周评论中的占比</small>
+            </div>
+            <div>
+              <dt>本月发布</dt>
+              <dd>{{ formatNumber(dashboard?.currentMonthPublishClicks) }}</dd>
+              <small :class="growthClass(dashboard?.publishMonthGrowthPercent)">较上月 {{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</small>
             </div>
             <div>
               <dt>本月占比</dt>
@@ -640,7 +713,7 @@ onMounted(loadAll)
           <summary class="device-summary">
             <span>
               <h3 id="device-title">访问设备占比</h3>
-              <p class="muted">按顾客打开落地页的 UA 识别手机系统和品牌</p>
+              <p class="muted"><span class="platform-chip">{{ selectedAnalyticsPlatformLabel }}</span> 设备访问分布</p>
             </span>
             <strong class="device-total">{{ formatNumber(dashboard?.deviceStats?.totalCount) }}</strong>
             <span class="device-toggle" aria-hidden="true">
@@ -984,6 +1057,64 @@ onMounted(loadAll)
 .updated {
   text-align: right;
 }
+.platform-filter {
+  align-items: center;
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  margin-top: 18px;
+  padding-top: 16px;
+}
+.platform-filter span {
+  color: var(--muted);
+  display: block;
+  font-size: 13px;
+}
+.platform-filter strong {
+  color: var(--text);
+  display: block;
+  font-size: 20px;
+  line-height: 1.2;
+  margin-top: 2px;
+}
+.platform-select-wrap {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.platform-select-wrap label {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.platform-select-wrap select {
+  background: #f8fafc;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 800;
+  min-height: 40px;
+  min-width: 150px;
+  padding: 8px 12px;
+}
+.platform-select-wrap select:disabled {
+  opacity: 0.65;
+}
+.platform-chip {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  color: var(--primary-strong);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  margin-right: 6px;
+  padding: 3px 7px;
+  vertical-align: 1px;
+}
 .metric-zone {
   align-items: end;
   border-bottom: 1px solid var(--border-soft);
@@ -1042,6 +1173,15 @@ onMounted(loadAll)
 .secondary-metrics small b {
   font-size: inherit;
 }
+.secondary-metrics .growth-pair {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+}
+.secondary-metrics .growth-pair span {
+  display: inline;
+  font-size: inherit;
+}
 .up {
   color: var(--success-text);
 }
@@ -1049,6 +1189,27 @@ onMounted(loadAll)
   color: var(--danger);
 }
 .flat {
+  color: var(--muted);
+}
+.secondary-metrics small.up,
+.compact-metrics small.up {
+  color: var(--success-text);
+}
+.secondary-metrics small.down,
+.compact-metrics small.down {
+  color: var(--danger);
+}
+.secondary-metrics small.flat,
+.compact-metrics small.flat {
+  color: var(--muted);
+}
+.secondary-metrics .growth-pair .up {
+  color: var(--success-text);
+}
+.secondary-metrics .growth-pair .down {
+  color: var(--danger);
+}
+.secondary-metrics .growth-pair .flat {
   color: var(--muted);
 }
 .dashboard-stack {
@@ -1500,10 +1661,18 @@ onMounted(loadAll)
     width: 100%;
   }
   .store-strip,
+  .platform-filter,
   .metric-zone,
   .dashboard-stack,
   .optimization-panel {
     grid-template-columns: 1fr;
+  }
+  .platform-select-wrap {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .platform-select-wrap select {
+    width: 100%;
   }
   .updated {
     text-align: left;

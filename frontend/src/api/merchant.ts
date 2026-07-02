@@ -20,6 +20,8 @@ export type DeviceStats = {
 }
 
 export type PublishStats = {
+  platformCode: string
+  platformName: string
   totalPublishClicks: number
   currentWeekPublishClicks: number
   currentMonthPublishClicks: number
@@ -74,8 +76,9 @@ export const merchantApi = {
   updateStoreDetail(payload: Record<string, unknown>) {
     return http.put('/merchant/store/detail', payload)
   },
-  getPublishStats() {
-    return http.get<{ code: number; message: string; data: PublishStats }>('/merchant/dashboard/publish-stats')
+  getPublishStats(platformCode = '') {
+    const params = platformCode ? { platformCode } : undefined
+    return http.get<{ code: number; message: string; data: PublishStats }>('/merchant/dashboard/publish-stats', { params })
   },
   listKeywords() {
     return http.get('/merchant/store/keywords')

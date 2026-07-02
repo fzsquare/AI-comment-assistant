@@ -8,7 +8,7 @@ import (
 func TestCrawlGuidedShareStatsWithoutDataAccumulates(t *testing.T) {
 	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.Local)
 
-	stats := CrawlGuidedShareStats(nil, 1, now.AddDate(0, 0, -7), now, now.AddDate(0, -1, 0), now)
+	stats := CrawlGuidedShareStats(nil, 1, "", now.AddDate(0, 0, -7), now, now.AddDate(0, -1, 0), now)
 
 	if stats.WeeklyReady || stats.MonthlyReady {
 		t.Fatalf("expected shares to be hidden while data accumulates, got %+v", stats)

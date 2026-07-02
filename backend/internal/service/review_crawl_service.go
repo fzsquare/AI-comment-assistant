@@ -390,13 +390,18 @@ type CrawlShareStats struct {
 	Message        string
 }
 
-func CrawlGuidedShareStats(db *gorm.DB, storeID uint, weekStart time.Time, weekEnd time.Time, monthStart time.Time, monthEnd time.Time) CrawlShareStats {
+func CrawlGuidedShareStats(db *gorm.DB, storeID uint, platformCode string, weekStart time.Time, weekEnd time.Time, monthStart time.Time, monthEnd time.Time) CrawlShareStats {
 	stats := CrawlShareStats{Message: "数据积累中"}
 	if db == nil || storeID == 0 {
 		return stats
 	}
 	var cfg model.StoreReviewCrawlConfig
-	if err := db.Where("store_id = ? AND enabled = ?", storeID, true).First(&cfg).Error; err != nil {
+	query := db.Where("store_id = ? AND enabled = ?", storeID, true)
+	platformCode = strings.TrimSpace(platformCode)
+	if platformCode != "" {
+		query = query.Where("platform_code = ?", platformCode)
+	}
+	if err := query.First(&cfg).Error; err != nil {
 		return stats
 	}
 	if cfg.BaselineCompletedAt == nil || cfg.LastStatus != model.CrawlStatusSuccess {

@@ -256,11 +256,56 @@ function deleteMerchantById(id: number) {
   return { deleted: true }
 }
 
-function mockPublishStats() {
-  const weeklyCounts = [3, 5, 0, 8, 12, 9, 14, 18, 15, 21, 17, 24]
-  const monthlyCounts = [22, 28, 31, 35, 42, 40, 46, 51, 48, 56, 61, 66]
-  const weeklyVisitCounts = [19, 24, 18, 35, 45, 40, 52, 68, 59, 77, 83, 96]
-  const monthlyVisitCounts = [88, 102, 128, 141, 166, 158, 181, 204, 221, 246, 270, 312]
+const platformStatSeeds: Record<string, { weekly: number[]; monthly: number[]; weeklyVisits: number[]; monthlyVisits: number[]; weeklyShare: number; monthlyShare: number }> = {
+  meituan: {
+    weekly: [3, 5, 0, 8, 12, 9, 14, 18, 15, 21, 17, 24],
+    monthly: [22, 28, 31, 35, 42, 40, 46, 51, 48, 56, 61, 66],
+    weeklyVisits: [19, 24, 18, 35, 45, 40, 52, 68, 59, 77, 83, 96],
+    monthlyVisits: [88, 102, 128, 141, 166, 158, 181, 204, 221, 246, 270, 312],
+    weeklyShare: 42.9,
+    monthlyShare: 31.4
+  },
+  dianping: {
+    weekly: [2, 3, 4, 6, 7, 8, 9, 13, 12, 16, 18, 21],
+    monthly: [14, 17, 19, 22, 26, 29, 33, 34, 39, 43, 48, 52],
+    weeklyVisits: [14, 16, 18, 21, 24, 31, 35, 42, 44, 51, 57, 63],
+    monthlyVisits: [61, 72, 80, 92, 104, 118, 132, 146, 161, 179, 193, 216],
+    weeklyShare: 36.2,
+    monthlyShare: 28.8
+  },
+  xiaohongshu: {
+    weekly: [1, 2, 3, 5, 6, 8, 11, 12, 14, 13, 15, 19],
+    monthly: [9, 12, 15, 19, 22, 26, 30, 35, 37, 42, 44, 49],
+    weeklyVisits: [10, 12, 15, 18, 22, 26, 34, 39, 43, 41, 48, 55],
+    monthlyVisits: [46, 55, 68, 76, 91, 106, 119, 138, 151, 166, 181, 204],
+    weeklyShare: 39.6,
+    monthlyShare: 33.1
+  },
+  douyin: {
+    weekly: [1, 1, 2, 2, 5, 4, 6, 9, 8, 11, 10, 8],
+    monthly: [7, 9, 13, 16, 18, 23, 25, 29, 31, 36, 39, 34],
+    weeklyVisits: [8, 9, 12, 13, 18, 17, 23, 29, 31, 35, 37, 34],
+    monthlyVisits: [34, 41, 49, 58, 67, 80, 91, 104, 118, 130, 147, 139],
+    weeklyShare: 22.4,
+    monthlyShare: 24.5
+  }
+}
+
+function sumSeries(series: number[][]) {
+  const length = Math.max(...series.map((items) => items.length))
+  return Array.from({ length }, (_, index) => series.reduce((sum, items) => sum + (items[index] || 0), 0))
+}
+
+function mockPublishStats(params: Record<string, unknown> = {}) {
+  const requestedPlatform = String(params.platformCode || '').trim()
+  const selectedSeed = requestedPlatform ? platformStatSeeds[requestedPlatform] : null
+  const activeSeeds = Object.values(platformStatSeeds)
+  const weeklyCounts = selectedSeed?.weekly || sumSeries(activeSeeds.map((item) => item.weekly))
+  const monthlyCounts = selectedSeed?.monthly || sumSeries(activeSeeds.map((item) => item.monthly))
+  const weeklyVisitCounts = selectedSeed?.weeklyVisits || sumSeries(activeSeeds.map((item) => item.weeklyVisits))
+  const monthlyVisitCounts = selectedSeed?.monthlyVisits || sumSeries(activeSeeds.map((item) => item.monthlyVisits))
+  const weeklyShare = selectedSeed?.weeklyShare || 35.8
+  const monthlyShare = selectedSeed?.monthlyShare || 29.7
   const today = new Date()
   const weeklySeries = weeklyCounts.map((count, index) => {
     const start = new Date(today)
@@ -274,6 +319,8 @@ function mockPublishStats() {
     return { month: month.toISOString().slice(0, 7), count }
   })
   return {
+    platformCode: selectedSeed ? requestedPlatform : '',
+    platformName: selectedSeed ? platformName(requestedPlatform) : '全部平台',
     totalPublishClicks: weeklyCounts.reduce((sum, count) => sum + count, 0),
     currentWeekPublishClicks: weeklyCounts[weeklyCounts.length - 1],
     currentMonthPublishClicks: monthlyCounts[monthlyCounts.length - 1],
@@ -300,8 +347,8 @@ function mockPublishStats() {
     crawlDataMessage: '',
     weeklyGuidedShareReady: true,
     monthlyGuidedShareReady: true,
-    weeklyGuidedSharePercent: 42.9,
-    monthlyGuidedSharePercent: 31.4,
+    weeklyGuidedSharePercent: weeklyShare,
+    monthlyGuidedSharePercent: monthlyShare,
     deviceStats: mockDeviceStats(weeklyVisitCounts.reduce((sum, count) => sum + count, 0)),
     weeklySeries,
     monthlySeries,
@@ -419,7 +466,7 @@ function saveMockReviewCrawlConfig(storeId: number, body: any) {
 }
 
 // ---------------- 路由表 ----------------
-type Handler = (m: RegExpMatchArray, body: any) => unknown
+type Handler = (m: RegExpMatchArray, body: any, params: Record<string, unknown>) => unknown
 
 function mockFailure(status: number, message: string): never {
   const err = new Error(message) as Error & { status?: number }
@@ -437,7 +484,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'POST', re: /\/merchant\/auth\/login$/, handler: () => ({ token: 'mock-merchant-token' }) },
   { method: 'GET', re: /\/merchant\/store\/detail$/, handler: () => store },
   { method: 'PUT', re: /\/merchant\/store\/detail$/, handler: (_m, b) => Object.assign(store, b) },
-  { method: 'GET', re: /\/merchant\/dashboard\/publish-stats$/, handler: () => mockPublishStats() },
+  { method: 'GET', re: /\/merchant\/dashboard\/publish-stats$/, handler: (_m, _b, params) => mockPublishStats(params) },
   { method: 'GET', re: /\/merchant\/store\/keyword-suggestions$/, handler: () => ({ tags: suggestTagsByIndustry(store.industryType) }) },
   { method: 'GET', re: /\/merchant\/store\/keywords$/, handler: () => keywords },
   { method: 'POST', re: /\/merchant\/store\/keywords$/, handler: (_m, b) => { const it = { id: nextId(), keyword: b.keyword, sortNo: b.sortNo || 0 }; keywords.push(it); return it } },
@@ -594,6 +641,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
 export const mockAdapter: AxiosAdapter = async (config) => {
   const method = (config.method || 'get').toUpperCase()
   const url = (config.url || '').split('?')[0]
+  const params = (config.params || {}) as Record<string, unknown>
   let body: any = {}
   try {
     body = config.data ? JSON.parse(config.data) : {}
@@ -609,7 +657,7 @@ export const mockAdapter: AxiosAdapter = async (config) => {
     if (m) {
       try {
         return {
-          data: envelope(route.handler(m, body)),
+          data: envelope(route.handler(m, body, params)),
           status: 200,
           statusText: 'OK',
           headers: {},

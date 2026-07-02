@@ -12,6 +12,7 @@ import (
 
 const (
 	ReviewActionPageView          = "page_view"
+	ReviewActionPlatformSelect    = "platform_select"
 	ReviewActionPlatformLinkClick = "platform_link_click"
 )
 
@@ -51,9 +52,17 @@ var deviceLabels = map[string]string{
 var deviceOrder = []string{"iphone", "huawei", "honor", "xiaomi", "oppo", "vivo", "samsung", "pixel", "android_other", "ipad", "other", "bot", "unknown"}
 
 func CountReviewLogAction(db *gorm.DB, storeID uint, actionType string, start time.Time, end time.Time) (int64, error) {
+	return CountReviewLogActionByPlatform(db, storeID, actionType, "", start, end)
+}
+
+func CountReviewLogActionByPlatform(db *gorm.DB, storeID uint, actionType string, platformCode string, start time.Time, end time.Time) (int64, error) {
 	query := db.Model(&model.ReviewDisplayLog{}).Where("action_type = ?", actionType)
 	if storeID > 0 {
 		query = query.Where("store_id = ?", storeID)
+	}
+	platformCode = strings.TrimSpace(platformCode)
+	if platformCode != "" {
+		query = query.Where("platform_code = ?", platformCode)
 	}
 	if !start.IsZero() {
 		query = query.Where("created_at >= ?", start)
@@ -66,11 +75,19 @@ func CountReviewLogAction(db *gorm.DB, storeID uint, actionType string, start ti
 }
 
 func DeviceStatsForReviewLogs(db *gorm.DB, storeID uint, actionType string, start time.Time, end time.Time) (DeviceStats, error) {
+	return DeviceStatsForReviewLogsByPlatform(db, storeID, actionType, "", start, end)
+}
+
+func DeviceStatsForReviewLogsByPlatform(db *gorm.DB, storeID uint, actionType string, platformCode string, start time.Time, end time.Time) (DeviceStats, error) {
 	query := db.Model(&model.ReviewDisplayLog{}).
 		Select("user_agent, COUNT(*) AS count").
 		Where("action_type = ?", actionType)
 	if storeID > 0 {
 		query = query.Where("store_id = ?", storeID)
+	}
+	platformCode = strings.TrimSpace(platformCode)
+	if platformCode != "" {
+		query = query.Where("platform_code = ?", platformCode)
 	}
 	if !start.IsZero() {
 		query = query.Where("created_at >= ?", start)
