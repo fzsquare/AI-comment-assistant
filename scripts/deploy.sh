@@ -40,8 +40,10 @@ Useful env:
   BACKEND_PORT=18989          Local-only Go backend port
   ALLOW_EMPTY_LLM_KEY=true    Allow UI/API startup without AI generation
   INIT_DB=true                Optionally create/import MySQL schema
-  MIGRATE_DB=true             Run database/migrations/*.sql once (as root) for an existing DB
+  MIGRATE_DB=true             Run database/migrations/*.sql once (default; requires root)
+  MIGRATE_DB=false            Skip DB migrations only when applied manually
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
+  REVIEW_CRAWL_SERVICE_URL=   Optional backend-only real review crawl service URL
   SMOKE_TEST=true             Check frontend gateway and management APIs after start
   SMOKE_TEST_AUTH=true        Force default/custom admin and merchant login checks
   SMOKE_SPA_ROUTES="..."      Space-separated SPA routes to verify after gateway start
@@ -132,6 +134,7 @@ configure_defaults() {
   DB_APP_PASSWORD="${DB_APP_PASSWORD:-}"
   MYSQL_ROOT_USER="${MYSQL_ROOT_USER:-root}"
   MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
+  MIGRATE_DB="${MIGRATE_DB:-true}"
 
   case "${MYSQL_DSN:-}" in
     *replace-with*|*CHANGE_ME*|*change-me*)
@@ -192,6 +195,11 @@ configure_defaults() {
   AGENT_MIN_GRADE="${AGENT_MIN_GRADE:-B}"
   MAX_REVIEW_GENERATE_COUNT="${MAX_REVIEW_GENERATE_COUNT:-50}"
   DEFAULT_REVIEW_TARGET_COUNT="${DEFAULT_REVIEW_TARGET_COUNT:-10}"
+  REVIEW_CRAWL_SERVICE_URL="${REVIEW_CRAWL_SERVICE_URL:-}"
+  REVIEW_CRAWL_POLL_INTERVAL_SECONDS="${REVIEW_CRAWL_POLL_INTERVAL_SECONDS:-3}"
+  REVIEW_CRAWL_POLL_MAX_ATTEMPTS="${REVIEW_CRAWL_POLL_MAX_ATTEMPTS:-40}"
+  REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS="${REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS:-20}"
+  REVIEW_CRAWL_MAX_DOWNLOAD_BYTES="${REVIEW_CRAWL_MAX_DOWNLOAD_BYTES:-5242880}"
   SMOKE_TEST="${SMOKE_TEST:-true}"
   SMOKE_TEST_AUTH="${SMOKE_TEST_AUTH:-auto}"
   SMOKE_SPA_ROUTES="${SMOKE_SPA_ROUTES:-/admin/console /merchant/console /landing/11111111-1111-4111-8111-111111111111}"
@@ -250,6 +258,12 @@ validate_config() {
       die "MYSQL_DSN still contains a placeholder; edit $ENV_FILE, leave MYSQL_DSN empty, or set DB_APP_PASSWORD for generated DSN"
       ;;
   esac
+}
+
+validate_positive_integer() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$name must be a positive integer, got: $value"
 }
 
 mysql_dsn_endpoint() {
@@ -352,6 +366,18 @@ EOF
 
 validate_runtime_config() {
   local failed=0
+
+  validate_positive_integer REVIEW_CRAWL_POLL_INTERVAL_SECONDS "$REVIEW_CRAWL_POLL_INTERVAL_SECONDS"
+  validate_positive_integer REVIEW_CRAWL_POLL_MAX_ATTEMPTS "$REVIEW_CRAWL_POLL_MAX_ATTEMPTS"
+  validate_positive_integer REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS "$REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS"
+  validate_positive_integer REVIEW_CRAWL_MAX_DOWNLOAD_BYTES "$REVIEW_CRAWL_MAX_DOWNLOAD_BYTES"
+
+  if [[ -n "$REVIEW_CRAWL_SERVICE_URL" ]]; then
+    case "$REVIEW_CRAWL_SERVICE_URL" in
+      http://*|https://*) ;;
+      *) die "REVIEW_CRAWL_SERVICE_URL must start with http:// or https://, got: $REVIEW_CRAWL_SERVICE_URL" ;;
+    esac
+  fi
 
   if [[ -z "$LLM_API_KEY" ]] && ! truthy "$ALLOW_EMPTY_LLM_KEY"; then
     cat >&2 <<EOF
@@ -699,6 +725,11 @@ start_services() {
       AGENT_MIN_GRADE="$AGENT_MIN_GRADE" \
       MAX_REVIEW_GENERATE_COUNT="$MAX_REVIEW_GENERATE_COUNT" \
       DEFAULT_REVIEW_TARGET_COUNT="$DEFAULT_REVIEW_TARGET_COUNT" \
+      REVIEW_CRAWL_SERVICE_URL="$REVIEW_CRAWL_SERVICE_URL" \
+      REVIEW_CRAWL_POLL_INTERVAL_SECONDS="$REVIEW_CRAWL_POLL_INTERVAL_SECONDS" \
+      REVIEW_CRAWL_POLL_MAX_ATTEMPTS="$REVIEW_CRAWL_POLL_MAX_ATTEMPTS" \
+      REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS="$REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS" \
+      REVIEW_CRAWL_MAX_DOWNLOAD_BYTES="$REVIEW_CRAWL_MAX_DOWNLOAD_BYTES" \
       "$BIN_DIR/ppk-server"
   ) >> "$LOG_DIR/backend.log" 2>&1 &
   echo $! > "$(pid_file_for backend)"
