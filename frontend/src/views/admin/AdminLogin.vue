@@ -45,10 +45,6 @@ async function submit() {
         {{ submitting ? '登录中…' : '进入管理员后台' }}
       </button>
 
-      <button class="switch-action" type="button" @click="router.push('/merchant/login')">
-        切换到商家入口
-      </button>
-
       <p class="auth-hint">演示账号：admin / 123456</p>
     </form>
   </main>
@@ -93,19 +89,11 @@ h1 {
   font-size: 14px;
   font-weight: 700;
 }
-.primary-action,
-.switch-action {
-  width: 100%;
-}
 .primary-action {
+  width: 100%;
   margin-top: 4px;
   min-height: 50px;
   font-weight: 800;
-}
-.switch-action {
-  margin-top: 10px;
-  background: #eef2ff;
-  color: #1e40af;
 }
 .auth-hint {
   margin: 14px 0 0;

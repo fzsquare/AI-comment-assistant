@@ -14,7 +14,9 @@ const TOKEN_KEY = 'ppk-token'
 const ROLE_KEY = 'ppk-role'
 
 function loginPath(role?: Role) {
-  return role === 'admin' ? '/admin/login' : '/merchant/login'
+  if (role === 'admin') return '/admin/login'
+  if (role === 'merchant') return '/merchant/login'
+  return '/'
 }
 
 function homePath(role: Role) {
@@ -70,9 +72,6 @@ router.beforeEach((to) => {
   }
 
   if (requiredRole && role !== requiredRole) {
-    if (role === 'merchant' || role === 'admin') {
-      return homePath(role)
-    }
     clearAuth()
     return { path: loginPath(requiredRole), query: { redirect: to.fullPath } }
   }

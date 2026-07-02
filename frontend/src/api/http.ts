@@ -8,6 +8,21 @@ const APP_BASE = import.meta.env.BASE_URL || '/'
 const apiBaseURL = import.meta.env.VITE_API_BASE_URL || APP_BASE.replace(/\/+$/, '') + '/api'
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
 
+function appRoute(path: string) {
+  return `${APP_BASE.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
+}
+
+function routeStartsWith(currentPath: string, path: string) {
+  const prefix = appRoute(path)
+  return currentPath === prefix || currentPath.startsWith(`${prefix}/`)
+}
+
+function loginPathForCurrentEntry(currentPath: string) {
+  if (routeStartsWith(currentPath, 'admin')) return appRoute('admin/login')
+  if (routeStartsWith(currentPath, 'merchant')) return appRoute('merchant/login')
+  return ''
+}
+
 const http = axios.create({
   baseURL: apiBaseURL,
   timeout: 10000,
@@ -33,14 +48,12 @@ http.interceptors.response.use(
   (error) => {
     const status = error?.response?.status
     if (status === 401 || status === 403) {
-      const role = localStorage.getItem(ROLE_KEY)
       localStorage.removeItem(TOKEN_KEY)
       localStorage.removeItem(ROLE_KEY)
 
       const currentPath = window.location.pathname
-      const isAdmin = role === 'admin' || currentPath.startsWith(APP_BASE + 'admin')
-      const loginPath = APP_BASE + (isAdmin ? 'admin/login' : 'merchant/login')
-      if (!currentPath.endsWith('/login')) {
+      const loginPath = loginPathForCurrentEntry(currentPath)
+      if (loginPath && !currentPath.endsWith('/login')) {
         window.location.assign(loginPath)
       }
     }
