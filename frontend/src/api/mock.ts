@@ -412,6 +412,16 @@ function adminStoreView(item: any) {
   const merchant = merchants.find((m) => m.id === item.merchantUserId)
   const link = platformLinks.find((p) => p.storeId === item.id && p.platformCode === item.primaryPlatformStyle)
   const reviewCrawl = reviewCrawlConfigs.find((cfg) => cfg.storeId === item.id)
+  const storeTags = nfcTags.filter((tag) => tag.storeId === item.id)
+  const writtenCount = storeTags.filter((tag) => tag.status === 'bound').length
+  const disabledCount = storeTags.filter((tag) => tag.status === 'disabled').length
+  const primaryStatus = !item.uuid
+    ? 'unwritten'
+    : item.status !== 1
+      ? 'unusable'
+      : writtenCount > 0
+        ? 'usable'
+        : 'unwritten'
   return {
     ...item,
     merchantAccount: merchant?.account || '',
@@ -420,6 +430,13 @@ function adminStoreView(item: any) {
     platformUrl: link?.targetUrl || '',
     landingUrl: landingPath(item.uuid),
     analytics: mockStoreAnalytics(item.id),
+    nfcCardStatus: {
+      totalCount: storeTags.length,
+      writtenCount,
+      disabledCount,
+      primaryStatus,
+      routeStatus: primaryStatus === 'usable' ? 'ok' : writtenCount > 0 ? 'store_inactive' : 'no_bound_tag'
+    },
     reviewCrawl
   }
 }

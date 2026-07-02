@@ -23,7 +23,8 @@ const crawlMatches = ref<ExternalStoreReviewMatch[]>([])
 const crawlLoading = ref(false)
 const selectedStoreId = ref<number | null>(null)
 const storeSearch = ref('')
-const storeStatusFilter = ref<'all' | 'active' | 'inactive' | 'official_configured' | 'official_missing' | 'nfc_error' | 'crawl_failed' | 'no_crawl'>('all')
+type StoreStatusFilter = 'all' | 'active' | 'inactive' | 'official_configured' | 'official_missing' | 'nfc_error' | 'crawl_failed' | 'no_crawl' | 'no_visit' | 'low_conversion'
+const storeStatusFilter = ref<StoreStatusFilter>('all')
 const configPanelOpen = ref(false)
 const activeDetailTab = ref<'overview' | 'usage' | 'conversion' | 'advice' | 'config'>('overview')
 const hoveredOpsChartIndex = ref<number | null>(null)
@@ -115,31 +116,12 @@ const opsChartAria = computed(() => {
 const filteredStores = computed(() => {
   const query = storeSearch.value.trim().toLowerCase()
   return stores.value.filter((item) => {
-    if (storeStatusFilter.value === 'active' && !isStoreActive(item)) return false
-    if (storeStatusFilter.value === 'inactive' && isStoreActive(item)) return false
-    if (storeStatusFilter.value === 'official_configured' && !hasOfficialLink(item)) return false
-    if (storeStatusFilter.value === 'official_missing' && hasOfficialLink(item)) return false
-    if (storeStatusFilter.value === 'nfc_error' && nfcRouteStatus(item) === 'usable') return false
-    if (storeStatusFilter.value === 'crawl_failed' && item.reviewCrawl?.lastStatus !== 'failed') return false
-    if (storeStatusFilter.value === 'no_crawl' && item.reviewCrawl?.enabled) return false
-    if (!query) return true
-    const merchant = merchantForStore(item)
-    return [
-      item.storeName,
-      item.industryType,
-      item.merchantAccount,
-      item.merchantName,
-      item.contactName,
-      merchant.account,
-      item.reviewCrawl?.externalShopId,
-      item.platformUrl,
-      item.uuid
-    ].some((value) => String(value || '').toLowerCase().includes(query))
+    return storeMatchesStatusFilter(item, storeStatusFilter.value) && storeMatchesSearch(item, query)
   })
 })
 const selectedStore = computed(() => {
-  if (!stores.value.length) return null
-  return stores.value.find((item) => item.id === selectedStoreId.value) || filteredStores.value[0] || stores.value[0] || null
+  if (!filteredStores.value.length) return null
+  return filteredStores.value.find((item) => item.id === selectedStoreId.value) || filteredStores.value[0] || null
 })
 const selectedMerchant = computed(() => selectedStore.value ? merchantForStore(selectedStore.value) : {})
 const activeStores = computed(() => stores.value.filter((item) => isStoreActive(item)))
@@ -148,7 +130,7 @@ const officialConfiguredCount = computed(() => stores.value.filter((item) => has
 const officialMissingCount = computed(() => stores.value.filter((item) => !hasOfficialLink(item)).length)
 const activeOfficialMissingCount = computed(() => activeStores.value.filter((item) => !hasOfficialLink(item)).length)
 const nfcRouteUsableCount = computed(() => stores.value.filter((item) => nfcRouteStatus(item) === 'usable').length)
-const nfcRouteErrorCount = computed(() => stores.value.filter((item) => nfcRouteStatus(item) === 'unusable').length)
+const nfcRouteErrorCount = computed(() => stores.value.filter((item) => nfcRouteStatus(item) !== 'usable').length)
 const activeNoVisitCount = computed(() => activeStores.value.filter((item) => (item.analytics?.currentWeekCustomerVisits || 0) === 0).length)
 const highVisitLowConversionCount = computed(() =>
   activeStores.value.filter((item) => {
@@ -167,12 +149,13 @@ const pendingWorkCount = computed(() =>
   noCrawlConfigCount.value
 )
 const workItems = computed(() => [
-  { label: '已激活但未配置官方链接', count: activeOfficialMissingCount.value, tone: activeOfficialMissingCount.value > 0 ? 'danger' : 'stable' },
-  { label: 'NFC 路由不可用', count: nfcRouteErrorCount.value, tone: nfcRouteErrorCount.value > 0 ? 'danger' : 'stable' },
-  { label: '已激活但近 7 天无访问', count: activeNoVisitCount.value, tone: activeNoVisitCount.value > 0 ? 'warn' : 'stable' },
-  { label: '访问高但发布点击低', count: highVisitLowConversionCount.value, tone: highVisitLowConversionCount.value > 0 ? 'warn' : 'stable' },
-  { label: '采集失败', count: stats.value.crawlFailedStoreCount, tone: stats.value.crawlFailedStoreCount > 0 ? 'warn' : 'stable' },
-  { label: '未启用评论采集', count: noCrawlConfigCount.value, tone: noCrawlConfigCount.value > 0 ? 'neutral' : 'stable' }
+  { label: '未激活商家', count: inactiveStoreCount.value, tone: inactiveStoreCount.value > 0 ? 'warn' : 'stable', filter: 'inactive' as StoreStatusFilter },
+  { label: '已激活但未配置官方链接', count: activeOfficialMissingCount.value, tone: activeOfficialMissingCount.value > 0 ? 'danger' : 'stable', filter: 'official_missing' as StoreStatusFilter },
+  { label: 'NFC 路由不可用', count: nfcRouteErrorCount.value, tone: nfcRouteErrorCount.value > 0 ? 'danger' : 'stable', filter: 'nfc_error' as StoreStatusFilter },
+  { label: '已激活但近 7 天无访问', count: activeNoVisitCount.value, tone: activeNoVisitCount.value > 0 ? 'warn' : 'stable', filter: 'no_visit' as StoreStatusFilter },
+  { label: '访问高但发布点击低', count: highVisitLowConversionCount.value, tone: highVisitLowConversionCount.value > 0 ? 'warn' : 'stable', filter: 'low_conversion' as StoreStatusFilter },
+  { label: '采集失败', count: stats.value.crawlFailedStoreCount, tone: stats.value.crawlFailedStoreCount > 0 ? 'warn' : 'stable', filter: 'crawl_failed' as StoreStatusFilter },
+  { label: '未启用评论采集', count: noCrawlConfigCount.value, tone: noCrawlConfigCount.value > 0 ? 'neutral' : 'stable', filter: 'no_crawl' as StoreStatusFilter }
 ])
 const globalDeviceAria = computed(() => {
   if (!globalDeviceItems.value.length) return '暂无全局访问设备数据'
@@ -345,6 +328,38 @@ function platformDisplayName(code?: string) {
   return platformOptions.find((item) => item.code === code)?.name || code || '-'
 }
 
+function storeMatchesStatusFilter(item: AdminStore, filter: StoreStatusFilter) {
+  if (filter === 'active') return isStoreActive(item)
+  if (filter === 'inactive') return !isStoreActive(item)
+  if (filter === 'official_configured') return hasOfficialLink(item)
+  if (filter === 'official_missing') return !hasOfficialLink(item)
+  if (filter === 'nfc_error') return nfcRouteStatus(item) !== 'usable'
+  if (filter === 'crawl_failed') return item.reviewCrawl?.lastStatus === 'failed'
+  if (filter === 'no_crawl') return !item.reviewCrawl?.enabled
+  if (filter === 'no_visit') return isStoreActive(item) && (item.analytics?.currentWeekCustomerVisits || 0) === 0
+  if (filter === 'low_conversion') {
+    const visits = item.analytics?.totalCustomerVisits || 0
+    return isStoreActive(item) && visits >= 50 && conversionRate(item) < 15
+  }
+  return true
+}
+
+function storeMatchesSearch(item: AdminStore, query: string) {
+  if (!query) return true
+  const merchant = merchantForStore(item)
+  return [
+    item.storeName,
+    item.industryType,
+    item.merchantAccount,
+    item.merchantName,
+    item.contactName,
+    merchant.account,
+    item.reviewCrawl?.externalShopId,
+    item.platformUrl,
+    item.uuid
+  ].some((value) => String(value || '').toLowerCase().includes(query))
+}
+
 function isStoreActive(item: AdminStore) {
   return item.status === 1
 }
@@ -366,9 +381,11 @@ function officialLinkStatusClass(item: AdminStore) {
 }
 
 function nfcRouteStatus(item: AdminStore) {
+  const status = item.nfcCardStatus?.primaryStatus
+  if (status === 'usable' || status === 'unwritten' || status === 'unusable') return status
   if (!item.uuid) return 'unwritten'
   if (!isStoreActive(item)) return 'unusable'
-  return 'usable'
+  return 'unusable'
 }
 
 function nfcRouteStatusText(item: AdminStore) {
@@ -383,6 +400,16 @@ function nfcRouteStatusClass(item: AdminStore) {
   if (status === 'usable') return 'enabled'
   if (status === 'unwritten') return 'disabled'
   return 'error'
+}
+
+function nfcRouteStatusDetail(item: AdminStore) {
+  const status = item.nfcCardStatus
+  if (!status) return '等待后端返回 NFC 状态'
+  if (status.primaryStatus === 'usable') return `已写入 ${formatNumber(status.writtenCount)} 张`
+  if (status.primaryStatus === 'unwritten') return '还没有绑定可用 NFC 标签'
+  if (status.routeStatus === 'store_inactive') return '商家未激活，落地页不可用'
+  if (status.disabledCount > 0) return `已禁用 ${formatNumber(status.disabledCount)} 张标签`
+  return '请检查 NFC 标签绑定和落地页路由'
 }
 
 function storeVisitText(item: AdminStore) {
@@ -709,6 +736,13 @@ function clearStoreFilters() {
   storeStatusFilter.value = 'all'
 }
 
+async function applyWorkFilter(filter: StoreStatusFilter) {
+  storeSearch.value = ''
+  storeStatusFilter.value = filter
+  await nextTick()
+  selectedStoreId.value = filteredStores.value[0]?.id || null
+}
+
 async function saveSelectedStoreIdConfig() {
   const item = selectedStore.value
   if (!item) return
@@ -875,6 +909,8 @@ onBeforeUnmount(() => {
                 :key="item.label"
                 type="button"
                 :class="['work-item', statusToneClass(item.tone)]"
+                :disabled="item.count === 0"
+                @click="applyWorkFilter(item.filter)"
               >
                 <span>{{ item.label }}</span>
                 <b>{{ formatNumber(item.count) }}</b>
@@ -1014,6 +1050,8 @@ onBeforeUnmount(() => {
               <option value="official_configured">官方链接已配置</option>
               <option value="official_missing">官方链接未配置</option>
               <option value="nfc_error">NFC 异常</option>
+              <option value="no_visit">近 7 天无访问</option>
+              <option value="low_conversion">访问高转化低</option>
               <option value="crawl_failed">采集失败</option>
               <option value="no_crawl">未启用采集</option>
             </select>
@@ -1053,7 +1091,10 @@ onBeforeUnmount(() => {
                     <span :class="['status-pill', officialLinkStatusClass(item)]">{{ officialLinkStatusText(item) }}</span>
                     <span class="subtext">{{ platformDisplayName(item.primaryPlatformStyle) }}</span>
                   </td>
-                  <td><span :class="['status-pill', nfcRouteStatusClass(item)]">{{ nfcRouteStatusText(item) }}</span></td>
+                  <td>
+                    <span :class="['status-pill', nfcRouteStatusClass(item)]">{{ nfcRouteStatusText(item) }}</span>
+                    <span class="subtext">{{ nfcRouteStatusDetail(item) }}</span>
+                  </td>
                   <td><strong>{{ formatNumber(item.analytics?.totalCustomerVisits) }}</strong><span class="subtext">本月 {{ formatNumber(item.analytics?.currentMonthCustomerVisits) }}</span></td>
                   <td>{{ formatNumber(item.analytics?.totalPublishClicks) }}</td>
                   <td><strong>{{ conversionRateText(item) }}</strong></td>
@@ -1088,7 +1129,10 @@ onBeforeUnmount(() => {
                   </div>
                   <div>
                     <dt>NFC 链接</dt>
-                    <dd><span :class="['status-pill', nfcRouteStatusClass(item)]">{{ nfcRouteStatusText(item) }}</span></dd>
+                    <dd>
+                      <span :class="['status-pill', nfcRouteStatusClass(item)]">{{ nfcRouteStatusText(item) }}</span>
+                      <small>{{ nfcRouteStatusDetail(item) }}</small>
+                    </dd>
                   </div>
                   <div>
                     <dt>NFC 访问</dt>
@@ -1127,7 +1171,10 @@ onBeforeUnmount(() => {
               </div>
               <div>
                 <dt>NFC 链接</dt>
-                <dd><span :class="['status-pill', nfcRouteStatusClass(selectedStore)]">{{ nfcRouteStatusText(selectedStore) }}</span></dd>
+                <dd>
+                  <span :class="['status-pill', nfcRouteStatusClass(selectedStore)]">{{ nfcRouteStatusText(selectedStore) }}</span>
+                  <small>{{ nfcRouteStatusDetail(selectedStore) }}</small>
+                </dd>
               </div>
               <div>
                 <dt>商家 ID</dt>
@@ -1797,6 +1844,15 @@ onBeforeUnmount(() => {
 
 .work-item:hover {
   background: #f8fafc;
+}
+
+.work-item:disabled {
+  cursor: default;
+  opacity: 0.66;
+}
+
+.work-item:disabled:hover {
+  background: inherit;
 }
 
 .work-item span {

@@ -51,6 +51,14 @@ export type AdminStoreReviewCrawl = {
   lastErrorMessage?: string
 }
 
+export type AdminStoreNFCCardStatus = {
+  totalCount: number
+  writtenCount: number
+  disabledCount: number
+  primaryStatus: 'usable' | 'unwritten' | 'unusable' | string
+  routeStatus: string
+}
+
 export type AdminStore = {
   id: number
   merchantUserId: number
@@ -71,6 +79,7 @@ export type AdminStore = {
   platformUrl?: string
   landingUrl?: string
   analytics?: AdminStoreAnalytics
+  nfcCardStatus?: AdminStoreNFCCardStatus
   reviewCrawl?: AdminStoreReviewCrawl
 }
 

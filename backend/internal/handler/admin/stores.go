@@ -64,7 +64,16 @@ type adminStoreView struct {
 	PlatformURL     string                     `json:"platformUrl"`
 	LandingURL      string                     `json:"landingUrl"`
 	Analytics       adminStoreAnalytics        `json:"analytics"`
+	NFCCardStatus   adminStoreNFCCardStatus    `json:"nfcCardStatus"`
 	ReviewCrawl     *adminStoreReviewCrawlView `json:"reviewCrawl,omitempty"`
+}
+
+type adminStoreNFCCardStatus struct {
+	TotalCount    int64  `json:"totalCount"`
+	WrittenCount  int64  `json:"writtenCount"`
+	DisabledCount int64  `json:"disabledCount"`
+	PrimaryStatus string `json:"primaryStatus"`
+	RouteStatus   string `json:"routeStatus"`
 }
 
 type adminStoreReviewCrawlView struct {
@@ -441,7 +450,48 @@ func (h *Handler) storeView(db *gorm.DB, store model.Store, merchant model.Merch
 	if err := db.Where("store_id = ?", store.ID).First(&crawlConfig).Error; err == nil {
 		view.ReviewCrawl = reviewCrawlView(crawlConfig)
 	}
+	view.NFCCardStatus = h.nfcCardStatus(db, store)
 	return view
+}
+
+func (h *Handler) nfcCardStatus(db *gorm.DB, store model.Store) adminStoreNFCCardStatus {
+	var totalCount, writtenCount, disabledCount int64
+	db.Model(&model.NFCTag{}).Where("store_id = ?", store.ID).Count(&totalCount)
+	db.Model(&model.NFCTag{}).Where("store_id = ? AND status = ?", store.ID, model.TagStatusBound).Count(&writtenCount)
+	db.Model(&model.NFCTag{}).Where("store_id = ? AND status = ?", store.ID, model.TagStatusDisabled).Count(&disabledCount)
+	return deriveNFCCardStatus(store, totalCount, writtenCount, disabledCount)
+}
+
+func deriveNFCCardStatus(store model.Store, totalCount, writtenCount, disabledCount int64) adminStoreNFCCardStatus {
+	status := adminStoreNFCCardStatus{
+		TotalCount:    totalCount,
+		WrittenCount:  writtenCount,
+		DisabledCount: disabledCount,
+		PrimaryStatus: "unusable",
+		RouteStatus:   "ok",
+	}
+	if strings.TrimSpace(store.UUID) == "" {
+		status.PrimaryStatus = "unwritten"
+		status.RouteStatus = "missing_uuid"
+		return status
+	}
+	if store.Status != model.StatusEnabled {
+		status.PrimaryStatus = "unusable"
+		status.RouteStatus = "store_inactive"
+		return status
+	}
+	if writtenCount > 0 {
+		status.PrimaryStatus = "usable"
+		status.RouteStatus = "ok"
+		return status
+	}
+	if totalCount == 0 {
+		status.PrimaryStatus = "unwritten"
+		status.RouteStatus = "no_bound_tag"
+		return status
+	}
+	status.RouteStatus = "no_active_bound_tag"
+	return status
 }
 
 func reviewCrawlView(config model.StoreReviewCrawlConfig) *adminStoreReviewCrawlView {

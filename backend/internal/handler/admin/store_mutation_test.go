@@ -1,6 +1,10 @@
 package admin
 
-import "testing"
+import (
+	"testing"
+
+	"ppk/backend/internal/model"
+)
 
 func TestNormalizeStoreMutationRequiresPasswordWhenCreating(t *testing.T) {
 	req := storeMutationRequest{
@@ -60,5 +64,28 @@ func TestNormalizeStoreMutationRejectsUnsupportedPlatformURL(t *testing.T) {
 
 	if err := normalizeStoreMutationRequest(&req, true); err == nil {
 		t.Fatal("expected unsupported platform url to fail")
+	}
+}
+
+func TestDeriveNFCCardStatusRequiresRealBoundTag(t *testing.T) {
+	store := model.Store{ID: 1, UUID: "store-uuid", Status: model.StatusEnabled}
+
+	status := deriveNFCCardStatus(store, 0, 0, 0)
+	if status.PrimaryStatus != "unwritten" || status.RouteStatus != "no_bound_tag" {
+		t.Fatalf("empty tag status got %#v, want unwritten/no_bound_tag", status)
+	}
+
+	status = deriveNFCCardStatus(store, 1, 1, 0)
+	if status.PrimaryStatus != "usable" || status.RouteStatus != "ok" || status.WrittenCount != 1 {
+		t.Fatalf("bound tag status got %#v, want usable/ok with written count", status)
+	}
+}
+
+func TestDeriveNFCCardStatusMarksInactiveStoreUnusable(t *testing.T) {
+	store := model.Store{ID: 1, UUID: "store-uuid", Status: model.StatusDisabled}
+
+	status := deriveNFCCardStatus(store, 1, 1, 0)
+	if status.PrimaryStatus != "unusable" || status.RouteStatus != "store_inactive" {
+		t.Fatalf("inactive store status got %#v, want unusable/store_inactive", status)
 	}
 }

@@ -22,6 +22,7 @@ const route = useRoute()
 const loading = ref(true)
 const switching = ref(false)
 const error = ref('')
+const reviewStateMessage = ref('')
 const payload = ref<LandingData | null>(null)
 const selectedTag = ref('')
 const selectedPlatform = ref<LandingData['platformLinks'][number] | null>(null)
@@ -65,6 +66,7 @@ async function load() {
       selectedPlatform.value = null
       selectedTag.value = ''
       editedContent.value = ''
+      reviewStateMessage.value = ''
       await trackEvent({
         sessionId: payload.value.sessionId,
         actionType: 'page_view'
@@ -107,12 +109,14 @@ async function choosePlatform(link: LandingData['platformLinks'][number]) {
   selectedTag.value = ''
   payload.value.review = null
   editedContent.value = ''
+  reviewStateMessage.value = ''
   await fetchReview('', 'platform_select')
 }
 
 async function fetchReview(tag: string, action: string) {
   if (!payload.value || !selectedPlatform.value) return
   switching.value = true
+  reviewStateMessage.value = ''
   try {
     const { data } = await publicApi.switchReview(String(route.params.token), {
       platformCode: selectedPlatform.value.platformCode,
@@ -122,6 +126,7 @@ async function fetchReview(tag: string, action: string) {
     const review = data.data.review
     payload.value.review = review
     payload.value.remainingDispatchableCount = data.data.remainingDispatchableCount
+    reviewStateMessage.value = ''
     await trackEvent({
       sessionId: payload.value.sessionId,
       reviewItemId: review.id,
@@ -129,7 +134,7 @@ async function fetchReview(tag: string, action: string) {
       platformCode: selectedPlatform.value.platformCode
     })
   } catch (err: any) {
-    alert(err?.response?.data?.message || '暂无推荐文案，请稍后再试')
+    reviewStateMessage.value = err?.response?.data?.message || '暂时没有可用文案，请找店员处理。'
   } finally {
     switching.value = false
   }
@@ -157,6 +162,10 @@ async function copyReview() {
 async function jump(link: { platformCode: string; targetUrl: string; backupUrl?: string }) {
   const text = editedContent.value.trim()
   if (!payload.value || !payload.value.review || !text) return
+  if (!link.targetUrl && !link.backupUrl) {
+    reviewStateMessage.value = '该平台暂时没有店铺链接，请换一个来源或联系店员。'
+    return
+  }
   if (!(await copyToClipboard(text))) {
     alert('文案未自动复制，请长按文案手动复制')
   }
@@ -169,10 +178,6 @@ async function jump(link: { platformCode: string; targetUrl: string; backupUrl?:
   })
   acceptedReviewIds.value = [...acceptedReviewIds.value, payload.value.review.id]
   // deeplink 唤起对应 App，唤不起回退商家网页链接
-  if (!link.targetUrl && !link.backupUrl) {
-    alert('该平台还没配置链接，请联系商家')
-    return
-  }
   openPlatform(link.platformCode, link.targetUrl, link.backupUrl)
 }
 
@@ -233,6 +238,13 @@ onMounted(load)
           >{{ link.platformName || link.buttonText }}</button>
         </div>
         <p v-else class="muted">当前门店还没有配置可用平台，请联系商家。</p>
+      </section>
+
+      <section class="card review-status-card" v-if="selectedPlatform && !payload.review && (switching || reviewStateMessage)" role="status">
+        <h2 class="step"><span class="no">2</span>{{ switching ? '正在整理评价' : '暂时没有可用文案' }}</h2>
+        <p class="helper">
+          {{ switching ? '我们正在按你选择的平台准备一版可编辑草稿。' : reviewStateMessage }}
+        </p>
       </section>
 
       <!-- 步骤 2：直接给出可编辑文案，体验标签折叠为可选项 -->
