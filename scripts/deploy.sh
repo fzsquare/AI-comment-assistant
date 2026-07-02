@@ -44,6 +44,9 @@ Useful env:
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
   SMOKE_TEST=true             Check frontend gateway and management APIs after start
   SMOKE_TEST_AUTH=true        Force default/custom admin and merchant login checks
+  SMOKE_SPA_ROUTES="..."      Space-separated SPA routes to verify after gateway start
+  VERIFY_ADMIN_CONSOLE_BUILD=true
+                              Check rebuilt AdminConsole lazy chunk and key UI strings
   SKIP_INSTALL=true           Reuse installed dependencies
 EOF
 }
@@ -191,6 +194,8 @@ configure_defaults() {
   DEFAULT_REVIEW_TARGET_COUNT="${DEFAULT_REVIEW_TARGET_COUNT:-10}"
   SMOKE_TEST="${SMOKE_TEST:-true}"
   SMOKE_TEST_AUTH="${SMOKE_TEST_AUTH:-auto}"
+  SMOKE_SPA_ROUTES="${SMOKE_SPA_ROUTES:-/admin/console /merchant/console /landing/11111111-1111-4111-8111-111111111111}"
+  VERIFY_ADMIN_CONSOLE_BUILD="${VERIFY_ADMIN_CONSOLE_BUILD:-true}"
   SMOKE_ADMIN_ACCOUNT="${SMOKE_ADMIN_ACCOUNT:-admin}"
   SMOKE_ADMIN_PASSWORD="${SMOKE_ADMIN_PASSWORD:-123456}"
   SMOKE_MERCHANT_ACCOUNT="${SMOKE_MERCHANT_ACCOUNT:-merchant}"
@@ -454,9 +459,49 @@ build_project() {
   require_base_commands
   log "building frontend with base $FRONTEND_BASE_PATH and API $FRONTEND_API_BASE_URL"
   (cd "$ROOT_DIR/frontend" && VITE_BASE_PATH="$FRONTEND_BASE_PATH" VITE_API_BASE_URL="$FRONTEND_API_BASE_URL" npm run build)
+  verify_frontend_build_artifacts
 
   log "building backend"
   (cd "$ROOT_DIR/backend" && go build -o "$BIN_DIR/ppk-server" ./cmd/server)
+}
+
+verify_frontend_build_artifacts() {
+  if ! truthy "$VERIFY_ADMIN_CONSOLE_BUILD"; then
+    log "VERIFY_ADMIN_CONSOLE_BUILD=false; AdminConsole build artifact check skipped"
+    return
+  fi
+
+  local dist="$ROOT_DIR/frontend/dist"
+  [[ -f "$dist/index.html" ]] || die "frontend build is missing dist/index.html"
+
+  local admin_js=("$dist"/assets/AdminConsole-*.js)
+  local admin_css=("$dist"/assets/AdminConsole-*.css)
+  [[ -e "${admin_js[0]}" ]] || die "frontend build is missing AdminConsole lazy JS chunk"
+  [[ -e "${admin_css[0]}" ]] || die "frontend build is missing AdminConsole CSS chunk"
+
+  python3 - "$dist" <<'PY'
+from pathlib import Path
+import sys
+
+dist = Path(sys.argv[1])
+assets = dist / "assets"
+needles = [
+    "商家运营控制台",
+    "商家 ID 配置",
+    "保存商家 ID",
+    "服务器落地链接 / NFC 写入链接",
+]
+
+bundle_text = "\n".join(
+    path.read_text("utf-8", errors="ignore")
+    for path in assets.glob("AdminConsole-*.js")
+)
+
+missing = [needle for needle in needles if needle not in bundle_text]
+if missing:
+    raise SystemExit("AdminConsole build is missing key UI text: " + ", ".join(missing))
+PY
+  log "verified AdminConsole build artifacts"
 }
 
 pid_file_for() {
@@ -562,6 +607,38 @@ run_smoke_tests() {
 
   log "running smoke tests against $base_url"
   python3 "$ROOT_DIR/scripts/check_frontend_flows.py" "${args[@]}"
+  check_spa_routes "$base_url"
+}
+
+check_spa_routes() {
+  local base_url="$1"
+  if [[ -z "${SMOKE_SPA_ROUTES:-}" ]]; then
+    log "SMOKE_SPA_ROUTES is empty; SPA route checks skipped"
+    return
+  fi
+
+  log "checking SPA routes under $base_url: $SMOKE_SPA_ROUTES"
+  python3 - "$base_url" "$SMOKE_SPA_ROUTES" <<'PY'
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+base_url = sys.argv[1].rstrip("/") + "/"
+routes = [route for route in sys.argv[2].split() if route]
+
+for route in routes:
+    url = urllib.parse.urljoin(base_url, route.lstrip("/"))
+    req = urllib.request.Request(url, method="GET", headers={"Accept": "text/html"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            if resp.status != 200 or "<html" not in body.lower() or 'id="app"' not in body:
+                raise SystemExit(f"SPA route {route} returned unexpected response")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"SPA route {route} failed: {exc.reason}") from exc
+    print(f"[smoke] ok SPA route {route}", flush=True)
+PY
 }
 
 ensure_port_free() {

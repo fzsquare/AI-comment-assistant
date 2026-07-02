@@ -196,7 +196,21 @@ onMounted(load)
       </div>
     </template>
 
-    <div class="card error-card" v-else-if="error">{{ error }}</div>
+    <section class="card error-card" v-else-if="error" aria-labelledby="landing-error-title">
+      <div class="error-mark" aria-hidden="true">!</div>
+      <h1 id="landing-error-title">该商家暂不可用</h1>
+      <p>{{ error || '当前商家未激活或服务器落地页不可访问。' }}</p>
+      <dl class="error-meta">
+        <div>
+          <dt>访问路由</dt>
+          <dd>/landing/{{ route.params.token }}</dd>
+        </div>
+        <div>
+          <dt>处理方式</dt>
+          <dd>停止评价流程，不跳转商家官方链接</dd>
+        </div>
+      </dl>
+    </section>
 
     <template v-else-if="payload">
       <header class="store-head">
@@ -317,8 +331,57 @@ onMounted(load)
   margin-bottom: 14px;
 }
 .error-card {
-  color: #991b1b;
-  text-align: center;
+  margin-top: 18vh;
+  padding: 28px 24px;
+}
+.error-card h1 {
+  color: #111827;
+  font-size: 22px;
+  line-height: 1.3;
+  margin: 18px 0 8px;
+}
+.error-card p {
+  color: #667085;
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 0;
+}
+.error-mark {
+  align-items: center;
+  background: #fef2f2;
+  border-radius: 12px;
+  color: #b42318;
+  display: inline-flex;
+  font-size: 24px;
+  font-weight: 800;
+  height: 52px;
+  justify-content: center;
+  width: 52px;
+}
+.error-meta {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  display: grid;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 12px;
+}
+.error-meta div {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+.error-meta dt {
+  color: #667085;
+  font-size: 12px;
+}
+.error-meta dd {
+  color: #111827;
+  font-size: 12px;
+  font-weight: 700;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .muted {
   color: #667085;
