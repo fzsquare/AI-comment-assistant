@@ -138,8 +138,8 @@ let externalReviewMatches: any[] = [
 
 // 多商家：演示「每个商家有自己独立的数据」（管理员能看到全部，商家只看到自己的）
 const merchants = [
-  { id: 1, account: 'merchant', merchantName: '巷子里的椒麻鸡', contactName: '张三', status: 1 },
-  { id: 2, account: 'merchant2', merchantName: '舒缘足道', contactName: '李四', status: 1 }
+  { id: 1, account: 'merchant', merchantName: '巷子里的椒麻鸡', contactName: '张三', status: 1, createdAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString() },
+  { id: 2, account: 'merchant2', merchantName: '舒缘足道', contactName: '李四', status: 1, createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }
 ]
 const storeTypes = [
   { id: 1, code: 'restaurant', name: '餐饮', industryCode: 'restaurant', isPreset: true, status: 1 },
@@ -153,8 +153,8 @@ const storeTypes = [
   { id: 9, code: 'auto', name: '汽车服务', industryCode: 'auto', isPreset: true, status: 1 }
 ]
 const stores: any[] = [
-  { ...store, id: 1, merchantUserId: 1 },
-  { id: 2, merchantUserId: 2, uuid: '22222222-2222-4222-8222-222222222222', typeId: 2, storeName: '舒缘足道', industryType: '足疗按摩', storeIntro: '', address: '', primaryPlatformStyle: 'dianping', brandTone: '轻松自然', status: 1 }
+  { ...store, id: 1, merchantUserId: 1, createdAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString() },
+  { id: 2, merchantUserId: 2, uuid: '22222222-2222-4222-8222-222222222222', typeId: 2, storeName: '舒缘足道', industryType: '足疗按摩', storeIntro: '', address: '', primaryPlatformStyle: 'dianping', brandTone: '轻松自然', status: 1, createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString() }
 ]
 
 // ---------------- 落地页评价池（已 humanize，{{tag}} 会被替换成顾客选的菜）----------------
@@ -470,8 +470,9 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'POST', re: /\/admin\/stores$/, handler: (_m, b) => {
     const t = storeTypes.find((x) => x.id === Number(b.typeId))
     const mid = nextId(); const sid = nextId(); const uuid = `mock-${sid}-${Date.now()}`
-    merchants.push({ id: mid, account: b.account, merchantName: b.merchantName || b.storeName, contactName: b.contactName || b.merchantName || b.storeName, status: 1 })
-    const s = { id: sid, merchantUserId: mid, uuid, typeId: t?.id || 0, storeName: b.storeName, industryType: t?.name || '餐饮', storeIntro: b.storeIntro || '', address: b.address || '', primaryPlatformStyle: b.primaryPlatformStyle || 'dianping', brandTone: b.brandTone || '轻松自然', status: 1 }
+    const createdAt = new Date().toISOString()
+    merchants.push({ id: mid, account: b.account, merchantName: b.merchantName || b.storeName, contactName: b.contactName || b.merchantName || b.storeName, status: 1, createdAt })
+    const s = { id: sid, merchantUserId: mid, uuid, typeId: t?.id || 0, storeName: b.storeName, industryType: t?.name || '餐饮', storeIntro: b.storeIntro || '', address: b.address || '', primaryPlatformStyle: b.primaryPlatformStyle || 'dianping', brandTone: b.brandTone || '轻松自然', status: 1, createdAt }
     stores.push(s)
     saveMockPlatformLink(sid, s.primaryPlatformStyle, b.platformUrl)
     saveMockReviewCrawlConfig(sid, b)
@@ -558,11 +559,26 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'GET', re: /\/admin\/stats$/, handler: () => {
     const totalVisits = stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).totalCustomerVisits, 0)
     const totalPublishClicks = stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).totalPublishClicks, 0)
+    const now = new Date()
+    const weekStart = new Date(now)
+    weekStart.setDate(now.getDate() - (now.getDay() || 7) + 1)
+    weekStart.setHours(0, 0, 0, 0)
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const createdAfter = (date: Date) => merchants.filter((item: any) => new Date(item.createdAt || 0) >= date).length
     return {
       merchantCount: merchants.length,
+      enabledMerchantCount: merchants.filter((item) => item.status === 1).length,
+      disabledMerchantCount: merchants.filter((item) => item.status !== 1).length,
+      currentWeekNewMerchants: createdAfter(weekStart),
+      currentMonthNewMerchants: createdAfter(monthStart),
       storeCount: stores.length,
+      enabledStoreCount: stores.filter((item) => item.status === 1).length,
+      disabledStoreCount: stores.filter((item) => item.status !== 1).length,
       tagCount: nfcTags.length,
       taskCount: tasks.length,
+      crawlEnabledStoreCount: reviewCrawlConfigs.filter((item) => item.enabled).length,
+      crawlFailedStoreCount: reviewCrawlConfigs.filter((item) => item.enabled && item.lastStatus === 'failed').length,
+      crawlDataAccumulatingCount: reviewCrawlConfigs.filter((item) => item.enabled && !item.baselineCompletedAt).length,
       totalCustomerVisits: totalVisits,
       currentWeekCustomerVisits: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentWeekCustomerVisits, 0),
       currentMonthCustomerVisits: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentMonthCustomerVisits, 0),

@@ -20,6 +20,9 @@ const crawlPanelStore = ref<AdminStore | null>(null)
 const crawlBatches = ref<ReviewCrawlBatch[]>([])
 const crawlMatches = ref<ExternalStoreReviewMatch[]>([])
 const crawlLoading = ref(false)
+const selectedStoreId = ref<number | null>(null)
+const storeSearch = ref('')
+const storeStatusFilter = ref<'all' | 'enabled' | 'disabled' | 'crawl_failed' | 'no_crawl'>('all')
 
 const platformOptions = [
   { code: 'dianping', name: '大众点评' },
@@ -49,6 +52,47 @@ const topStores = computed(() => {
     .sort((a, b) => (b.analytics?.totalCustomerVisits || 0) - (a.analytics?.totalCustomerVisits || 0))
     .slice(0, 5)
 })
+const filteredStores = computed(() => {
+  const query = storeSearch.value.trim().toLowerCase()
+  return stores.value.filter((item) => {
+    if (storeStatusFilter.value === 'enabled' && item.status !== 1) return false
+    if (storeStatusFilter.value === 'disabled' && item.status === 1) return false
+    if (storeStatusFilter.value === 'crawl_failed' && item.reviewCrawl?.lastStatus !== 'failed') return false
+    if (storeStatusFilter.value === 'no_crawl' && item.reviewCrawl?.enabled) return false
+    if (!query) return true
+    const merchant = merchantForStore(item)
+    return [
+      item.storeName,
+      item.industryType,
+      item.merchantAccount,
+      item.merchantName,
+      item.contactName,
+      merchant.account,
+      item.reviewCrawl?.externalShopId
+    ].some((value) => String(value || '').toLowerCase().includes(query))
+  })
+})
+const selectedStore = computed(() => {
+  if (!stores.value.length) return null
+  return stores.value.find((item) => item.id === selectedStoreId.value) || filteredStores.value[0] || stores.value[0] || null
+})
+const selectedMerchant = computed(() => selectedStore.value ? merchantForStore(selectedStore.value) : {})
+const noPlatformLinkCount = computed(() => stores.value.filter((item) => !item.platformUrl).length)
+const noCrawlConfigCount = computed(() => stores.value.filter((item) => !item.reviewCrawl?.enabled).length)
+const pendingWorkCount = computed(() =>
+  stats.value.disabledMerchantCount +
+  stats.value.crawlFailedStoreCount +
+  stats.value.crawlDataAccumulatingCount +
+  noPlatformLinkCount.value +
+  noCrawlConfigCount.value
+)
+const workItems = computed(() => [
+  { label: '禁用商家', count: stats.value.disabledMerchantCount, tone: stats.value.disabledMerchantCount > 0 ? 'danger' : 'stable' },
+  { label: '采集失败', count: stats.value.crawlFailedStoreCount, tone: stats.value.crawlFailedStoreCount > 0 ? 'danger' : 'stable' },
+  { label: '数据积累中', count: stats.value.crawlDataAccumulatingCount, tone: stats.value.crawlDataAccumulatingCount > 0 ? 'warn' : 'stable' },
+  { label: '未配交付链接', count: noPlatformLinkCount.value, tone: noPlatformLinkCount.value > 0 ? 'warn' : 'stable' },
+  { label: '未启用采集', count: noCrawlConfigCount.value, tone: noCrawlConfigCount.value > 0 ? 'neutral' : 'stable' }
+])
 const globalDeviceAria = computed(() => {
   if (!globalDeviceItems.value.length) return '暂无全局访问设备数据'
   return `全局访问设备占比：${globalDeviceItems.value.map((item) => `${item.label}${formatPercent(item.percent)}`).join('，')}`
@@ -81,6 +125,15 @@ function emptyStats(): AdminStats {
     storeCount: 0,
     tagCount: 0,
     taskCount: 0,
+    enabledMerchantCount: 0,
+    disabledMerchantCount: 0,
+    currentWeekNewMerchants: 0,
+    currentMonthNewMerchants: 0,
+    enabledStoreCount: 0,
+    disabledStoreCount: 0,
+    crawlEnabledStoreCount: 0,
+    crawlFailedStoreCount: 0,
+    crawlDataAccumulatingCount: 0,
     totalCustomerVisits: 0,
     currentWeekCustomerVisits: 0,
     currentMonthCustomerVisits: 0,
@@ -152,11 +205,27 @@ function crawlConfigText(item: AdminStore) {
   return `${platformDisplayName(cfg.platformCode)} ${cfg.externalShopId} · ${enabledText}`
 }
 
+function statusToneClass(tone: string) {
+  return {
+    danger: tone === 'danger',
+    warn: tone === 'warn',
+    stable: tone === 'stable',
+    neutral: tone === 'neutral'
+  }
+}
+
 function formatDateTime(value?: string) {
   if (!value) return '-'
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return '-'
   return d.toLocaleString('zh-CN', { hour12: false })
+}
+
+function shortDateTime(value?: string) {
+  if (!value) return '-'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return '-'
+  return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
 }
 
 function normalizeAbsoluteUrl(value: string) {
@@ -211,6 +280,12 @@ async function loadAll() {
     stats.value = statsRes.data.data
     if (!newStore.typeId) newStore.typeId = storeTypes.value[0]?.id || 0
     if (!newType.industryCode) newType.industryCode = presetTypes.value[0]?.code || ''
+    if (stores.value.length && !stores.value.some((item) => item.id === selectedStoreId.value)) {
+      selectedStoreId.value = stores.value[0].id
+    }
+    if (!stores.value.length) {
+      selectedStoreId.value = null
+    }
   } catch (err: any) {
     error.value = messageFrom(err, '后台数据加载失败')
   } finally {
@@ -241,6 +316,7 @@ async function createStoreType() {
 
 function editStore(item: any) {
   const merchant = merchantForStore(item)
+  selectedStoreId.value = item.id
   editingStoreId.value = item.id
   lastCreated.value = null
   newStore.account = item.merchantAccount || merchant.account || ''
@@ -333,9 +409,11 @@ async function deleteStore(item: any) {
   if (!window.confirm(`确认删除门店「${item.storeName}」？关联商家账号、评价、图片、平台入口和生成任务会一起删除，NFC 卡片会解绑保留。`)) return
   await runAction(() => adminApi.deleteStore(item.id), '门店已删除')
   if (editingStoreId.value === item.id) resetStoreForm()
+  if (selectedStoreId.value === item.id) selectedStoreId.value = null
 }
 
 async function runStoreReviewCrawl(item: AdminStore) {
+  selectedStoreId.value = item.id
   await runAction(() => adminApi.runStoreReviewCrawl(item.id), '评论采集已同步')
   if (crawlPanelStore.value?.id === item.id) {
     await loadReviewCrawl(item)
@@ -343,6 +421,7 @@ async function runStoreReviewCrawl(item: AdminStore) {
 }
 
 async function loadReviewCrawl(item: AdminStore) {
+  selectedStoreId.value = item.id
   crawlLoading.value = true
   error.value = ''
   try {
@@ -358,6 +437,15 @@ async function loadReviewCrawl(item: AdminStore) {
   } finally {
     crawlLoading.value = false
   }
+}
+
+function selectStore(item: AdminStore) {
+  selectedStoreId.value = item.id
+}
+
+function clearStoreFilters() {
+  storeSearch.value = ''
+  storeStatusFilter.value = 'all'
 }
 
 async function copyText(text: string) {
@@ -392,71 +480,104 @@ onMounted(loadAll)
     <p v-if="error" class="alert">{{ error }}</p>
     <p v-else-if="notice" class="notice">{{ notice }}</p>
 
-    <div class="stat-strip" aria-label="平台统计">
-      <div>
-        <span>商家</span>
-        <strong>{{ formatNumber(stats.merchantCount) }}</strong>
-        <small>{{ formatNumber(stats.storeCount) }} 个门店 URL</small>
-      </div>
-      <div>
-        <span>客户访问</span>
-        <strong>{{ formatNumber(stats.totalCustomerVisits) }}</strong>
-        <small>本月 {{ formatNumber(stats.currentMonthCustomerVisits) }}</small>
-      </div>
-      <div>
-        <span>引导发布</span>
-        <strong>{{ formatNumber(stats.totalPublishClicks) }}</strong>
-        <small>本周 {{ formatNumber(stats.currentWeekPublishClicks) }}</small>
-      </div>
-      <div>
-        <span>生成任务</span>
-        <strong>{{ formatNumber(stats.taskCount) }}</strong>
-        <small>{{ updatedText || '等待数据' }}</small>
-      </div>
-    </div>
-
-    <div class="ops-grid" aria-label="运营总览">
-      <section class="ops-panel" aria-labelledby="admin-device-title">
-        <div class="panel-head">
-          <div>
-            <h2 id="admin-device-title">全局访问设备</h2>
-            <p class="muted">{{ deviceSummaryText }}</p>
-          </div>
-          <strong>{{ formatNumber(stats.deviceStats?.totalCount) }}</strong>
+    <section class="erp-board" aria-label="管理员运营工作台">
+      <div class="erp-title-row">
+        <div>
+          <h2>运营工作台</h2>
+          <p class="muted">{{ updatedText || '等待数据更新' }}</p>
         </div>
-        <div v-if="globalDeviceItems.length" class="device-bars" role="img" :aria-label="globalDeviceAria">
-          <div v-for="item in globalDeviceItems" :key="item.code" class="device-row">
-            <div class="device-row-head">
+        <strong :class="['workload-pill', pendingWorkCount > 0 ? 'warn' : 'stable']">
+          待处理 {{ formatNumber(pendingWorkCount) }}
+        </strong>
+      </div>
+
+      <div class="stat-strip" aria-label="平台统计">
+        <div>
+          <span>本周新增商家</span>
+          <strong>{{ formatNumber(stats.currentWeekNewMerchants) }}</strong>
+          <small>本月 {{ formatNumber(stats.currentMonthNewMerchants) }} / 累计 {{ formatNumber(stats.merchantCount) }}</small>
+        </div>
+        <div>
+          <span>启用商家</span>
+          <strong>{{ formatNumber(stats.enabledMerchantCount) }}</strong>
+          <small>禁用 {{ formatNumber(stats.disabledMerchantCount) }}</small>
+        </div>
+        <div>
+          <span>门店 URL</span>
+          <strong>{{ formatNumber(stats.storeCount) }}</strong>
+          <small>启用 {{ formatNumber(stats.enabledStoreCount) }} / 禁用 {{ formatNumber(stats.disabledStoreCount) }}</small>
+        </div>
+        <div>
+          <span>客户访问</span>
+          <strong>{{ formatNumber(stats.totalCustomerVisits) }}</strong>
+          <small>本月 {{ formatNumber(stats.currentMonthCustomerVisits) }}</small>
+        </div>
+        <div>
+          <span>引导发布</span>
+          <strong>{{ formatNumber(stats.totalPublishClicks) }}</strong>
+          <small>本周 {{ formatNumber(stats.currentWeekPublishClicks) }}</small>
+        </div>
+      </div>
+
+      <div class="ops-grid" aria-label="运营总览">
+        <section class="ops-panel" aria-labelledby="admin-work-title">
+          <div class="panel-head">
+            <div>
+              <h3 id="admin-work-title">业务待办</h3>
+              <p class="muted">按账号、交付、采集三个运营环节归类</p>
+            </div>
+            <strong>{{ formatNumber(pendingWorkCount) }}</strong>
+          </div>
+          <div class="work-list">
+            <div v-for="item in workItems" :key="item.label" :class="['work-item', statusToneClass(item.tone)]">
               <span>{{ item.label }}</span>
-              <b>{{ formatNumber(item.count) }} · {{ formatPercent(item.percent) }}</b>
-            </div>
-            <div class="device-track" aria-hidden="true">
-              <span :style="deviceBarStyle(item)"></span>
+              <b>{{ formatNumber(item.count) }}</b>
             </div>
           </div>
-        </div>
-        <p v-else class="empty-note">顾客打开交付 URL 后，这里会出现设备结构。</p>
-      </section>
+        </section>
 
-      <section class="ops-panel" aria-labelledby="top-store-title">
-        <div class="panel-head">
-          <div>
-            <h2 id="top-store-title">商家访问排行</h2>
-            <p class="muted">按访问量排序，辅助判断交付后是否真实使用</p>
+        <section class="ops-panel" aria-labelledby="top-store-title">
+          <div class="panel-head">
+            <div>
+              <h3 id="top-store-title">商家访问排行</h3>
+              <p class="muted">按累计访问量排序</p>
+            </div>
           </div>
-        </div>
-        <ol v-if="topStores.length" class="store-rank">
-          <li v-for="item in topStores" :key="item.id">
-            <span>
-              <b>{{ item.storeName }}</b>
-              <small>{{ primaryDeviceText(item) }}</small>
-            </span>
-            <strong>{{ formatNumber(item.analytics?.totalCustomerVisits) }}</strong>
-          </li>
-        </ol>
-        <p v-else class="empty-note">暂无门店数据。</p>
-      </section>
-    </div>
+          <ol v-if="topStores.length" class="store-rank">
+            <li v-for="item in topStores" :key="item.id" @click="selectStore(item)">
+              <span>
+                <b>{{ item.storeName }}</b>
+                <small>{{ primaryDeviceText(item) }}</small>
+              </span>
+              <strong>{{ formatNumber(item.analytics?.totalCustomerVisits) }}</strong>
+            </li>
+          </ol>
+          <p v-else class="empty-note">暂无门店数据。</p>
+        </section>
+
+        <section class="ops-panel" aria-labelledby="admin-device-title">
+          <div class="panel-head">
+            <div>
+              <h3 id="admin-device-title">全局访问设备</h3>
+              <p class="muted">{{ deviceSummaryText }}</p>
+            </div>
+            <strong>{{ formatNumber(stats.deviceStats?.totalCount) }}</strong>
+          </div>
+          <div v-if="globalDeviceItems.length" class="device-bars" role="img" :aria-label="globalDeviceAria">
+            <div v-for="item in globalDeviceItems" :key="item.code" class="device-row">
+              <div class="device-row-head">
+                <span>{{ item.label }}</span>
+                <b>{{ formatNumber(item.count) }} · {{ formatPercent(item.percent) }}</b>
+              </div>
+              <div class="device-track" aria-hidden="true">
+                <span :style="deviceBarStyle(item)"></span>
+              </div>
+            </div>
+          </div>
+          <p v-else class="empty-note">顾客打开交付 URL 后，这里会出现设备结构。</p>
+        </section>
+      </div>
+    </section>
 
     <div class="card">
       <div class="section-head">
@@ -527,15 +648,34 @@ onMounted(loadAll)
       </div>
     </div>
 
-    <div class="card">
-      <h2>门店列表</h2>
-      <table class="desktop-table">
+    <div class="card merchant-ledger">
+      <div class="section-head ledger-head">
+        <div>
+          <h2>商家台账</h2>
+          <p class="muted">共 {{ formatNumber(filteredStores.length) }} 条，当前选中 {{ selectedStore?.storeName || '-' }}</p>
+        </div>
+        <div class="ledger-tools">
+          <input v-model="storeSearch" type="search" placeholder="搜索商家、账号、门店、外部 ID" />
+          <select v-model="storeStatusFilter">
+            <option value="all">全部状态</option>
+            <option value="enabled">启用中</option>
+            <option value="disabled">已禁用</option>
+            <option value="crawl_failed">采集失败</option>
+            <option value="no_crawl">未启用采集</option>
+          </select>
+          <button class="secondary" type="button" @click="clearStoreFilters">重置</button>
+        </div>
+      </div>
+
+      <div class="merchant-workspace">
+        <div class="ledger-table">
+          <table class="desktop-table">
         <thead><tr><th>门店</th><th>商家账号</th><th>后台数据</th><th>主力设备</th><th>评论采集</th><th>交付 URL</th><th>状态</th><th>操作</th></tr></thead>
         <tbody>
-          <tr v-for="item in stores" :key="item.id">
+          <tr v-for="item in filteredStores" :key="item.id" :class="{ selected: selectedStore?.id === item.id }" @click="selectStore(item)">
             <td>
               <strong>{{ item.storeName }}</strong>
-              <span class="subtext">ID {{ item.id }} · {{ typeName(item.typeId) }}</span>
+              <span class="subtext">ID {{ item.id }} · {{ typeName(item.typeId) }} · {{ shortDateTime(item.createdAt) }}</span>
             </td>
             <td>{{ item.merchantAccount || merchantForStore(item).account || '-' }}</td>
             <td>
@@ -558,6 +698,7 @@ onMounted(loadAll)
             <td>
               <span class="table-actions">
                 <button class="secondary" :disabled="loading" @click="editStore(item)">编辑</button>
+                <button class="secondary" :disabled="loading" @click="selectStore(item)">明细</button>
                 <button class="secondary" :disabled="loading" @click="toggleStoreStatus(item)">
                   {{ item.status === 1 ? '禁用' : '启用' }}
                 </button>
@@ -569,8 +710,9 @@ onMounted(loadAll)
           </tr>
         </tbody>
       </table>
+          <p v-if="!filteredStores.length" class="empty-note ledger-empty">没有匹配的商家。</p>
       <div class="mobile-store-list" aria-label="门店列表">
-        <article v-for="item in stores" :key="item.id" class="mobile-store-item">
+        <article v-for="item in filteredStores" :key="item.id" class="mobile-store-item" @click="selectStore(item)">
           <div class="mobile-store-head">
             <div>
               <strong>{{ item.storeName }}</strong>
@@ -608,6 +750,7 @@ onMounted(loadAll)
           </dl>
           <div class="mobile-store-actions">
             <button class="secondary" :disabled="loading" @click="editStore(item)">编辑</button>
+            <button class="secondary" :disabled="loading" @click="selectStore(item)">明细</button>
             <button class="secondary" :disabled="loading" @click="toggleStoreStatus(item)">
               {{ item.status === 1 ? '禁用' : '启用' }}
             </button>
@@ -616,6 +759,93 @@ onMounted(loadAll)
             <button class="danger" :disabled="loading" @click="deleteStore(item)">删除</button>
           </div>
         </article>
+      </div>
+        </div>
+
+        <aside v-if="selectedStore" class="merchant-detail" aria-label="商家明细">
+          <div class="detail-head">
+            <div>
+              <p class="eyebrow">商家明细</p>
+              <h3>{{ selectedStore.storeName }}</h3>
+              <span>{{ selectedStore.merchantAccount || selectedMerchant.account || '-' }}</span>
+            </div>
+            <b :class="['status-pill', selectedStore.status === 1 ? 'enabled' : 'disabled']">{{ numericStatusText(selectedStore.status) }}</b>
+          </div>
+
+          <dl class="detail-grid">
+            <div>
+              <dt>商家名称</dt>
+              <dd>{{ selectedStore.merchantName || selectedMerchant.merchantName || '-' }}</dd>
+            </div>
+            <div>
+              <dt>联系人</dt>
+              <dd>{{ selectedStore.contactName || selectedMerchant.contactName || '-' }}</dd>
+            </div>
+            <div>
+              <dt>门店类型</dt>
+              <dd>{{ typeName(selectedStore.typeId) }}</dd>
+            </div>
+            <div>
+              <dt>创建时间</dt>
+              <dd>{{ formatDateTime(selectedStore.createdAt) }}</dd>
+            </div>
+          </dl>
+
+          <div class="detail-metrics">
+            <div>
+              <span>累计访问</span>
+              <strong>{{ formatNumber(selectedStore.analytics?.totalCustomerVisits) }}</strong>
+              <small>本月 {{ formatNumber(selectedStore.analytics?.currentMonthCustomerVisits) }}</small>
+            </div>
+            <div>
+              <span>引导发布</span>
+              <strong>{{ formatNumber(selectedStore.analytics?.totalPublishClicks) }}</strong>
+              <small>本周 {{ formatNumber(selectedStore.analytics?.currentWeekPublishClicks) }}</small>
+            </div>
+            <div>
+              <span>平台入口</span>
+              <strong>{{ formatNumber(selectedStore.analytics?.activePlatformLinkCount) }}</strong>
+              <small>{{ platformDisplayName(selectedStore.primaryPlatformStyle) }}</small>
+            </div>
+          </div>
+
+          <div class="detail-block">
+            <h4>交付 URL</h4>
+            <p class="detail-url">{{ storeLandingUrl(selectedStore) }}</p>
+            <button class="secondary" type="button" @click="copyText(storeLandingUrl(selectedStore))">复制 URL</button>
+          </div>
+
+          <div class="detail-block">
+            <h4>评论采集</h4>
+            <dl class="detail-grid compact">
+              <div>
+                <dt>配置</dt>
+                <dd>{{ crawlConfigText(selectedStore) }}</dd>
+              </div>
+              <div>
+                <dt>状态</dt>
+                <dd>{{ crawlStatusText(selectedStore.reviewCrawl?.lastStatus) }}</dd>
+              </div>
+              <div>
+                <dt>上次采集</dt>
+                <dd>{{ formatDateTime(selectedStore.reviewCrawl?.lastCrawledAt) }}</dd>
+              </div>
+              <div>
+                <dt>下次采集</dt>
+                <dd>{{ formatDateTime(selectedStore.reviewCrawl?.nextCrawlAt) }}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div class="detail-actions">
+            <button class="secondary" type="button" :disabled="loading" @click="editStore(selectedStore)">编辑资料</button>
+            <button class="secondary" type="button" :disabled="loading || !selectedStore.reviewCrawl?.enabled" @click="runStoreReviewCrawl(selectedStore)">同步评论</button>
+            <button class="secondary" type="button" :disabled="loading" @click="loadReviewCrawl(selectedStore)">采集明细</button>
+            <button type="button" :disabled="loading" @click="toggleStoreStatus(selectedStore)">
+              {{ selectedStore.status === 1 ? '禁用门店' : '启用门店' }}
+            </button>
+          </div>
+        </aside>
       </div>
 
       <section v-if="crawlPanelStore" class="crawl-panel" aria-labelledby="crawl-panel-title">
@@ -757,13 +987,51 @@ onMounted(loadAll)
   align-items: center;
   justify-content: space-between;
 }
+.admin-console {
+  max-width: 1360px;
+}
+.admin-console .card {
+  border-radius: 8px;
+  box-shadow: none;
+}
 .header-actions {
   align-items: center;
+}
+.erp-board {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  margin-bottom: 16px;
+  padding: 16px;
+}
+.erp-title-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.erp-title-row h2 {
+  margin-bottom: 4px;
+}
+.workload-pill {
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-size: 13px;
+  padding: 6px 10px;
+}
+.workload-pill.warn {
+  background: #fffbeb;
+  color: #92400e;
+}
+.workload-pill.stable {
+  background: var(--success-bg);
+  color: var(--success-text);
 }
 .stat-strip {
   display: grid;
   gap: 10px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-bottom: 16px;
 }
 .stat-strip div {
@@ -793,7 +1061,7 @@ onMounted(loadAll)
 .ops-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1fr) minmax(260px, 1fr);
   margin-bottom: 16px;
 }
 .ops-panel {
@@ -809,12 +1077,52 @@ onMounted(loadAll)
   justify-content: space-between;
   margin-bottom: 12px;
 }
-.panel-head h2 {
+.panel-head h2,
+.panel-head h3 {
   margin-bottom: 4px;
 }
 .panel-head strong {
   font-size: 24px;
   line-height: 1;
+}
+.work-list {
+  display: grid;
+  gap: 8px;
+}
+.work-item {
+  align-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 8px 10px;
+}
+.work-item span {
+  color: var(--muted);
+  font-size: 13px;
+}
+.work-item b {
+  font-size: 18px;
+}
+.work-item.danger {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+.work-item.warn {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+.work-item.stable {
+  background: var(--success-bg);
+  border-color: #bbf7d0;
+  color: var(--success-text);
+}
+.work-item.neutral {
+  background: #f8fafc;
+  color: var(--text);
 }
 .device-bars {
   display: grid;
@@ -870,6 +1178,12 @@ onMounted(loadAll)
   min-height: 52px;
   padding: 9px 10px;
 }
+.store-rank li {
+  cursor: pointer;
+}
+.store-rank li:hover {
+  border-color: #bfdbfe;
+}
 .store-rank b,
 .store-rank small {
   display: block;
@@ -903,6 +1217,142 @@ onMounted(loadAll)
 }
 .section-head h2 {
   margin-bottom: 4px;
+}
+.ledger-head {
+  align-items: flex-start;
+}
+.ledger-tools {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(220px, 1fr) minmax(140px, auto) auto;
+  min-width: min(100%, 520px);
+}
+.merchant-workspace {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 0.36fr);
+}
+.ledger-table {
+  min-width: 0;
+  overflow-x: auto;
+}
+.ledger-table table {
+  display: table;
+  min-width: 980px;
+}
+.ledger-table tr {
+  cursor: pointer;
+}
+.ledger-table tbody tr:hover,
+.ledger-table tbody tr.selected {
+  background: #f8fafc;
+}
+.ledger-table tbody tr.selected td:first-child {
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+.ledger-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.merchant-detail {
+  background: #f8fafc;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  position: sticky;
+  top: 16px;
+}
+.detail-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.detail-head h3 {
+  margin: 0 0 4px;
+}
+.detail-head span,
+.eyebrow {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0;
+}
+.detail-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+}
+.detail-grid.compact {
+  grid-template-columns: 1fr;
+}
+.detail-grid div {
+  min-width: 0;
+}
+.detail-grid dt {
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.detail-grid dd {
+  color: var(--text);
+  font-weight: 700;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.detail-metrics {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.detail-metrics div {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  min-width: 0;
+  padding: 9px;
+}
+.detail-metrics span,
+.detail-metrics small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+}
+.detail-metrics strong {
+  display: block;
+  font-size: 20px;
+  line-height: 1.1;
+  margin: 3px 0;
+}
+.detail-block {
+  border-top: 1px solid var(--border-soft);
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+.detail-block h4 {
+  margin: 0;
+}
+.detail-url {
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  padding: 9px;
+}
+.detail-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.detail-actions button {
+  min-height: 40px;
+  padding: 8px 10px;
 }
 .form-grid {
   align-items: start;
@@ -1143,9 +1593,23 @@ onMounted(loadAll)
   padding: 14px 18px 18px;
 }
 
+@media (max-width: 1024px) {
+  .stat-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ops-grid,
+  .merchant-workspace {
+    grid-template-columns: 1fr;
+  }
+  .merchant-detail {
+    position: static;
+  }
+}
+
 @media (max-width: 640px) {
   .admin-header,
   .section-head,
+  .erp-title-row,
   .url-line {
     display: grid;
     grid-template-columns: 1fr;
@@ -1166,6 +1630,12 @@ onMounted(loadAll)
   }
   .stat-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ledger-tools,
+  .detail-metrics,
+  .detail-actions,
+  .detail-grid {
+    grid-template-columns: 1fr;
   }
   .crawl-config-grid {
     grid-template-columns: 1fr;

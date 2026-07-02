@@ -3,9 +3,18 @@ import type { DeviceStats } from './merchant'
 
 export type AdminStats = {
   merchantCount: number
+  enabledMerchantCount: number
+  disabledMerchantCount: number
+  currentWeekNewMerchants: number
+  currentMonthNewMerchants: number
   storeCount: number
+  enabledStoreCount: number
+  disabledStoreCount: number
   tagCount: number
   taskCount: number
+  crawlEnabledStoreCount: number
+  crawlFailedStoreCount: number
+  crawlDataAccumulatingCount: number
   totalCustomerVisits: number
   currentWeekCustomerVisits: number
   currentMonthCustomerVisits: number
@@ -50,6 +59,8 @@ export type AdminStore = {
   primaryPlatformStyle: string
   brandTone?: string
   status: number
+  createdAt?: string
+  updatedAt?: string
   merchantAccount?: string
   merchantName?: string
   contactName?: string

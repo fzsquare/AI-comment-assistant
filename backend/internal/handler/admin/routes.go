@@ -16,9 +16,18 @@ import (
 
 type adminStatsResponse struct {
 	MerchantCount              int64               `json:"merchantCount"`
+	EnabledMerchantCount       int64               `json:"enabledMerchantCount"`
+	DisabledMerchantCount      int64               `json:"disabledMerchantCount"`
+	CurrentWeekNewMerchants    int64               `json:"currentWeekNewMerchants"`
+	CurrentMonthNewMerchants   int64               `json:"currentMonthNewMerchants"`
 	StoreCount                 int64               `json:"storeCount"`
+	EnabledStoreCount          int64               `json:"enabledStoreCount"`
+	DisabledStoreCount         int64               `json:"disabledStoreCount"`
 	TagCount                   int64               `json:"tagCount"`
 	TaskCount                  int64               `json:"taskCount"`
+	CrawlEnabledStoreCount     int64               `json:"crawlEnabledStoreCount"`
+	CrawlFailedStoreCount      int64               `json:"crawlFailedStoreCount"`
+	CrawlDataAccumulatingCount int64               `json:"crawlDataAccumulatingCount"`
 	TotalCustomerVisits        int64               `json:"totalCustomerVisits"`
 	CurrentWeekCustomerVisits  int64               `json:"currentWeekCustomerVisits"`
 	CurrentMonthCustomerVisits int64               `json:"currentMonthCustomerVisits"`
@@ -291,16 +300,31 @@ func (h *Handler) listTasks(c *gin.Context) {
 }
 
 func (h *Handler) stats(c *gin.Context) {
-	var merchantCount, storeCount, tagCount, taskCount int64
-	h.DB.Model(&model.MerchantUser{}).Count(&merchantCount)
-	h.DB.Model(&model.Store{}).Count(&storeCount)
-	h.DB.Model(&model.NFCTag{}).Count(&tagCount)
-	h.DB.Model(&model.ReviewGenerationTask{}).Count(&taskCount)
-
 	loc := adminDashboardLocation()
 	now := time.Now().In(loc)
 	weekStart := adminStartOfWeek(now)
 	monthStart := adminStartOfMonth(now)
+
+	var merchantCount, enabledMerchantCount, disabledMerchantCount, currentWeekNewMerchants, currentMonthNewMerchants int64
+	h.DB.Model(&model.MerchantUser{}).Count(&merchantCount)
+	h.DB.Model(&model.MerchantUser{}).Where("status = ?", model.StatusEnabled).Count(&enabledMerchantCount)
+	h.DB.Model(&model.MerchantUser{}).Where("status <> ?", model.StatusEnabled).Count(&disabledMerchantCount)
+	h.DB.Model(&model.MerchantUser{}).Where("created_at >= ?", weekStart).Count(&currentWeekNewMerchants)
+	h.DB.Model(&model.MerchantUser{}).Where("created_at >= ?", monthStart).Count(&currentMonthNewMerchants)
+
+	var storeCount, enabledStoreCount, disabledStoreCount int64
+	h.DB.Model(&model.Store{}).Count(&storeCount)
+	h.DB.Model(&model.Store{}).Where("status = ?", model.StatusEnabled).Count(&enabledStoreCount)
+	h.DB.Model(&model.Store{}).Where("status <> ?", model.StatusEnabled).Count(&disabledStoreCount)
+
+	var tagCount, taskCount int64
+	h.DB.Model(&model.NFCTag{}).Count(&tagCount)
+	h.DB.Model(&model.ReviewGenerationTask{}).Count(&taskCount)
+
+	var crawlEnabledStoreCount, crawlFailedStoreCount, crawlDataAccumulatingCount int64
+	h.DB.Model(&model.StoreReviewCrawlConfig{}).Where("enabled = ?", true).Count(&crawlEnabledStoreCount)
+	h.DB.Model(&model.StoreReviewCrawlConfig{}).Where("enabled = ? AND last_status = ?", true, model.CrawlStatusFailed).Count(&crawlFailedStoreCount)
+	h.DB.Model(&model.StoreReviewCrawlConfig{}).Where("enabled = ? AND baseline_completed_at IS NULL", true).Count(&crawlDataAccumulatingCount)
 
 	totalVisits, err := service.CountReviewLogAction(h.DB, 0, service.ReviewActionPageView, time.Time{}, time.Time{})
 	if err != nil {
@@ -340,9 +364,18 @@ func (h *Handler) stats(c *gin.Context) {
 
 	response.Success(c, adminStatsResponse{
 		MerchantCount:              merchantCount,
+		EnabledMerchantCount:       enabledMerchantCount,
+		DisabledMerchantCount:      disabledMerchantCount,
+		CurrentWeekNewMerchants:    currentWeekNewMerchants,
+		CurrentMonthNewMerchants:   currentMonthNewMerchants,
 		StoreCount:                 storeCount,
+		EnabledStoreCount:          enabledStoreCount,
+		DisabledStoreCount:         disabledStoreCount,
 		TagCount:                   tagCount,
 		TaskCount:                  taskCount,
+		CrawlEnabledStoreCount:     crawlEnabledStoreCount,
+		CrawlFailedStoreCount:      crawlFailedStoreCount,
+		CrawlDataAccumulatingCount: crawlDataAccumulatingCount,
 		TotalCustomerVisits:        totalVisits,
 		CurrentWeekCustomerVisits:  currentWeekVisits,
 		CurrentMonthCustomerVisits: currentMonthVisits,
