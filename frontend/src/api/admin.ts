@@ -22,6 +22,8 @@ export type AdminStats = {
   currentWeekPublishClicks: number
   currentMonthPublishClicks: number
   deviceStats: DeviceStats
+  dataSource: string
+  dataSourceLabel: string
   updatedAt: string
 }
 
@@ -34,6 +36,8 @@ export type AdminStoreAnalytics = {
   currentMonthPublishClicks: number
   activePlatformLinkCount: number
   deviceStats: DeviceStats
+  dataSource: string
+  dataSourceLabel: string
 }
 
 export type AdminStoreReviewCrawl = {

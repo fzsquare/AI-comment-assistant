@@ -50,6 +50,8 @@ type publishStatsResponse struct {
 	DeviceStats                 service.DeviceStats  `json:"deviceStats"`
 	WeeklySeries                []weeklySeriesPoint  `json:"weeklySeries"`
 	MonthlySeries               []monthlySeriesPoint `json:"monthlySeries"`
+	DataSource                  string               `json:"dataSource"`
+	DataSourceLabel             string               `json:"dataSourceLabel"`
 	PartialErrors               []string             `json:"partialErrors"`
 }
 
@@ -200,6 +202,8 @@ func (h *Handler) getPublishStats(c *gin.Context) {
 		DeviceStats:                 deviceStats,
 		WeeklySeries:                weekly,
 		MonthlySeries:               monthly,
+		DataSource:                  service.ReviewAnalyticsDataSource,
+		DataSourceLabel:             service.ReviewAnalyticsDataSourceLabel,
 		PartialErrors:               []string{},
 	})
 }

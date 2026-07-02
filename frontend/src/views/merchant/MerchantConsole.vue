@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { merchantApi } from '../../api/merchant'
 import type { DeviceBreakdownItem, GenerationPreferences, PublishStats, PublishTrendPoint } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
+import { analyticsSourceLabel } from '../../utils/analyticsSource'
 
 const auth = useAuthStore()
 const storeForm = reactive({
@@ -160,6 +161,7 @@ const updatedText = computed(() => {
   if (Number.isNaN(d.getTime())) return ''
   return `数据更新至 ${d.toLocaleString('zh-CN', { hour12: false })}`
 })
+const analyticsSourceText = computed(() => analyticsSourceLabel(dashboard.value?.dataSourceLabel))
 const deviceItems = computed(() => dashboard.value?.deviceStats?.items || [])
 const deviceHasData = computed(() => deviceItems.value.length > 0)
 const topDevice = computed<DeviceBreakdownItem | null>(() => {
@@ -691,7 +693,10 @@ onBeforeUnmount(() => {
           <p class="eyebrow">{{ storeForm.industryType || '商家' }}</p>
           <h2 id="publish-title">{{ storeForm.storeName || '商家价值看板' }}</h2>
         </div>
-        <p class="updated">{{ updatedText }}</p>
+        <div class="analytics-meta">
+          <p class="updated">{{ updatedText }}</p>
+          <p class="data-source">来源：{{ analyticsSourceText }}</p>
+        </div>
       </div>
 
       <div class="platform-filter" aria-label="数据平台筛选">
@@ -1217,12 +1222,19 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 .eyebrow,
-.updated {
+.updated,
+.data-source {
   color: var(--muted);
   font-size: 13px;
   margin: 0;
 }
-.updated {
+.analytics-meta {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
+}
+.updated,
+.data-source {
   text-align: right;
 }
 .platform-filter {
@@ -1922,6 +1934,13 @@ onBeforeUnmount(() => {
   .dashboard-stack,
   .optimization-panel {
     grid-template-columns: 1fr;
+  }
+  .analytics-meta {
+    justify-items: start;
+  }
+  .updated,
+  .data-source {
+    text-align: left;
   }
   .platform-select-wrap {
     align-items: stretch;

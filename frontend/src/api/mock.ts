@@ -10,6 +10,8 @@ import type { AxiosAdapter, AxiosResponse } from 'axios'
 const envelope = (data: unknown) => ({ code: 0, message: 'ok', data })
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const landingPath = (uuid: string) => `${import.meta.env.BASE_URL}landing/${uuid}`
+const analyticsDataSource = 'mock_review_display_logs'
+const analyticsDataSourceLabel = 'Mock 客户端落地页事件日志'
 
 // 自包含 SVG 占位图（无需联网也能显示）
 const ph = (text: string, bg: string) =>
@@ -336,6 +338,8 @@ function mockPublishStats(params: Record<string, unknown> = {}) {
     visitWeekGrowthPercent: growthPercent(weeklyVisitCounts[weeklyVisitCounts.length - 1], weeklyVisitCounts[weeklyVisitCounts.length - 2]),
     visitMonthGrowthPercent: growthPercent(monthlyVisitCounts[monthlyVisitCounts.length - 1], monthlyVisitCounts[monthlyVisitCounts.length - 2]),
     updatedAt: new Date().toISOString(),
+    dataSource: analyticsDataSource,
+    dataSourceLabel: analyticsDataSourceLabel,
     timezone: 'Asia/Shanghai',
     currentWeekStart: weeklySeries[weeklySeries.length - 1].weekStart,
     currentWeekEnd: weeklySeries[weeklySeries.length - 1].weekEnd,
@@ -394,7 +398,9 @@ function mockStoreAnalytics(id: number) {
     currentWeekPublishClicks: id === 1 ? 24 : 9,
     currentMonthPublishClicks: id === 1 ? 66 : 18,
     activePlatformLinkCount: platformLinks.filter((link) => link.storeId === id && link.status === 1).length,
-    deviceStats: mockDeviceStats(visits)
+    deviceStats: mockDeviceStats(visits),
+    dataSource: analyticsDataSource,
+    dataSourceLabel: analyticsDataSourceLabel
   }
 }
 
@@ -633,6 +639,8 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
       currentWeekPublishClicks: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentWeekPublishClicks, 0),
       currentMonthPublishClicks: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentMonthPublishClicks, 0),
       deviceStats: mockDeviceStats(totalVisits),
+      dataSource: analyticsDataSource,
+      dataSourceLabel: analyticsDataSourceLabel,
       updatedAt: new Date().toISOString()
     }
   } }

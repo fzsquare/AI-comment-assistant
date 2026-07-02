@@ -4,6 +4,7 @@ import { adminApi } from '../../api/admin'
 import type { AdminStats, AdminStore, ExternalStoreReviewMatch, ReviewCrawlBatch } from '../../api/admin'
 import type { DeviceBreakdownItem } from '../../api/merchant'
 import { copyToClipboard } from '../../utils/clipboard'
+import { analyticsSourceLabel } from '../../utils/analyticsSource'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -62,6 +63,7 @@ const updatedText = computed(() => {
   if (Number.isNaN(d.getTime())) return ''
   return `更新至 ${d.toLocaleString('zh-CN', { hour12: false })}`
 })
+const analyticsSourceText = computed(() => analyticsSourceLabel(stats.value.dataSourceLabel))
 const deviceSummaryText = computed(() => {
   if (!stats.value.totalCustomerVisits) return '暂无顾客访问数据'
   if (!globalTopDevice.value) return '设备结构待积累'
@@ -226,6 +228,8 @@ function emptyStats(): AdminStats {
     currentWeekPublishClicks: 0,
     currentMonthPublishClicks: 0,
     deviceStats: { totalCount: 0, items: [] },
+    dataSource: '',
+    dataSourceLabel: '',
     updatedAt: ''
   }
 }
@@ -816,6 +820,7 @@ onBeforeUnmount(() => {
           <div>
             <h2 id="overview-title">商家运营总览</h2>
             <p class="muted">{{ updatedText || '等待数据更新' }}</p>
+            <p class="data-source">来源：{{ analyticsSourceText }}</p>
           </div>
           <strong :class="['workload-pill', pendingWorkCount > 0 ? 'warn' : 'stable']">
             待处理 {{ formatNumber(pendingWorkCount) }}
@@ -1634,7 +1639,8 @@ onBeforeUnmount(() => {
 .muted,
 .eyebrow,
 .subtext,
-.empty-note {
+.empty-note,
+.data-source {
   color: var(--muted);
   font-size: 13px;
   margin: 0;

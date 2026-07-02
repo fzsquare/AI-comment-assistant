@@ -1,5 +1,4 @@
-import axios from 'axios'
-import { mockAdapter } from './mock'
+import axios, { type AxiosAdapter } from 'axios'
 
 const TOKEN_KEY = 'ppk-token'
 const ROLE_KEY = 'ppk-role'
@@ -7,6 +6,14 @@ const ROLE_KEY = 'ppk-role'
 const APP_BASE = import.meta.env.BASE_URL || '/'
 const apiBaseURL = import.meta.env.VITE_API_BASE_URL || APP_BASE.replace(/\/+$/, '') + '/api'
 const useMock = import.meta.env.VITE_USE_MOCK === 'true'
+const mockConfig: { adapter?: AxiosAdapter } = useMock
+  ? {
+      adapter: async (config) => {
+        const { mockAdapter } = await import('./mock')
+        return mockAdapter(config)
+      }
+    }
+  : {}
 
 function appRoute(path: string) {
   return `${APP_BASE.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`
@@ -27,7 +34,7 @@ const http = axios.create({
   baseURL: apiBaseURL,
   timeout: 10000,
   // Mock 模式：用自定义 adapter 拦截全部请求，脱离后端独立调试
-  ...(useMock ? { adapter: mockAdapter } : {})
+  ...mockConfig
 })
 
 if (useMock) {

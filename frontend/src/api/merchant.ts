@@ -37,6 +37,8 @@ export type PublishStats = {
   visitWeekGrowthPercent: number
   visitMonthGrowthPercent: number
   updatedAt: string
+  dataSource: string
+  dataSourceLabel: string
   timezone: string
   currentWeekStart: string
   currentWeekEnd: string

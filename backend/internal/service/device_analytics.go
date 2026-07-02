@@ -16,6 +16,11 @@ const (
 	ReviewActionPlatformLinkClick = "platform_link_click"
 )
 
+const (
+	ReviewAnalyticsDataSource      = "review_display_logs"
+	ReviewAnalyticsDataSourceLabel = "客户端落地页事件日志（review_display_logs）"
+)
+
 type DeviceBreakdownItem struct {
 	Code    string  `json:"code"`
 	Label   string  `json:"label"`

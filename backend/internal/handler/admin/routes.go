@@ -35,6 +35,8 @@ type adminStatsResponse struct {
 	CurrentWeekPublishClicks   int64               `json:"currentWeekPublishClicks"`
 	CurrentMonthPublishClicks  int64               `json:"currentMonthPublishClicks"`
 	DeviceStats                service.DeviceStats `json:"deviceStats"`
+	DataSource                 string              `json:"dataSource"`
+	DataSourceLabel            string              `json:"dataSourceLabel"`
 	UpdatedAt                  string              `json:"updatedAt"`
 }
 
@@ -47,6 +49,8 @@ type adminStoreAnalytics struct {
 	CurrentMonthPublishClicks  int64               `json:"currentMonthPublishClicks"`
 	ActivePlatformLinkCount    int64               `json:"activePlatformLinkCount"`
 	DeviceStats                service.DeviceStats `json:"deviceStats"`
+	DataSource                 string              `json:"dataSource"`
+	DataSourceLabel            string              `json:"dataSourceLabel"`
 }
 
 func (h *Handler) Register(api *gin.RouterGroup) {
@@ -383,6 +387,8 @@ func (h *Handler) stats(c *gin.Context) {
 		CurrentWeekPublishClicks:   currentWeekPublishClicks,
 		CurrentMonthPublishClicks:  currentMonthPublishClicks,
 		DeviceStats:                deviceStats,
+		DataSource:                 service.ReviewAnalyticsDataSource,
+		DataSourceLabel:            service.ReviewAnalyticsDataSourceLabel,
 		UpdatedAt:                  now.Format(time.RFC3339),
 	})
 }
@@ -438,6 +444,8 @@ func (h *Handler) storeAnalytics(storeID uint) (adminStoreAnalytics, error) {
 		CurrentMonthPublishClicks:  currentMonthPublishClicks,
 		ActivePlatformLinkCount:    activeLinks,
 		DeviceStats:                deviceStats,
+		DataSource:                 service.ReviewAnalyticsDataSource,
+		DataSourceLabel:            service.ReviewAnalyticsDataSourceLabel,
 	}, nil
 }
 

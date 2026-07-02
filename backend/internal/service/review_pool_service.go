@@ -174,9 +174,17 @@ func (s *ReviewPoolService) generationPreferences(storeID uint) GenerationPrefer
 	if err := s.DB.Where("store_id = ?", storeID).First(&row).Error; err != nil {
 		return preferences
 	}
-	preferences.FocusKeywords = decodeJSONStringSlice(row.FocusKeywords)
-	preferences.StyleCodes = decodeJSONStringSlice(row.StyleCodes)
-	preferences.ReferenceReviews = decodeJSONStringSlice(row.ReferenceReviews)
+	return generationPreferencesFromRow(row)
+}
+
+func generationPreferencesFromRow(row model.StoreGenerationPreference) GenerationPreferences {
+	preferences := GenerationPreferences{
+		FocusKeywords:       decodeJSONStringSlice(row.FocusKeywords),
+		StyleCodes:          decodeJSONStringSlice(row.StyleCodes),
+		DiversityDimensions: decodeJSONStringSlice(row.DiversityDimensions),
+		ReferenceReviews:    decodeJSONStringSlice(row.ReferenceReviews),
+		LengthVariance:      "wide",
+	}
 	if strings.TrimSpace(row.LengthVariance) != "" {
 		preferences.LengthVariance = strings.TrimSpace(row.LengthVariance)
 	}

@@ -1,11 +1,27 @@
-ALTER TABLE review_items
-  ADD COLUMN used_at DATETIME NULL;
+-- 评价抓取分析：使用 information_schema 守卫新增列，兼容全新库先导入 schema.sql
+-- 后再执行 migrations，以及旧库重复执行迁移的情况。
 
-ALTER TABLE review_generation_tasks
-  ADD COLUMN generated_raw_count INT NOT NULL DEFAULT 0,
-  ADD COLUMN inserted_row_count INT NOT NULL DEFAULT 0,
-  ADD COLUMN duplicate_filtered_count INT NOT NULL DEFAULT 0,
-  ADD COLUMN duplicate_check_version VARCHAR(64) NOT NULL DEFAULT '';
+SET @db := DATABASE();
+
+SET @has := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='review_items' AND COLUMN_NAME='used_at');
+SET @s := IF(@has=0, 'ALTER TABLE review_items ADD COLUMN used_at DATETIME NULL AFTER dispatched_at', 'SELECT 1');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+SET @has := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='review_generation_tasks' AND COLUMN_NAME='generated_raw_count');
+SET @s := IF(@has=0, 'ALTER TABLE review_generation_tasks ADD COLUMN generated_raw_count INT NOT NULL DEFAULT 0 AFTER target_count', 'SELECT 1');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+SET @has := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='review_generation_tasks' AND COLUMN_NAME='inserted_row_count');
+SET @s := IF(@has=0, 'ALTER TABLE review_generation_tasks ADD COLUMN inserted_row_count INT NOT NULL DEFAULT 0 AFTER generated_raw_count', 'SELECT 1');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+SET @has := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='review_generation_tasks' AND COLUMN_NAME='duplicate_filtered_count');
+SET @s := IF(@has=0, 'ALTER TABLE review_generation_tasks ADD COLUMN duplicate_filtered_count INT NOT NULL DEFAULT 0 AFTER inserted_row_count', 'SELECT 1');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+
+SET @has := (SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=@db AND TABLE_NAME='review_generation_tasks' AND COLUMN_NAME='duplicate_check_version');
+SET @s := IF(@has=0, 'ALTER TABLE review_generation_tasks ADD COLUMN duplicate_check_version VARCHAR(64) NOT NULL DEFAULT '''' AFTER duplicate_filtered_count', 'SELECT 1');
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
 
 CREATE TABLE IF NOT EXISTS store_review_crawl_configs (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
