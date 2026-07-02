@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { adminApi } from '../../api/admin'
 import type { AdminStats, AdminStore, ExternalStoreReviewMatch, ReviewCrawlBatch } from '../../api/admin'
 import type { DeviceBreakdownItem } from '../../api/merchant'
@@ -25,6 +25,10 @@ const storeSearch = ref('')
 const storeStatusFilter = ref<'all' | 'active' | 'inactive' | 'official_configured' | 'official_missing' | 'nfc_error' | 'crawl_failed' | 'no_crawl'>('all')
 const configPanelOpen = ref(false)
 const activeDetailTab = ref<'overview' | 'usage' | 'conversion' | 'advice' | 'config'>('overview')
+const hoveredOpsChartIndex = ref<number | null>(null)
+const opsChartSvg = ref<SVGSVGElement | null>(null)
+const opsChartSize = reactive({ width: 600, height: 220 })
+let opsResizeObserver: ResizeObserver | null = null
 
 const platformOptions = [
   { code: 'dianping', name: '大众点评' },
@@ -67,6 +71,44 @@ const topStores = computed(() => {
   return [...stores.value]
     .sort((a, b) => (b.analytics?.totalCustomerVisits || 0) - (a.analytics?.totalCustomerVisits || 0))
     .slice(0, 5)
+})
+const opsChartSeries = computed(() => {
+  const source = topStores.value.length ? [...topStores.value].reverse() : stores.value.slice(0, 5)
+  return source.map((item) => ({
+    label: item.storeName,
+    visits: item.analytics?.totalCustomerVisits || 0,
+    clicks: item.analytics?.totalPublishClicks || 0
+  }))
+})
+const opsChartHasData = computed(() => opsChartSeries.value.some((item) => item.visits > 0 || item.clicks > 0))
+const opsChartMetrics = computed(() => buildOpsChartMetrics(opsChartSize.width, opsChartSize.height))
+const opsChartViewBox = computed(() => `0 0 ${opsChartMetrics.value.width} ${opsChartMetrics.value.height}`)
+const opsChartScale = computed(() => buildOpsChartScale(opsChartSeries.value, opsChartMetrics.value))
+const opsVisitPoints = computed(() => buildOpsChartPoints(opsChartSeries.value, 'visits', opsChartScale.value.max, opsChartMetrics.value))
+const opsClickPoints = computed(() => buildOpsChartPoints(opsChartSeries.value, 'clicks', opsChartScale.value.max, opsChartMetrics.value))
+const opsVisitPolyline = computed(() => opsVisitPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
+const opsClickPolyline = computed(() => opsClickPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
+const opsAreaPolygon = computed(() => {
+  if (!opsVisitPoints.value.length) return ''
+  const metrics = opsChartMetrics.value
+  return `${opsVisitPolyline.value} ${metrics.plotRight},${metrics.plotBottom} ${metrics.plotLeft},${metrics.plotBottom}`
+})
+const activeOpsChartPoint = computed(() => {
+  if (hoveredOpsChartIndex.value === null) return null
+  return opsVisitPoints.value[hoveredOpsChartIndex.value] || null
+})
+const opsTooltipStyle = computed(() => {
+  const point = activeOpsChartPoint.value
+  if (!point) return {}
+  const metrics = opsChartMetrics.value
+  return {
+    left: `${(point.x / metrics.width) * 100}%`,
+    top: `${(point.y / metrics.height) * 100}%`
+  }
+})
+const opsChartAria = computed(() => {
+  if (!opsChartHasData.value) return '暂无商家访问和官方点击分布数据'
+  return `商家使用曲线：${opsChartSeries.value.map((item) => `${item.label}访问${item.visits}次，官方点击${item.clicks}次`).join('；')}`
 })
 const filteredStores = computed(() => {
   const query = storeSearch.value.trim().toLowerCase()
@@ -202,6 +244,80 @@ function formatNumber(value: number | undefined) {
 
 function formatPercent(value: number | undefined) {
   return `${Number(value || 0).toFixed(1)}%`
+}
+
+function shortStoreLabel(value: string) {
+  const text = String(value || '').trim()
+  if (text.length <= 5) return text || '-'
+  return `${text.slice(0, 5)}…`
+}
+
+function niceOpsChartMax(value: number) {
+  const raw = Math.max(value * 1.15, 4)
+  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)))
+  const fraction = raw / magnitude
+  const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10
+  return niceFraction * magnitude
+}
+
+function buildOpsChartMetrics(width: number, height: number) {
+  const safeWidth = Math.max(Math.round(width || 0), 260)
+  const safeHeight = Math.max(Math.round(height || 0), 180)
+  const plotLeft = safeWidth < 420 ? 38 : 54
+  const plotRight = Math.max(plotLeft + 120, safeWidth - 22)
+  const plotTop = 32
+  const plotBottom = Math.max(plotTop + 80, safeHeight - 38)
+  return {
+    width: safeWidth,
+    height: safeHeight,
+    plotLeft,
+    plotRight,
+    plotTop,
+    plotBottom,
+    plotHeight: plotBottom - plotTop
+  }
+}
+
+function updateOpsChartSize() {
+  const rect = opsChartSvg.value?.getBoundingClientRect()
+  if (!rect?.width || !rect?.height) return
+  opsChartSize.width = Math.round(rect.width)
+  opsChartSize.height = Math.round(rect.height)
+}
+
+function startOpsChartObserver() {
+  updateOpsChartSize()
+  if (!opsChartSvg.value || typeof ResizeObserver === 'undefined') return
+  opsResizeObserver = new ResizeObserver(updateOpsChartSize)
+  opsResizeObserver.observe(opsChartSvg.value)
+}
+
+function buildOpsChartScale(series: { visits: number; clicks: number }[], metrics: ReturnType<typeof buildOpsChartMetrics>) {
+  const maxValue = Math.max(...series.flatMap((item) => [item.visits, item.clicks]), 1)
+  const max = niceOpsChartMax(maxValue)
+  const steps = 4
+  const ticks = Array.from({ length: steps + 1 }, (_, index) => {
+    const value = Math.round((max * (steps - index)) / steps)
+    const y = metrics.plotTop + (index * metrics.plotHeight) / steps
+    return { value, y: Number(y.toFixed(2)) }
+  })
+  return { max, ticks }
+}
+
+function buildOpsChartPoints(series: { label: string; visits: number; clicks: number }[], key: 'visits' | 'clicks', maxValue: number, metrics: ReturnType<typeof buildOpsChartMetrics>) {
+  if (!series.length) return []
+  return series.map((item, index) => {
+    const x = series.length === 1 ? (metrics.plotLeft + metrics.plotRight) / 2 : metrics.plotLeft + (index * (metrics.plotRight - metrics.plotLeft)) / (series.length - 1)
+    const y = metrics.plotBottom - (item[key] / Math.max(maxValue, 1)) * metrics.plotHeight
+    return { ...item, x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) }
+  })
+}
+
+function opsAxisAnchor(x: number) {
+  const metrics = opsChartMetrics.value
+  if (x <= metrics.plotLeft + 1) return 'start'
+  if (x >= metrics.plotRight - 1) return 'end'
+  return 'middle'
 }
 
 function dominantDevice(items: DeviceBreakdownItem[]) {
@@ -646,7 +762,15 @@ function logout() {
   location.href = import.meta.env.BASE_URL + 'admin/login'
 }
 
-onMounted(loadAll)
+onMounted(async () => {
+  await nextTick()
+  startOpsChartObserver()
+  await loadAll()
+})
+
+onBeforeUnmount(() => {
+  opsResizeObserver?.disconnect()
+})
 </script>
 
 <template>
@@ -774,15 +898,76 @@ onMounted(loadAll)
                 <strong>{{ stats.totalCustomerVisits ? formatPercent((stats.totalPublishClicks / stats.totalCustomerVisits) * 100) : '-' }}</strong>
               </div>
             </div>
-            <div class="device-bars compact" role="img" :aria-label="globalDeviceAria">
-              <div v-for="item in globalDeviceItems" :key="item.code" class="device-row">
-                <div class="device-row-head">
-                  <span>{{ item.label }}</span>
-                  <b>{{ formatPercent(item.percent) }}</b>
-                </div>
-                <div class="device-track" aria-hidden="true"><span :style="deviceBarStyle(item)"></span></div>
+            <div class="ops-line-chart" @pointerleave="hoveredOpsChartIndex = null">
+              <div class="ops-chart-legend" aria-hidden="true">
+                <span><i class="visit"></i>NFC 访问</span>
+                <span><i class="click"></i>官方点击</span>
               </div>
-              <p v-if="!globalDeviceItems.length" class="empty-note">暂无设备数据。</p>
+              <svg ref="opsChartSvg" class="ops-line-chart-svg" :viewBox="opsChartViewBox" role="img" :aria-label="opsChartAria">
+                <defs>
+                  <linearGradient id="adminOpsVisitArea" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.2" />
+                    <stop offset="76%" stop-color="#3b82f6" stop-opacity="0.04" />
+                    <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
+                  </linearGradient>
+                </defs>
+                <g>
+                  <g v-for="tick in opsChartScale.ticks" :key="tick.value">
+                    <line class="ops-chart-grid-line" :x1="opsChartMetrics.plotLeft" :x2="opsChartMetrics.plotRight" :y1="tick.y" :y2="tick.y" />
+                    <line class="ops-chart-y-tick" :x1="opsChartMetrics.plotLeft - 6" :x2="opsChartMetrics.plotLeft" :y1="tick.y" :y2="tick.y" />
+                    <text class="ops-chart-axis-text ops-chart-y-axis-text" :x="opsChartMetrics.plotLeft - 12" :y="tick.y + 4" text-anchor="end">{{ formatNumber(tick.value) }}</text>
+                  </g>
+                </g>
+                <polygon v-if="opsAreaPolygon" class="ops-chart-area" :points="opsAreaPolygon" />
+                <polyline v-if="opsVisitPoints.length" class="ops-chart-line visit" :points="opsVisitPolyline" fill="none" />
+                <polyline v-if="opsClickPoints.length" class="ops-chart-line click" :points="opsClickPolyline" fill="none" />
+                <g
+                  v-for="(point, index) in opsVisitPoints"
+                  :key="point.label"
+                  class="ops-chart-point-group"
+                  tabindex="0"
+                  focusable="true"
+                  @pointerenter="hoveredOpsChartIndex = index"
+                  @focus="hoveredOpsChartIndex = index"
+                  @blur="hoveredOpsChartIndex = null"
+                >
+                  <rect class="ops-chart-hit" :x="point.x - 22" :y="opsChartMetrics.plotTop" width="44" :height="opsChartMetrics.plotHeight" />
+                  <line
+                    v-if="hoveredOpsChartIndex === index"
+                    class="ops-chart-hover-line"
+                    :x1="point.x"
+                    :x2="point.x"
+                    :y1="opsChartMetrics.plotTop"
+                    :y2="opsChartMetrics.plotBottom"
+                  />
+                  <circle :cx="point.x" :cy="point.y" :r="hoveredOpsChartIndex === index ? 5.8 : 4.4" class="ops-chart-dot visit" />
+                  <circle
+                    v-if="opsClickPoints[index]"
+                    :cx="opsClickPoints[index].x"
+                    :cy="opsClickPoints[index].y"
+                    :r="hoveredOpsChartIndex === index ? 5.4 : 4"
+                    class="ops-chart-dot click"
+                  />
+                </g>
+                <g aria-hidden="true">
+                  <text
+                    v-for="point in opsVisitPoints"
+                    :key="point.label"
+                    class="ops-chart-axis-text"
+                    :x="point.x"
+                    :y="opsChartMetrics.height - 20"
+                    :text-anchor="opsAxisAnchor(point.x)"
+                  >
+                    {{ shortStoreLabel(point.label) }}
+                  </text>
+                </g>
+              </svg>
+              <div v-if="activeOpsChartPoint" class="ops-chart-tooltip visible" :style="opsTooltipStyle">
+                <strong>{{ activeOpsChartPoint.label }}</strong>
+                <span>NFC 访问 {{ formatNumber(activeOpsChartPoint.visits) }}</span>
+                <span>官方点击 {{ formatNumber(activeOpsChartPoint.clicks) }}</span>
+              </div>
+              <p v-if="!opsChartHasData" class="empty-note">暂无商家使用曲线数据。</p>
             </div>
           </section>
 
@@ -1665,6 +1850,174 @@ onMounted(loadAll)
   font-size: 20px;
   line-height: 1.1;
   margin-top: 4px;
+}
+
+.ops-line-chart {
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.86) 0%, rgba(255, 255, 255, 0.96) 48%),
+    #fff;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 10px 10px 6px;
+  position: relative;
+}
+
+.ops-chart-legend {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-bottom: 2px;
+}
+
+.ops-chart-legend span {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 5px;
+}
+
+.ops-chart-legend i {
+  border-radius: 999px;
+  display: inline-block;
+  height: 8px;
+  width: 8px;
+}
+
+.ops-chart-legend i.visit {
+  background: #2563eb;
+}
+
+.ops-chart-legend i.click {
+  background: #10b981;
+}
+
+.ops-line-chart-svg {
+  display: block;
+  height: 220px;
+  width: 100%;
+}
+
+.ops-chart-grid-line {
+  stroke: #dbeafe;
+  stroke-dasharray: 5 5;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.ops-chart-y-tick {
+  stroke: #94a3b8;
+  stroke-linecap: round;
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.ops-chart-axis-text {
+  fill: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ops-chart-y-axis-text {
+  fill: #334155;
+  font-size: 12px;
+  font-weight: 850;
+  paint-order: stroke fill;
+  stroke: rgba(248, 250, 252, 0.92);
+  stroke-linejoin: round;
+  stroke-width: 3px;
+}
+
+.ops-chart-area {
+  fill: url(#adminOpsVisitArea);
+}
+
+.ops-chart-line {
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3.2;
+  vector-effect: non-scaling-stroke;
+}
+
+.ops-chart-line.visit {
+  filter: drop-shadow(0 8px 12px rgba(37, 99, 235, 0.14));
+  stroke: #2563eb;
+}
+
+.ops-chart-line.click {
+  stroke: #10b981;
+}
+
+.ops-chart-point-group {
+  cursor: pointer;
+  outline: none;
+}
+
+.ops-chart-hit {
+  fill: transparent;
+}
+
+.ops-chart-hover-line {
+  stroke: #bfdbfe;
+  stroke-dasharray: 4 4;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.ops-chart-dot {
+  fill: #fff;
+  stroke-width: 2.3;
+  transition: fill 0.18s ease, r 0.18s ease, stroke 0.18s ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.ops-chart-dot.visit {
+  stroke: #2563eb;
+}
+
+.ops-chart-dot.click {
+  stroke: #10b981;
+}
+
+.ops-chart-point-group:focus .ops-chart-dot.visit,
+.ops-chart-dot.visit:hover {
+  fill: #2563eb;
+  stroke: #fff;
+}
+
+.ops-chart-point-group:focus .ops-chart-dot.click,
+.ops-chart-dot.click:hover {
+  fill: #10b981;
+  stroke: #fff;
+}
+
+.ops-chart-tooltip {
+  background: #fff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.18);
+  color: var(--text);
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+  opacity: 0;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(12px, -100%);
+  transition: opacity 0.18s ease;
+  z-index: 2;
+}
+
+.ops-chart-tooltip.visible {
+  opacity: 1;
+}
+
+.ops-chart-tooltip span {
+  color: var(--muted);
 }
 
 .device-row-head {
