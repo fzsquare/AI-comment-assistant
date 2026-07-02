@@ -16,23 +16,39 @@ import (
 	"gorm.io/gorm"
 )
 
-const publishActionType = "platform_link_click"
-
 type publishStatsResponse struct {
-	TotalPublishClicks        int64                `json:"totalPublishClicks"`
-	CurrentWeekPublishClicks  int64                `json:"currentWeekPublishClicks"`
-	CurrentMonthPublishClicks int64                `json:"currentMonthPublishClicks"`
-	UpdatedAt                 string               `json:"updatedAt"`
-	Timezone                  string               `json:"timezone"`
-	CurrentWeekStart          string               `json:"currentWeekStart"`
-	CurrentWeekEnd            string               `json:"currentWeekEnd"`
-	CurrentMonthStart         string               `json:"currentMonthStart"`
-	CurrentMonthEnd           string               `json:"currentMonthEnd"`
-	PlatformLinksConfigured   bool                 `json:"platformLinksConfigured"`
-	ActivePlatformLinkCount   int64                `json:"activePlatformLinkCount"`
-	WeeklySeries              []weeklySeriesPoint  `json:"weeklySeries"`
-	MonthlySeries             []monthlySeriesPoint `json:"monthlySeries"`
-	PartialErrors             []string             `json:"partialErrors"`
+	TotalPublishClicks          int64                `json:"totalPublishClicks"`
+	CurrentWeekPublishClicks    int64                `json:"currentWeekPublishClicks"`
+	CurrentMonthPublishClicks   int64                `json:"currentMonthPublishClicks"`
+	PreviousWeekPublishClicks   int64                `json:"previousWeekPublishClicks"`
+	PreviousMonthPublishClicks  int64                `json:"previousMonthPublishClicks"`
+	PublishWeekGrowthPercent    float64              `json:"publishWeekGrowthPercent"`
+	PublishMonthGrowthPercent   float64              `json:"publishMonthGrowthPercent"`
+	TotalCustomerVisits         int64                `json:"totalCustomerVisits"`
+	CurrentWeekCustomerVisits   int64                `json:"currentWeekCustomerVisits"`
+	CurrentMonthCustomerVisits  int64                `json:"currentMonthCustomerVisits"`
+	PreviousWeekCustomerVisits  int64                `json:"previousWeekCustomerVisits"`
+	PreviousMonthCustomerVisits int64                `json:"previousMonthCustomerVisits"`
+	VisitWeekGrowthPercent      float64              `json:"visitWeekGrowthPercent"`
+	VisitMonthGrowthPercent     float64              `json:"visitMonthGrowthPercent"`
+	UpdatedAt                   string               `json:"updatedAt"`
+	Timezone                    string               `json:"timezone"`
+	CurrentWeekStart            string               `json:"currentWeekStart"`
+	CurrentWeekEnd              string               `json:"currentWeekEnd"`
+	CurrentMonthStart           string               `json:"currentMonthStart"`
+	CurrentMonthEnd             string               `json:"currentMonthEnd"`
+	PlatformLinksConfigured     bool                 `json:"platformLinksConfigured"`
+	ActivePlatformLinkCount     int64                `json:"activePlatformLinkCount"`
+	CrawlDataReady              bool                 `json:"crawlDataReady"`
+	CrawlDataMessage            string               `json:"crawlDataMessage"`
+	WeeklyGuidedShareReady      bool                 `json:"weeklyGuidedShareReady"`
+	MonthlyGuidedShareReady     bool                 `json:"monthlyGuidedShareReady"`
+	WeeklyGuidedSharePercent    float64              `json:"weeklyGuidedSharePercent"`
+	MonthlyGuidedSharePercent   float64              `json:"monthlyGuidedSharePercent"`
+	DeviceStats                 service.DeviceStats  `json:"deviceStats"`
+	WeeklySeries                []weeklySeriesPoint  `json:"weeklySeries"`
+	MonthlySeries               []monthlySeriesPoint `json:"monthlySeries"`
+	PartialErrors               []string             `json:"partialErrors"`
 }
 
 type weeklySeriesPoint struct {
@@ -72,6 +88,46 @@ func (h *Handler) getPublishStats(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "本月发布次数加载失败")
 		return
 	}
+	previousWeek, err := h.countPublishClicks(store.ID, weekStart.AddDate(0, 0, -7), weekStart)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "上周发布次数加载失败")
+		return
+	}
+	previousMonth, err := h.countPublishClicks(store.ID, monthStart.AddDate(0, -1, 0), monthStart)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "上月发布次数加载失败")
+		return
+	}
+	totalVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, time.Time{}, time.Time{})
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "访问次数加载失败")
+		return
+	}
+	currentWeekVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, weekStart, weekStart.AddDate(0, 0, 7))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "本周访问次数加载失败")
+		return
+	}
+	currentMonthVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, monthStart, monthStart.AddDate(0, 1, 0))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "本月访问次数加载失败")
+		return
+	}
+	previousWeekVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, weekStart.AddDate(0, 0, -7), weekStart)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "上周访问次数加载失败")
+		return
+	}
+	previousMonthVisits, err := service.CountReviewLogAction(h.DB, store.ID, service.ReviewActionPageView, monthStart.AddDate(0, -1, 0), monthStart)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "上月访问次数加载失败")
+		return
+	}
+	deviceStats, err := service.DeviceStatsForReviewLogs(h.DB, store.ID, service.ReviewActionPageView, time.Time{}, time.Time{})
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "设备占比加载失败")
+		return
+	}
 	weekly, err := h.weeklyPublishSeries(store.ID, weekStart, 12)
 	if err != nil {
 		response.Error(c, http.StatusInternalServerError, "周趋势加载失败")
@@ -89,36 +145,63 @@ func (h *Handler) getPublishStats(c *gin.Context) {
 		response.Error(c, http.StatusInternalServerError, "平台链接状态加载失败")
 		return
 	}
+	shareStats := service.CrawlGuidedShareStats(
+		h.DB,
+		store.ID,
+		weekStart,
+		weekStart.AddDate(0, 0, 7),
+		monthStart,
+		monthStart.AddDate(0, 1, 0),
+	)
 
 	response.Success(c, publishStatsResponse{
-		TotalPublishClicks:        total,
-		CurrentWeekPublishClicks:  currentWeek,
-		CurrentMonthPublishClicks: currentMonth,
-		UpdatedAt:                 now.Format(time.RFC3339),
-		Timezone:                  loc.String(),
-		CurrentWeekStart:          formatDate(weekStart),
-		CurrentWeekEnd:            formatDate(weekStart.AddDate(0, 0, 6)),
-		CurrentMonthStart:         formatDate(monthStart),
-		CurrentMonthEnd:           formatDate(monthStart.AddDate(0, 1, -1)),
-		PlatformLinksConfigured:   activeLinks > 0,
-		ActivePlatformLinkCount:   activeLinks,
-		WeeklySeries:              weekly,
-		MonthlySeries:             monthly,
-		PartialErrors:             []string{},
+		TotalPublishClicks:          total,
+		CurrentWeekPublishClicks:    currentWeek,
+		CurrentMonthPublishClicks:   currentMonth,
+		PreviousWeekPublishClicks:   previousWeek,
+		PreviousMonthPublishClicks:  previousMonth,
+		PublishWeekGrowthPercent:    growthPercent(currentWeek, previousWeek),
+		PublishMonthGrowthPercent:   growthPercent(currentMonth, previousMonth),
+		TotalCustomerVisits:         totalVisits,
+		CurrentWeekCustomerVisits:   currentWeekVisits,
+		CurrentMonthCustomerVisits:  currentMonthVisits,
+		PreviousWeekCustomerVisits:  previousWeekVisits,
+		PreviousMonthCustomerVisits: previousMonthVisits,
+		VisitWeekGrowthPercent:      growthPercent(currentWeekVisits, previousWeekVisits),
+		VisitMonthGrowthPercent:     growthPercent(currentMonthVisits, previousMonthVisits),
+		UpdatedAt:                   now.Format(time.RFC3339),
+		Timezone:                    loc.String(),
+		CurrentWeekStart:            formatDate(weekStart),
+		CurrentWeekEnd:              formatDate(weekStart.AddDate(0, 0, 6)),
+		CurrentMonthStart:           formatDate(monthStart),
+		CurrentMonthEnd:             formatDate(monthStart.AddDate(0, 1, -1)),
+		PlatformLinksConfigured:     activeLinks > 0,
+		ActivePlatformLinkCount:     activeLinks,
+		CrawlDataReady:              shareStats.WeeklyReady || shareStats.MonthlyReady,
+		CrawlDataMessage:            shareStats.Message,
+		WeeklyGuidedShareReady:      shareStats.WeeklyReady,
+		MonthlyGuidedShareReady:     shareStats.MonthlyReady,
+		WeeklyGuidedSharePercent:    shareStats.WeeklyPercent,
+		MonthlyGuidedSharePercent:   shareStats.MonthlyPercent,
+		DeviceStats:                 deviceStats,
+		WeeklySeries:                weekly,
+		MonthlySeries:               monthly,
+		PartialErrors:               []string{},
 	})
 }
 
 func (h *Handler) countPublishClicks(storeID uint, start time.Time, end time.Time) (int64, error) {
-	query := h.DB.Model(&model.ReviewDisplayLog{}).
-		Where("store_id = ? AND action_type = ?", storeID, publishActionType)
-	if !start.IsZero() {
-		query = query.Where("created_at >= ?", start)
+	return service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPlatformLinkClick, start, end)
+}
+
+func growthPercent(current int64, previous int64) float64 {
+	if previous == 0 {
+		if current > 0 {
+			return 100
+		}
+		return 0
 	}
-	if !end.IsZero() {
-		query = query.Where("created_at < ?", end)
-	}
-	var count int64
-	return count, query.Count(&count).Error
+	return float64(current-previous) / float64(previous) * 100
 }
 
 func (h *Handler) weeklyPublishSeries(storeID uint, currentWeekStart time.Time, weeks int) ([]weeklySeriesPoint, error) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { merchantApi } from '../../api/merchant'
-import type { GenerationPreferences, PublishStats, PublishTrendPoint } from '../../api/merchant'
+import type { DeviceBreakdownItem, GenerationPreferences, PublishStats, PublishTrendPoint } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
@@ -24,7 +24,6 @@ const suggestedTags = ref<string[]>([])
 const images = ref<any[]>([])
 const links = ref<any[]>([])
 const reviews = ref<any[]>([])
-const tasks = ref<any[]>([])
 const dashboard = ref<PublishStats | null>(null)
 const activeTrend = ref<'week' | 'month'>('week')
 const optimizationOpen = ref(false)
@@ -115,6 +114,33 @@ const updatedText = computed(() => {
   if (Number.isNaN(d.getTime())) return ''
   return `数据更新至 ${d.toLocaleString('zh-CN', { hour12: false })}`
 })
+const deviceItems = computed(() => dashboard.value?.deviceStats?.items || [])
+const deviceHasData = computed(() => deviceItems.value.length > 0)
+const topDevice = computed<DeviceBreakdownItem | null>(() => {
+  return deviceItems.value.reduce<DeviceBreakdownItem | null>((best, item) => {
+    if (!best || item.count > best.count) return item
+    return best
+  }, null)
+})
+const visitStatusText = computed(() => {
+  if (!dashboard.value) return '数据加载中'
+  if (dashboard.value.totalCustomerVisits === 0) return '等待顾客通过 NFC 或交付 URL 访问'
+  if (!topDevice.value) return `累计客户访问 ${formatNumber(dashboard.value.totalCustomerVisits)} 次`
+  return `${topDevice.value.label}访问最多，占 ${formatPercent(topDevice.value.percent)}`
+})
+const deviceChartAria = computed(() => {
+  if (!deviceHasData.value) return '暂无顾客访问设备数据'
+  return `顾客访问设备占比：${deviceItems.value.map((item) => `${item.label}${formatPercent(item.percent)}`).join('，')}`
+})
+const crawlAccumulatingText = computed(() => dashboard.value?.crawlDataMessage || '数据积累中')
+const weeklyShareText = computed(() => {
+  if (!dashboard.value?.weeklyGuidedShareReady) return crawlAccumulatingText.value
+  return formatPercent(dashboard.value.weeklyGuidedSharePercent)
+})
+const monthlyShareText = computed(() => {
+  if (!dashboard.value?.monthlyGuidedShareReady) return crawlAccumulatingText.value
+  return formatPercent(dashboard.value.monthlyGuidedSharePercent)
+})
 
 function messageFrom(err: any, fallback: string) {
   return err?.response?.data?.message || err?.message || fallback
@@ -124,14 +150,13 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, taskRes, statsRes, prefRes] = await Promise.all([
+    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, statsRes, prefRes] = await Promise.all([
       merchantApi.getStoreDetail(),
       merchantApi.listKeywords(),
       merchantApi.getKeywordSuggestions(),
       merchantApi.listImages(),
       merchantApi.listPlatformLinks(),
       merchantApi.listReviews(),
-      merchantApi.listTasks(),
       merchantApi.getPublishStats(),
       merchantApi.getGenerationPreferences()
     ])
@@ -141,7 +166,6 @@ async function loadAll() {
     images.value = imageRes.data.data
     links.value = linkRes.data.data
     reviews.value = reviewRes.data.data
-    tasks.value = taskRes.data.data
     dashboard.value = statsRes.data.data
     applyPreferences(prefRes.data.data)
     if (!reviewPlatformCode.value && links.value.length > 0) {
@@ -433,6 +457,29 @@ function formatNumber(value: number | undefined) {
   return Number(value || 0).toLocaleString('zh-CN')
 }
 
+function formatPercent(value: number | undefined) {
+  return `${Number(value || 0).toFixed(1)}%`
+}
+
+function formatGrowthPercent(value: number | undefined) {
+  const n = Number(value || 0)
+  const sign = n > 0 ? '+' : ''
+  return `${sign}${n.toFixed(1)}%`
+}
+
+function growthClass(value: number | undefined) {
+  const n = Number(value || 0)
+  return {
+    up: n > 0,
+    down: n < 0,
+    flat: n === 0
+  }
+}
+
+function deviceBarStyle(item: DeviceBreakdownItem) {
+  return { width: `${Math.min(Math.max(item.percent, item.count > 0 ? 4 : 0), 100)}%` }
+}
+
 function shortDate(value?: string) {
   if (!value) return ''
   const parts = value.split('-')
@@ -484,18 +531,32 @@ onMounted(loadAll)
 
       <div class="metric-zone" :aria-busy="loading && !dashboard">
         <div>
-          <p class="metric-label">累计引导发布</p>
-          <p class="hero-number">{{ formatNumber(dashboard?.totalPublishClicks) }}</p>
-          <p class="metric-status">{{ dashboardStatusText }}</p>
+          <p class="metric-label">累计客户访问</p>
+          <p class="hero-number">{{ formatNumber(dashboard?.totalCustomerVisits) }}</p>
+          <p class="metric-status">{{ visitStatusText }}</p>
         </div>
         <div class="secondary-metrics">
           <div>
-            <span>本周</span>
-            <strong>{{ formatNumber(dashboard?.currentWeekPublishClicks) }}</strong>
+            <span>本周访问</span>
+            <strong>{{ formatNumber(dashboard?.currentWeekCustomerVisits) }}</strong>
+            <small :class="growthClass(dashboard?.visitWeekGrowthPercent)">周 {{ formatGrowthPercent(dashboard?.visitWeekGrowthPercent) }}</small>
           </div>
           <div>
-            <span>本月</span>
-            <strong>{{ formatNumber(dashboard?.currentMonthPublishClicks) }}</strong>
+            <span>本月访问</span>
+            <strong>{{ formatNumber(dashboard?.currentMonthCustomerVisits) }}</strong>
+            <small :class="growthClass(dashboard?.visitMonthGrowthPercent)">月 {{ formatGrowthPercent(dashboard?.visitMonthGrowthPercent) }}</small>
+          </div>
+          <div>
+            <span>引导发布</span>
+            <strong>{{ formatNumber(dashboard?.totalPublishClicks) }}</strong>
+            <small>
+              周 <b :class="growthClass(dashboard?.publishWeekGrowthPercent)">{{ formatGrowthPercent(dashboard?.publishWeekGrowthPercent) }}</b>
+              · 月 <b :class="growthClass(dashboard?.publishMonthGrowthPercent)">{{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</b>
+            </small>
+          </div>
+          <div>
+            <span>活跃平台</span>
+            <strong>{{ formatNumber(dashboard?.activePlatformLinkCount) }}</strong>
           </div>
         </div>
       </div>
@@ -541,6 +602,77 @@ onMounted(loadAll)
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div class="dashboard-stack">
+        <section class="publish-summary" aria-labelledby="publish-summary-title">
+          <div class="insight-head">
+            <div>
+              <h3 id="publish-summary-title">发布转化</h3>
+              <p class="muted">{{ dashboardStatusText }}</p>
+            </div>
+          </div>
+          <dl class="compact-metrics">
+            <div>
+              <dt>本周发布</dt>
+              <dd>{{ formatNumber(dashboard?.currentWeekPublishClicks) }}</dd>
+              <small :class="growthClass(dashboard?.publishWeekGrowthPercent)">较上周 {{ formatGrowthPercent(dashboard?.publishWeekGrowthPercent) }}</small>
+            </div>
+            <div>
+              <dt>本月发布</dt>
+              <dd>{{ formatNumber(dashboard?.currentMonthPublishClicks) }}</dd>
+              <small :class="growthClass(dashboard?.publishMonthGrowthPercent)">较上月 {{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</small>
+            </div>
+            <div>
+              <dt>本周占比</dt>
+              <dd>{{ weeklyShareText }}</dd>
+              <small>引导发布在周评论中的占比</small>
+            </div>
+            <div>
+              <dt>本月占比</dt>
+              <dd>{{ monthlyShareText }}</dd>
+              <small>引导发布在月评论中的占比</small>
+            </div>
+          </dl>
+        </section>
+
+        <details class="device-panel device-collapsible" aria-labelledby="device-title">
+          <summary class="device-summary">
+            <span>
+              <h3 id="device-title">访问设备占比</h3>
+              <p class="muted">按顾客打开落地页的 UA 识别手机系统和品牌</p>
+            </span>
+            <strong class="device-total">{{ formatNumber(dashboard?.deviceStats?.totalCount) }}</strong>
+            <span class="device-toggle" aria-hidden="true">
+              <span class="when-closed">展开</span>
+              <span class="when-open">收起</span>
+            </span>
+          </summary>
+          <div class="device-content">
+            <div v-if="deviceHasData" class="device-bars" role="img" :aria-label="deviceChartAria">
+              <div v-for="item in deviceItems" :key="item.code" class="device-row">
+                <div class="device-row-head">
+                  <span>{{ item.label }}</span>
+                  <b>{{ formatNumber(item.count) }} · {{ formatPercent(item.percent) }}</b>
+                </div>
+                <div class="device-track" aria-hidden="true">
+                  <span :style="deviceBarStyle(item)"></span>
+                </div>
+              </div>
+            </div>
+            <p v-else class="empty-note">有顾客访问交付 URL 后，这里会出现设备占比。</p>
+            <table class="sr-only">
+              <caption>访问设备占比数据</caption>
+              <tbody>
+                <tr v-for="item in deviceItems" :key="item.code">
+                  <th>{{ item.label }}</th>
+                  <td>{{ item.count }}</td>
+                  <td>{{ formatPercent(item.percent) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
       </div>
 
       <div class="optimization-panel">
@@ -639,7 +771,7 @@ onMounted(loadAll)
       <details class="card fold-card">
         <summary>
           <span>
-            <strong>跳转链接</strong>
+            <strong>跳转任务</strong>
             <small>顾客点击去发布时打开的商家链接</small>
           </span>
           <span class="fold-hint">展开</span>
@@ -685,37 +817,6 @@ onMounted(loadAll)
       <details class="card fold-card">
         <summary>
           <span>
-            <strong>AI 生成任务</strong>
-            <small>按当前生成方向补充评价池</small>
-          </span>
-          <span class="fold-hint">展开</span>
-        </summary>
-        <div class="fold-body">
-          <select v-model="reviewPlatformCode">
-            <option value="" disabled>选择评价平台</option>
-            <option v-for="item in links" :key="item.id" :value="item.platformCode">
-              {{ item.platformName || item.platformCode }}
-            </option>
-          </select>
-          <div class="field-gap"></div>
-          <button :disabled="loading || generating" @click="generateReviews">{{ generating ? '生成中' : '生成 10 条评价' }}</button>
-          <table>
-            <thead><tr><th>ID</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
-            <tbody>
-              <tr v-for="task in tasks" :key="task.id">
-                <td>{{ task.id }}</td>
-                <td>{{ task.triggerType }}</td>
-                <td>{{ task.status }}</td>
-                <td>{{ task.successCount }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </details>
-
-      <details class="card fold-card">
-        <summary>
-          <span>
             <strong>关键词管理</strong>
             <small>顾客选择标签，用来生成更贴合的评价</small>
           </span>
@@ -742,6 +843,34 @@ onMounted(loadAll)
             <li v-for="item in keywords" :key="item.id" class="list-action">
               <span>{{ item.keyword }}</span>
               <button class="danger" :disabled="loading" @click="deleteKeyword(item.id)">删除</button>
+            </li>
+          </ul>
+        </div>
+      </details>
+
+      <details class="card fold-card">
+        <summary>
+          <span>
+            <strong>评价管理</strong>
+            <small>手工补充和维护可用评价</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body">
+          <select v-model="reviewPlatformCode">
+            <option value="" disabled>选择评价平台</option>
+            <option v-for="item in links" :key="item.id" :value="item.platformCode">
+              {{ item.platformName || item.platformCode }}
+            </option>
+          </select>
+          <div class="field-gap"></div>
+          <textarea v-model="reviewText" placeholder="新增手工评价"></textarea>
+          <div class="field-gap"></div>
+          <button :disabled="loading" @click="addReview">添加评价</button>
+          <ul>
+            <li v-for="item in reviews.slice(0, 8)" :key="item.id" class="list-action">
+              <span>{{ item.platformStyle }} - {{ item.content }}</span>
+              <button class="danger" :disabled="loading" @click="deleteReview(item.id)">删除</button>
             </li>
           </ul>
         </div>
@@ -798,34 +927,6 @@ onMounted(loadAll)
           <input v-model="storeForm.brandTone" placeholder="品牌调性" />
           <div class="field-gap"></div>
           <button :disabled="loading" @click="saveStore">保存</button>
-        </div>
-      </details>
-
-      <details class="card fold-card">
-        <summary>
-          <span>
-            <strong>评价管理</strong>
-            <small>手工补充和维护可用评价</small>
-          </span>
-          <span class="fold-hint">展开</span>
-        </summary>
-        <div class="fold-body">
-          <select v-model="reviewPlatformCode">
-            <option value="" disabled>选择评价平台</option>
-            <option v-for="item in links" :key="item.id" :value="item.platformCode">
-              {{ item.platformName || item.platformCode }}
-            </option>
-          </select>
-          <div class="field-gap"></div>
-          <textarea v-model="reviewText" placeholder="新增手工评价"></textarea>
-          <div class="field-gap"></div>
-          <button :disabled="loading" @click="addReview">添加评价</button>
-          <ul>
-            <li v-for="item in reviews.slice(0, 8)" :key="item.id" class="list-action">
-              <span>{{ item.platformStyle }} - {{ item.content }}</span>
-              <button class="danger" :disabled="loading" @click="deleteReview(item.id)">删除</button>
-            </li>
-          </ul>
         </div>
       </details>
     </div>
@@ -929,8 +1030,159 @@ onMounted(loadAll)
   line-height: 1.15;
   margin-top: 2px;
 }
+.secondary-metrics small,
+.compact-metrics small {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  margin-top: 5px;
+}
+.secondary-metrics small b {
+  font-size: inherit;
+}
+.up {
+  color: var(--success-text);
+}
+.down {
+  color: var(--danger);
+}
+.flat {
+  color: var(--muted);
+}
+.dashboard-stack {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.device-panel,
+.publish-summary {
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 14px;
+}
+.insight-head {
+  align-items: start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.insight-head h3 {
+  margin: 0;
+}
+.insight-head p {
+  margin: 3px 0 0;
+}
+.insight-head strong {
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+.device-collapsible {
+  overflow: hidden;
+  padding: 0;
+}
+.device-summary {
+  align-items: center;
+  cursor: pointer;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  list-style: none;
+  min-height: 64px;
+  padding: 14px;
+}
+.device-summary::-webkit-details-marker {
+  display: none;
+}
+.device-summary h3 {
+  margin: 0;
+}
+.device-summary p {
+  margin: 3px 0 0;
+}
+.device-total {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 850;
+  line-height: 1;
+}
+.device-toggle {
+  color: var(--primary-strong);
+  font-size: 13px;
+  font-weight: 800;
+  min-width: 36px;
+  text-align: right;
+}
+.device-collapsible[open] .when-closed,
+.device-collapsible:not([open]) .when-open {
+  display: none;
+}
+.device-content {
+  border-top: 1px solid var(--border-soft);
+  padding: 14px;
+}
+.device-bars {
+  display: grid;
+  gap: 12px;
+}
+.device-row-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.device-row-head span {
+  color: var(--text);
+  font-weight: 800;
+}
+.device-row-head b {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+.device-track {
+  background: #eef2f7;
+  border-radius: 999px;
+  height: 10px;
+  overflow: hidden;
+}
+.device-track span {
+  background: #2563eb;
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+}
+.compact-metrics {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin: 0;
+}
+.compact-metrics div {
+  background: #f8fafc;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  padding: 10px;
+}
+.compact-metrics dt {
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+}
+.compact-metrics dd {
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 850;
+  line-height: 1.1;
+  margin: 4px 0 0;
+}
 .trend-section {
   border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 18px;
   padding-bottom: 18px;
 }
 .trend-head {
@@ -1249,6 +1501,7 @@ onMounted(loadAll)
   }
   .store-strip,
   .metric-zone,
+  .dashboard-stack,
   .optimization-panel {
     grid-template-columns: 1fr;
   }

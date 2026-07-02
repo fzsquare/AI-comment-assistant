@@ -11,19 +11,23 @@ import (
 )
 
 const (
-	defaultAppEnv                 = "development"
-	defaultAppHost                = "127.0.0.1"
-	defaultAppPort                = "8080"
-	defaultMySQLDSN               = "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
-	defaultJWTSecret              = "dev-jwt-secret-change-me-32-bytes"
-	defaultAgentServiceURL        = "http://127.0.0.1:8090"
-	defaultAgentMinGrade          = "B"
-	defaultAgentInternalToken     = "dev-agent-internal-token-change-me"
-	defaultAllowedOrigins         = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
-	defaultMaxReviewGenerateCount = 50
-	defaultReviewTargetCount      = 10
-	defaultUploadDir              = "./uploads"
-	minSecretLength               = 32
+	defaultAppEnv                         = "development"
+	defaultAppHost                        = "127.0.0.1"
+	defaultAppPort                        = "8080"
+	defaultMySQLDSN                       = "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
+	defaultJWTSecret                      = "dev-jwt-secret-change-me-32-bytes"
+	defaultAgentServiceURL                = "http://127.0.0.1:8090"
+	defaultAgentMinGrade                  = "B"
+	defaultAgentInternalToken             = "dev-agent-internal-token-change-me"
+	defaultAllowedOrigins                 = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
+	defaultMaxReviewGenerateCount         = 50
+	defaultReviewTargetCount              = 10
+	defaultUploadDir                      = "./uploads"
+	defaultReviewCrawlPollIntervalSeconds = 3
+	defaultReviewCrawlPollMaxAttempts     = 40
+	defaultReviewCrawlHTTPTimeoutSeconds  = 20
+	defaultReviewCrawlMaxDownloadBytes    = 5 * 1024 * 1024
+	minSecretLength                       = 32
 )
 
 type Config struct {
@@ -50,6 +54,12 @@ type Config struct {
 	PublicBaseURL string
 	// 部署在子路径时的公开路径前缀，例如 /ppk；用于生成相对落地页和上传资源地址
 	PublicBasePath string
+	// 外部真实评论采集服务，仅后端访问；为空时采集功能不可用
+	ReviewCrawlServiceURL          string
+	ReviewCrawlPollIntervalSeconds int
+	ReviewCrawlPollMaxAttempts     int
+	ReviewCrawlHTTPTimeoutSeconds  int
+	ReviewCrawlMaxDownloadBytes    int
 }
 
 func Load() Config {
@@ -68,20 +78,25 @@ func Load() Config {
 	}
 
 	return Config{
-		AppEnv:                   appEnv,
-		AppHost:                  getEnv("APP_HOST", defaultAppHost),
-		AppPort:                  getEnv("APP_PORT", defaultAppPort),
-		MySQLDSN:                 getEnv("MYSQL_DSN", mysqlFallback),
-		JWTSecret:                getEnv("JWT_SECRET", jwtFallback),
-		AllowedOrigins:           parseCSV(getEnv("ALLOWED_ORIGINS", allowedOriginsFallback)),
-		AgentServiceURL:          strings.TrimRight(getEnv("AGENT_SERVICE_URL", defaultAgentServiceURL), "/"),
-		AgentInternalToken:       getEnv("AGENT_INTERNAL_TOKEN", agentTokenFallback),
-		AgentMinGrade:            getEnv("AGENT_MIN_GRADE", defaultAgentMinGrade),
-		MaxReviewGenerateCount:   getEnvInt("MAX_REVIEW_GENERATE_COUNT", defaultMaxReviewGenerateCount),
-		DefaultReviewTargetCount: getEnvInt("DEFAULT_REVIEW_TARGET_COUNT", defaultReviewTargetCount),
-		UploadDir:                getEnv("UPLOAD_DIR", defaultUploadDir),
-		PublicBaseURL:            strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
-		PublicBasePath:           normalizeBasePath(getEnv("PUBLIC_BASE_PATH", "")),
+		AppEnv:                         appEnv,
+		AppHost:                        getEnv("APP_HOST", defaultAppHost),
+		AppPort:                        getEnv("APP_PORT", defaultAppPort),
+		MySQLDSN:                       getEnv("MYSQL_DSN", mysqlFallback),
+		JWTSecret:                      getEnv("JWT_SECRET", jwtFallback),
+		AllowedOrigins:                 parseCSV(getEnv("ALLOWED_ORIGINS", allowedOriginsFallback)),
+		AgentServiceURL:                strings.TrimRight(getEnv("AGENT_SERVICE_URL", defaultAgentServiceURL), "/"),
+		AgentInternalToken:             getEnv("AGENT_INTERNAL_TOKEN", agentTokenFallback),
+		AgentMinGrade:                  getEnv("AGENT_MIN_GRADE", defaultAgentMinGrade),
+		MaxReviewGenerateCount:         getEnvInt("MAX_REVIEW_GENERATE_COUNT", defaultMaxReviewGenerateCount),
+		DefaultReviewTargetCount:       getEnvInt("DEFAULT_REVIEW_TARGET_COUNT", defaultReviewTargetCount),
+		UploadDir:                      getEnv("UPLOAD_DIR", defaultUploadDir),
+		PublicBaseURL:                  strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
+		PublicBasePath:                 normalizeBasePath(getEnv("PUBLIC_BASE_PATH", "")),
+		ReviewCrawlServiceURL:          strings.TrimRight(getEnv("REVIEW_CRAWL_SERVICE_URL", ""), "/"),
+		ReviewCrawlPollIntervalSeconds: getEnvInt("REVIEW_CRAWL_POLL_INTERVAL_SECONDS", defaultReviewCrawlPollIntervalSeconds),
+		ReviewCrawlPollMaxAttempts:     getEnvInt("REVIEW_CRAWL_POLL_MAX_ATTEMPTS", defaultReviewCrawlPollMaxAttempts),
+		ReviewCrawlHTTPTimeoutSeconds:  getEnvInt("REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS", defaultReviewCrawlHTTPTimeoutSeconds),
+		ReviewCrawlMaxDownloadBytes:    getEnvInt("REVIEW_CRAWL_MAX_DOWNLOAD_BYTES", defaultReviewCrawlMaxDownloadBytes),
 	}
 }
 
@@ -129,6 +144,23 @@ func (c Config) Validate() error {
 		if err := validateBasePath(c.PublicBasePath); err != nil {
 			problems = append(problems, "PUBLIC_BASE_PATH must be a URL path prefix like /ppk")
 		}
+	}
+	if c.ReviewCrawlServiceURL != "" {
+		if err := validateHTTPURL(c.ReviewCrawlServiceURL); err != nil {
+			problems = append(problems, "REVIEW_CRAWL_SERVICE_URL must be an http(s) URL")
+		}
+	}
+	if c.ReviewCrawlPollIntervalSeconds <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_POLL_INTERVAL_SECONDS must be greater than 0")
+	}
+	if c.ReviewCrawlPollMaxAttempts <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_POLL_MAX_ATTEMPTS must be greater than 0")
+	}
+	if c.ReviewCrawlHTTPTimeoutSeconds <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS must be greater than 0")
+	}
+	if c.ReviewCrawlMaxDownloadBytes <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_MAX_DOWNLOAD_BYTES must be greater than 0")
 	}
 
 	for _, origin := range c.AllowedOrigins {

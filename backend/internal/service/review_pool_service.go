@@ -51,11 +51,12 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	preferences := s.generationPreferences(storeID)
 
 	task := model.ReviewGenerationTask{
-		StoreID:       storeID,
-		PlatformStyle: platformCode,
-		TriggerType:   triggerType,
-		TargetCount:   targetCount,
-		Status:        model.TaskStatusRunning,
+		StoreID:               storeID,
+		PlatformStyle:         platformCode,
+		TriggerType:           triggerType,
+		TargetCount:           targetCount,
+		Status:                model.TaskStatusRunning,
+		DuplicateCheckVersion: ReviewMatchAlgorithmVersion,
 	}
 	if err := s.DB.Create(&task).Error; err != nil {
 		return err
@@ -86,6 +87,18 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 		s.DB.Save(&task)
 		return errors.New("no reviews generated")
 	}
+	task.GeneratedRawCount = len(reviews)
+	existingContents := s.duplicateCheckContents(storeID, platformCode)
+	filteredReviews, duplicateCount := filterDuplicateGeneratedReviews(reviews, existingContents)
+	task.DuplicateFilteredCount = duplicateCount
+	reviews = filteredReviews
+	if len(reviews) == 0 {
+		task.Status = model.TaskStatusFailed
+		task.ErrorMessage = "all generated reviews were duplicates"
+		task.FailedCount = duplicateCount
+		s.DB.Save(&task)
+		return errors.New("all generated reviews were duplicates")
+	}
 
 	for i := range reviews {
 		reviews[i].StoreID = storeID
@@ -106,8 +119,50 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	}
 
 	task.SuccessCount = len(reviews)
-	task.Status = model.TaskStatusSuccess
+	task.InsertedRowCount = len(reviews)
+	task.FailedCount = duplicateCount
+	if duplicateCount > 0 {
+		task.Status = model.TaskStatusPartialFailed
+	} else {
+		task.Status = model.TaskStatusSuccess
+	}
 	return s.DB.Save(&task).Error
+}
+
+func (s *ReviewPoolService) duplicateCheckContents(storeID uint, platformCode string) []string {
+	if s.DB == nil || storeID == 0 || platformCode == "" {
+		return nil
+	}
+	var items []model.ReviewItem
+	if err := s.DB.
+		Where("store_id = ? AND platform_style = ? AND status <> ?", storeID, platformCode, model.ReviewStatusDeleted).
+		Find(&items).Error; err != nil {
+		return nil
+	}
+	contents := make([]string, 0, len(items))
+	for _, item := range items {
+		content := strings.TrimSpace(item.Content)
+		if content != "" {
+			contents = append(contents, content)
+		}
+	}
+
+	var feedbackRows []model.ReviewFeedback
+	if err := s.DB.
+		Where("store_id = ? AND platform_code = ? AND feedback_type = ?", storeID, platformCode, model.ReviewFeedbackAccepted).
+		Find(&feedbackRows).Error; err != nil {
+		return contents
+	}
+	for _, row := range feedbackRows {
+		content := strings.TrimSpace(row.EditedContent)
+		if content == "" {
+			content = strings.TrimSpace(row.ContentSnapshot)
+		}
+		if content != "" {
+			contents = append(contents, content)
+		}
+	}
+	return contents
 }
 
 func (s *ReviewPoolService) generationPreferences(storeID uint) GenerationPreferences {

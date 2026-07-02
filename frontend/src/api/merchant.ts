@@ -7,10 +7,33 @@ export type PublishTrendPoint = {
   count: number
 }
 
+export type DeviceBreakdownItem = {
+  code: string
+  label: string
+  count: number
+  percent: number
+}
+
+export type DeviceStats = {
+  totalCount: number
+  items: DeviceBreakdownItem[]
+}
+
 export type PublishStats = {
   totalPublishClicks: number
   currentWeekPublishClicks: number
   currentMonthPublishClicks: number
+  previousWeekPublishClicks: number
+  previousMonthPublishClicks: number
+  publishWeekGrowthPercent: number
+  publishMonthGrowthPercent: number
+  totalCustomerVisits: number
+  currentWeekCustomerVisits: number
+  currentMonthCustomerVisits: number
+  previousWeekCustomerVisits: number
+  previousMonthCustomerVisits: number
+  visitWeekGrowthPercent: number
+  visitMonthGrowthPercent: number
   updatedAt: string
   timezone: string
   currentWeekStart: string
@@ -19,6 +42,13 @@ export type PublishStats = {
   currentMonthEnd: string
   platformLinksConfigured: boolean
   activePlatformLinkCount: number
+  crawlDataReady: boolean
+  crawlDataMessage: string
+  weeklyGuidedShareReady: boolean
+  monthlyGuidedShareReady: boolean
+  weeklyGuidedSharePercent: number
+  monthlyGuidedSharePercent: number
+  deviceStats: DeviceStats
   weeklySeries: PublishTrendPoint[]
   monthlySeries: PublishTrendPoint[]
   partialErrors: string[]

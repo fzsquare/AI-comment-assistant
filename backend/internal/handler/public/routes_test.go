@@ -38,7 +38,7 @@ func TestReviewStatusForFeedback(t *testing.T) {
 		wantStatus   string
 		wantUpdate   bool
 	}{
-		{feedbackType: model.ReviewFeedbackAccepted, wantStatus: model.ReviewStatusDeleted, wantUpdate: true},
+		{feedbackType: model.ReviewFeedbackAccepted, wantStatus: model.ReviewStatusUsed, wantUpdate: true},
 		{feedbackType: model.ReviewFeedbackRejected, wantStatus: model.ReviewStatusDisabled, wantUpdate: true},
 		{feedbackType: "unknown", wantUpdate: false},
 	}

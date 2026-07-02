@@ -81,6 +81,61 @@ let nfcTags = [
   { id: 1, tagCode: 'TAG-DEMO-001', storeId: 1, landingToken: 'mock-demo-001', status: 'bound', remark: '演示标签' }
 ]
 
+let reviewCrawlConfigs: any[] = [
+  {
+    id: 1,
+    storeId: 1,
+    platformCode: 'meituan',
+    externalShopId: '1953748828',
+    enabled: true,
+    baselineCompletedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+    lastCrawledAt: new Date().toISOString(),
+    nextCrawlAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    lastStatus: 'success',
+    lastErrorMessage: ''
+  }
+]
+
+let reviewCrawlBatches: any[] = [
+  {
+    id: 1,
+    configId: 1,
+    storeId: 1,
+    platformCode: 'meituan',
+    externalShopIdSnapshot: '1953748828',
+    triggerType: 'scheduled',
+    attemptNo: 2,
+    isBaseline: false,
+    windowDays: 7,
+    startedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    finishedAt: new Date().toISOString(),
+    status: 'success',
+    rawRowCount: 36,
+    insertedRowCount: 36,
+    matchedReviewCount: 11,
+    errorMessage: ''
+  }
+]
+
+let externalReviewMatches: any[] = [
+  {
+    id: 1,
+    batchId: 1,
+    storeId: 1,
+    platformCode: 'meituan',
+    sourceReviewRef: 'mock-1001',
+    userName: '美团用户',
+    ratingRaw: '50',
+    reviewTime: new Date().toISOString(),
+    content: '这家店服务挺热情，团购核销也顺，整体体验不错。',
+    matchedFeedbackId: 1001,
+    matchedReviewItemId: 901,
+    matchScore: 0.92,
+    matchReason: 'character_similarity',
+    matchSource: 'edited_content'
+  }
+]
+
 // 多商家：演示「每个商家有自己独立的数据」（管理员能看到全部，商家只看到自己的）
 const merchants = [
   { id: 1, account: 'merchant', merchantName: '巷子里的椒麻鸡', contactName: '张三', status: 1 },
@@ -178,6 +233,10 @@ function deleteStoreById(id: number) {
     tag.storeId === id ? { ...tag, storeId: 0, landingToken: '', status: 'unbound' } : tag
   )
   tasks = tasks.filter((task) => task.storeId !== id)
+  const configIds = reviewCrawlConfigs.filter((cfg) => cfg.storeId === id).map((cfg) => cfg.id)
+  reviewCrawlConfigs = reviewCrawlConfigs.filter((cfg) => cfg.storeId !== id)
+  reviewCrawlBatches = reviewCrawlBatches.filter((batch) => !configIds.includes(batch.configId))
+  externalReviewMatches = externalReviewMatches.filter((match) => match.storeId !== id)
   if (id === store.id) {
     keywords = []
     images = []
@@ -200,6 +259,8 @@ function deleteMerchantById(id: number) {
 function mockPublishStats() {
   const weeklyCounts = [3, 5, 0, 8, 12, 9, 14, 18, 15, 21, 17, 24]
   const monthlyCounts = [22, 28, 31, 35, 42, 40, 46, 51, 48, 56, 61, 66]
+  const weeklyVisitCounts = [19, 24, 18, 35, 45, 40, 52, 68, 59, 77, 83, 96]
+  const monthlyVisitCounts = [88, 102, 128, 141, 166, 158, 181, 204, 221, 246, 270, 312]
   const today = new Date()
   const weeklySeries = weeklyCounts.map((count, index) => {
     const start = new Date(today)
@@ -216,6 +277,17 @@ function mockPublishStats() {
     totalPublishClicks: weeklyCounts.reduce((sum, count) => sum + count, 0),
     currentWeekPublishClicks: weeklyCounts[weeklyCounts.length - 1],
     currentMonthPublishClicks: monthlyCounts[monthlyCounts.length - 1],
+    previousWeekPublishClicks: weeklyCounts[weeklyCounts.length - 2],
+    previousMonthPublishClicks: monthlyCounts[monthlyCounts.length - 2],
+    publishWeekGrowthPercent: growthPercent(weeklyCounts[weeklyCounts.length - 1], weeklyCounts[weeklyCounts.length - 2]),
+    publishMonthGrowthPercent: growthPercent(monthlyCounts[monthlyCounts.length - 1], monthlyCounts[monthlyCounts.length - 2]),
+    totalCustomerVisits: weeklyVisitCounts.reduce((sum, count) => sum + count, 0),
+    currentWeekCustomerVisits: weeklyVisitCounts[weeklyVisitCounts.length - 1],
+    currentMonthCustomerVisits: monthlyVisitCounts[monthlyVisitCounts.length - 1],
+    previousWeekCustomerVisits: weeklyVisitCounts[weeklyVisitCounts.length - 2],
+    previousMonthCustomerVisits: monthlyVisitCounts[monthlyVisitCounts.length - 2],
+    visitWeekGrowthPercent: growthPercent(weeklyVisitCounts[weeklyVisitCounts.length - 1], weeklyVisitCounts[weeklyVisitCounts.length - 2]),
+    visitMonthGrowthPercent: growthPercent(monthlyVisitCounts[monthlyVisitCounts.length - 1], monthlyVisitCounts[monthlyVisitCounts.length - 2]),
     updatedAt: new Date().toISOString(),
     timezone: 'Asia/Shanghai',
     currentWeekStart: weeklySeries[weeklySeries.length - 1].weekStart,
@@ -224,9 +296,58 @@ function mockPublishStats() {
     currentMonthEnd: `${monthlySeries[monthlySeries.length - 1].month}-30`,
     platformLinksConfigured: platformLinks.some((link) => link.status === 1),
     activePlatformLinkCount: platformLinks.filter((link) => link.status === 1).length,
+    crawlDataReady: true,
+    crawlDataMessage: '',
+    weeklyGuidedShareReady: true,
+    monthlyGuidedShareReady: true,
+    weeklyGuidedSharePercent: 42.9,
+    monthlyGuidedSharePercent: 31.4,
+    deviceStats: mockDeviceStats(weeklyVisitCounts.reduce((sum, count) => sum + count, 0)),
     weeklySeries,
     monthlySeries,
     partialErrors: []
+  }
+}
+
+function mockDeviceStats(total: number) {
+  const safeTotal = Math.max(total, 0)
+  if (safeTotal === 0) return { totalCount: 0, items: [] }
+  const iphone = Math.round(safeTotal * 0.43)
+  const huawei = Math.round(safeTotal * 0.18)
+  const xiaomi = Math.round(safeTotal * 0.14)
+  const oppo = Math.round(safeTotal * 0.11)
+  const vivo = Math.round(safeTotal * 0.08)
+  const androidOther = Math.max(0, safeTotal - iphone - huawei - xiaomi - oppo - vivo)
+  return {
+    totalCount: safeTotal,
+    items: [
+      { code: 'iphone', label: '苹果 iPhone', count: iphone, percent: Number(((iphone / safeTotal) * 100).toFixed(1)) },
+      { code: 'huawei', label: '华为', count: huawei, percent: Number(((huawei / safeTotal) * 100).toFixed(1)) },
+      { code: 'xiaomi', label: '小米/Redmi', count: xiaomi, percent: Number(((xiaomi / safeTotal) * 100).toFixed(1)) },
+      { code: 'oppo', label: 'OPPO/一加/realme', count: oppo, percent: Number(((oppo / safeTotal) * 100).toFixed(1)) },
+      { code: 'vivo', label: 'vivo/iQOO', count: vivo, percent: Number(((vivo / safeTotal) * 100).toFixed(1)) },
+      { code: 'android_other', label: 'Android 其他', count: androidOther, percent: Number(((androidOther / safeTotal) * 100).toFixed(1)) }
+    ].filter((item) => item.count > 0)
+  }
+}
+
+function growthPercent(current: number, previous: number) {
+  if (!previous) return current > 0 ? 100 : 0
+  return Number((((current - previous) / previous) * 100).toFixed(1))
+}
+
+function mockStoreAnalytics(id: number) {
+  const visits = id === 1 ? 684 : 238
+  const publishes = id === 1 ? 146 : 41
+  return {
+    totalCustomerVisits: visits,
+    currentWeekCustomerVisits: id === 1 ? 96 : 28,
+    currentMonthCustomerVisits: id === 1 ? 312 : 93,
+    totalPublishClicks: publishes,
+    currentWeekPublishClicks: id === 1 ? 24 : 9,
+    currentMonthPublishClicks: id === 1 ? 66 : 18,
+    activePlatformLinkCount: platformLinks.filter((link) => link.storeId === id && link.status === 1).length,
+    deviceStats: mockDeviceStats(visits)
   }
 }
 
@@ -237,13 +358,16 @@ function platformName(code: string) {
 function adminStoreView(item: any) {
   const merchant = merchants.find((m) => m.id === item.merchantUserId)
   const link = platformLinks.find((p) => p.storeId === item.id && p.platformCode === item.primaryPlatformStyle)
+  const reviewCrawl = reviewCrawlConfigs.find((cfg) => cfg.storeId === item.id)
   return {
     ...item,
     merchantAccount: merchant?.account || '',
     merchantName: merchant?.merchantName || '',
     contactName: merchant?.contactName || '',
     platformUrl: link?.targetUrl || '',
-    landingUrl: landingPath(item.uuid)
+    landingUrl: landingPath(item.uuid),
+    analytics: mockStoreAnalytics(item.id),
+    reviewCrawl
   }
 }
 
@@ -267,6 +391,31 @@ function saveMockPlatformLink(storeId: number, platformCode: string, targetUrl?:
   }
   if (index >= 0) platformLinks[index] = next
   else platformLinks.push(next)
+}
+
+function saveMockReviewCrawlConfig(storeId: number, body: any) {
+  const enabled = !!body.reviewCrawlEnabled
+  const externalShopId = String(body.reviewCrawlExternalShopId || '').trim()
+  const platformCode = String(body.reviewCrawlPlatformCode || 'meituan').trim() || 'meituan'
+  const index = reviewCrawlConfigs.findIndex((cfg) => cfg.storeId === storeId)
+  if (!enabled && !externalShopId && !body.reviewCrawlPlatformCode) {
+    if (index >= 0) reviewCrawlConfigs[index] = { ...reviewCrawlConfigs[index], enabled: false, externalShopId: '', lastStatus: reviewCrawlConfigs[index].lastStatus || 'never_run' }
+    return
+  }
+  const next = {
+    id: index >= 0 ? reviewCrawlConfigs[index].id : nextId(),
+    storeId,
+    platformCode,
+    externalShopId,
+    enabled: enabled && !!externalShopId,
+    baselineCompletedAt: index >= 0 ? reviewCrawlConfigs[index].baselineCompletedAt : '',
+    lastCrawledAt: index >= 0 ? reviewCrawlConfigs[index].lastCrawledAt : '',
+    nextCrawlAt: index >= 0 ? reviewCrawlConfigs[index].nextCrawlAt : '',
+    lastStatus: index >= 0 ? reviewCrawlConfigs[index].lastStatus : 'never_run',
+    lastErrorMessage: ''
+  }
+  if (index >= 0) reviewCrawlConfigs[index] = next
+  else reviewCrawlConfigs.push(next)
 }
 
 // ---------------- 路由表 ----------------
@@ -325,6 +474,7 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
     const s = { id: sid, merchantUserId: mid, uuid, typeId: t?.id || 0, storeName: b.storeName, industryType: t?.name || '餐饮', storeIntro: b.storeIntro || '', address: b.address || '', primaryPlatformStyle: b.primaryPlatformStyle || 'dianping', brandTone: b.brandTone || '轻松自然', status: 1 }
     stores.push(s)
     saveMockPlatformLink(sid, s.primaryPlatformStyle, b.platformUrl)
+    saveMockReviewCrawlConfig(sid, b)
     return { store: s, merchant: { id: mid, account: b.account }, landingUrl: landingPath(uuid) }
   } },
   { method: 'PUT', re: /\/admin\/stores\/(\d+)$/, handler: (m, b) => {
@@ -347,7 +497,47 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
       brandTone: b.brandTone || ''
     })
     saveMockPlatformLink(item.id, item.primaryPlatformStyle, b.platformUrl)
+    saveMockReviewCrawlConfig(item.id, b)
     return adminStoreView(item)
+  } },
+  { method: 'POST', re: /\/admin\/stores\/(\d+)\/review-crawl\/run$/, handler: (m) => {
+    const storeId = Number(m[1])
+    const cfg = reviewCrawlConfigs.find((item) => item.storeId === storeId)
+    if (!cfg || !cfg.enabled) mockFailure(400, '门店未启用评论采集')
+    const now = new Date()
+    const batch = {
+      id: nextId(),
+      configId: cfg.id,
+      storeId,
+      platformCode: cfg.platformCode,
+      externalShopIdSnapshot: cfg.externalShopId,
+      triggerType: 'manual',
+      attemptNo: reviewCrawlBatches.filter((item) => item.configId === cfg.id).length + 1,
+      isBaseline: !cfg.baselineCompletedAt,
+      windowDays: 7,
+      startedAt: new Date(now.getTime() - 2 * 60 * 1000).toISOString(),
+      finishedAt: now.toISOString(),
+      status: 'success',
+      rawRowCount: 36,
+      insertedRowCount: 36,
+      matchedReviewCount: cfg.baselineCompletedAt ? 11 : 0,
+      errorMessage: ''
+    }
+    reviewCrawlBatches.unshift(batch)
+    cfg.lastStatus = 'success'
+    cfg.lastErrorMessage = ''
+    cfg.lastCrawledAt = now.toISOString()
+    cfg.nextCrawlAt = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString()
+    if (!cfg.baselineCompletedAt) cfg.baselineCompletedAt = now.toISOString()
+    return { batch, skipped: false, message: '采集完成' }
+  } },
+  { method: 'GET', re: /\/admin\/stores\/(\d+)\/review-crawl\/batches$/, handler: (m) => {
+    const storeId = Number(m[1])
+    return reviewCrawlBatches.filter((item) => item.storeId === storeId)
+  } },
+  { method: 'GET', re: /\/admin\/stores\/(\d+)\/review-crawl\/matches$/, handler: (m) => {
+    const storeId = Number(m[1])
+    return externalReviewMatches.filter((item) => item.storeId === storeId)
   } },
   { method: 'PUT', re: /\/admin\/stores\/(\d+)\/status$/, handler: (m, b) => { const it = stores.find((x) => x.id === Number(m[1])); if (it) it.status = b.status; return it } },
   { method: 'DELETE', re: /\/admin\/stores\/(\d+)$/, handler: (m) => {
@@ -365,7 +555,24 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'PUT', re: /\/admin\/nfc-tags\/(\d+)\/bind$/, handler: (m, b) => { const it = nfcTags.find((t) => t.id === Number(m[1])); if (it) { it.storeId = b.storeId; it.status = 'bound' } return it } },
   { method: 'PUT', re: /\/admin\/nfc-tags\/(\d+)\/status$/, handler: (m, b) => { const it = nfcTags.find((t) => t.id === Number(m[1])); if (it) it.status = b.status; return it } },
   { method: 'GET', re: /\/admin\/review-generation-tasks$/, handler: () => tasks },
-  { method: 'GET', re: /\/admin\/stats$/, handler: () => ({ merchantCount: merchants.length, storeCount: stores.length, tagCount: nfcTags.length, taskCount: tasks.length, reviewCount: merchantReviews.length, dispatchableCount: remaining }) }
+  { method: 'GET', re: /\/admin\/stats$/, handler: () => {
+    const totalVisits = stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).totalCustomerVisits, 0)
+    const totalPublishClicks = stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).totalPublishClicks, 0)
+    return {
+      merchantCount: merchants.length,
+      storeCount: stores.length,
+      tagCount: nfcTags.length,
+      taskCount: tasks.length,
+      totalCustomerVisits: totalVisits,
+      currentWeekCustomerVisits: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentWeekCustomerVisits, 0),
+      currentMonthCustomerVisits: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentMonthCustomerVisits, 0),
+      totalPublishClicks,
+      currentWeekPublishClicks: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentWeekPublishClicks, 0),
+      currentMonthPublishClicks: stores.reduce((sum, item) => sum + mockStoreAnalytics(item.id).currentMonthPublishClicks, 0),
+      deviceStats: mockDeviceStats(totalVisits),
+      updatedAt: new Date().toISOString()
+    }
+  } }
 ]
 
 export const mockAdapter: AxiosAdapter = async (config) => {

@@ -38,7 +38,10 @@ const tagSummaryLabel = computed(() => selectedTag.value ? `已按“${selectedT
 
 async function trackEvent(payloadData: Record<string, unknown>) {
   try {
-    await publicApi.createEvent(String(route.params.token), payloadData)
+    await publicApi.createEvent(String(route.params.token), {
+      ...payloadData,
+      clientUserAgent: navigator.userAgent || ''
+    })
   } catch (err) {
     console.warn('event tracking failed', err)
   }

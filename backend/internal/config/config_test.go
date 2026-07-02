@@ -23,17 +23,21 @@ func TestValidateRejectsProductionWithMissingRequiredSecrets(t *testing.T) {
 
 func TestValidateAllowsDevelopmentDefaults(t *testing.T) {
 	cfg := Config{
-		AppEnv:                   "development",
-		AppHost:                  "127.0.0.1",
-		AppPort:                  "8080",
-		MySQLDSN:                 "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
-		JWTSecret:                "dev-jwt-secret-change-me-32-bytes",
-		AgentServiceURL:          "http://127.0.0.1:8090",
-		AgentInternalToken:       "dev-agent-internal-token-change-me",
-		AllowedOrigins:           []string{"http://localhost:5173"},
-		MaxReviewGenerateCount:   50,
-		DefaultReviewTargetCount: 10,
-		UploadDir:                "./uploads",
+		AppEnv:                         "development",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "dev-jwt-secret-change-me-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "dev-agent-internal-token-change-me",
+		AllowedOrigins:                 []string{"http://localhost:5173"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -43,17 +47,21 @@ func TestValidateAllowsDevelopmentDefaults(t *testing.T) {
 
 func TestValidateRejectsAllowedOriginWithPath(t *testing.T) {
 	cfg := Config{
-		AppEnv:                   "production",
-		AppHost:                  "127.0.0.1",
-		AppPort:                  "8080",
-		MySQLDSN:                 "ppk_user:secret@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
-		JWTSecret:                "prod-jwt-secret-with-at-least-32-bytes",
-		AgentServiceURL:          "http://127.0.0.1:8090",
-		AgentInternalToken:       "prod-agent-token-with-at-least-32-bytes",
-		AllowedOrigins:           []string{"https://frontend.example.com/app"},
-		MaxReviewGenerateCount:   50,
-		DefaultReviewTargetCount: 10,
-		UploadDir:                "./uploads",
+		AppEnv:                         "production",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_user:secret@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "prod-jwt-secret-with-at-least-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "prod-agent-token-with-at-least-32-bytes",
+		AllowedOrigins:                 []string{"https://frontend.example.com/app"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
 	}
 
 	err := cfg.Validate()
@@ -94,18 +102,22 @@ func TestLoadNormalizesPublicBasePath(t *testing.T) {
 
 func TestValidateRejectsInvalidPublicBasePath(t *testing.T) {
 	cfg := Config{
-		AppEnv:                   "development",
-		AppHost:                  "127.0.0.1",
-		AppPort:                  "8080",
-		MySQLDSN:                 "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
-		JWTSecret:                "dev-jwt-secret-change-me-32-bytes",
-		AgentServiceURL:          "http://127.0.0.1:8090",
-		AgentInternalToken:       "dev-agent-internal-token-change-me",
-		AllowedOrigins:           []string{"http://localhost:5173"},
-		MaxReviewGenerateCount:   50,
-		DefaultReviewTargetCount: 10,
-		UploadDir:                "./uploads",
-		PublicBasePath:           "/bad path",
+		AppEnv:                         "development",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "dev-jwt-secret-change-me-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "dev-agent-internal-token-change-me",
+		AllowedOrigins:                 []string{"http://localhost:5173"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		PublicBasePath:                 "/bad path",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
 	}
 
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "PUBLIC_BASE_PATH") {

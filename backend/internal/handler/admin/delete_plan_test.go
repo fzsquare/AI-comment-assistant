@@ -14,6 +14,9 @@ func TestStoreDeletionPlanClearsChildrenBeforeDeletingStore(t *testing.T) {
 		"delete_review_feedbacks",
 		"delete_review_display_logs",
 		"delete_review_generation_tasks",
+		"delete_external_store_reviews",
+		"delete_review_crawl_batches",
+		"delete_review_crawl_configs",
 		"delete_store_generation_preferences",
 		"delete_review_items",
 		"delete_store_platform_links",
@@ -58,6 +61,9 @@ func TestAdminRegisterExposesDeleteRoutes(t *testing.T) {
 		"DELETE /api/admin/merchants/:id",
 		"DELETE /api/admin/stores/:id",
 		"PUT /api/admin/stores/:id",
+		"POST /api/admin/stores/:id/review-crawl/run",
+		"GET /api/admin/stores/:id/review-crawl/batches",
+		"GET /api/admin/stores/:id/review-crawl/matches",
 	} {
 		if !routes[route] {
 			t.Fatalf("route %s not registered; routes=%v", route, routes)

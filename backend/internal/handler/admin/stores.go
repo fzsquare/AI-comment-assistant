@@ -5,11 +5,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"ppk/backend/internal/model"
 	"ppk/backend/internal/pkg/auth"
 	"ppk/backend/internal/pkg/response"
 	"ppk/backend/internal/pkg/utils"
+	"ppk/backend/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -38,26 +40,42 @@ var platformMeta = map[string][2]string{
 }
 
 type storeMutationRequest struct {
-	Account              string `json:"account"`
-	Password             string `json:"password"`
-	MerchantName         string `json:"merchantName"`
-	ContactName          string `json:"contactName"`
-	TypeID               uint   `json:"typeId"`
-	StoreName            string `json:"storeName"`
-	StoreIntro           string `json:"storeIntro"`
-	Address              string `json:"address"`
-	PrimaryPlatformStyle string `json:"primaryPlatformStyle"`
-	BrandTone            string `json:"brandTone"`
-	PlatformURL          string `json:"platformUrl"`
+	Account                   string `json:"account"`
+	Password                  string `json:"password"`
+	MerchantName              string `json:"merchantName"`
+	ContactName               string `json:"contactName"`
+	TypeID                    uint   `json:"typeId"`
+	StoreName                 string `json:"storeName"`
+	StoreIntro                string `json:"storeIntro"`
+	Address                   string `json:"address"`
+	PrimaryPlatformStyle      string `json:"primaryPlatformStyle"`
+	BrandTone                 string `json:"brandTone"`
+	PlatformURL               string `json:"platformUrl"`
+	ReviewCrawlPlatformCode   string `json:"reviewCrawlPlatformCode"`
+	ReviewCrawlExternalShopID string `json:"reviewCrawlExternalShopId"`
+	ReviewCrawlEnabled        bool   `json:"reviewCrawlEnabled"`
 }
 
 type adminStoreView struct {
 	model.Store
-	MerchantAccount string `json:"merchantAccount"`
-	MerchantName    string `json:"merchantName"`
-	ContactName     string `json:"contactName"`
-	PlatformURL     string `json:"platformUrl"`
-	LandingURL      string `json:"landingUrl"`
+	MerchantAccount string                     `json:"merchantAccount"`
+	MerchantName    string                     `json:"merchantName"`
+	ContactName     string                     `json:"contactName"`
+	PlatformURL     string                     `json:"platformUrl"`
+	LandingURL      string                     `json:"landingUrl"`
+	Analytics       adminStoreAnalytics        `json:"analytics"`
+	ReviewCrawl     *adminStoreReviewCrawlView `json:"reviewCrawl,omitempty"`
+}
+
+type adminStoreReviewCrawlView struct {
+	PlatformCode        string `json:"platformCode"`
+	ExternalShopID      string `json:"externalShopId"`
+	Enabled             bool   `json:"enabled"`
+	BaselineCompletedAt string `json:"baselineCompletedAt,omitempty"`
+	LastCrawledAt       string `json:"lastCrawledAt,omitempty"`
+	NextCrawlAt         string `json:"nextCrawlAt,omitempty"`
+	LastStatus          string `json:"lastStatus"`
+	LastErrorMessage    string `json:"lastErrorMessage,omitempty"`
 }
 
 func normalizeStoreMutationRequest(req *storeMutationRequest, requirePassword bool) error {
@@ -68,6 +86,8 @@ func normalizeStoreMutationRequest(req *storeMutationRequest, requirePassword bo
 	req.PrimaryPlatformStyle = strings.TrimSpace(req.PrimaryPlatformStyle)
 	req.PlatformURL = strings.TrimSpace(req.PlatformURL)
 	req.Password = strings.TrimSpace(req.Password)
+	req.ReviewCrawlPlatformCode = strings.TrimSpace(req.ReviewCrawlPlatformCode)
+	req.ReviewCrawlExternalShopID = strings.TrimSpace(req.ReviewCrawlExternalShopID)
 
 	if req.Account == "" || req.StoreName == "" || req.TypeID == 0 || (requirePassword && req.Password == "") {
 		if requirePassword {
@@ -80,6 +100,14 @@ func normalizeStoreMutationRequest(req *storeMutationRequest, requirePassword bo
 	}
 	if err := validateClientJumpURL(req.PlatformURL); err != nil {
 		return errors.New("商家跳转链接只支持 http/https")
+	}
+	if req.ReviewCrawlEnabled || req.ReviewCrawlExternalShopID != "" {
+		if req.ReviewCrawlExternalShopID == "" {
+			return errors.New("启用评论采集需要填写美团商家 ID")
+		}
+		if _, err := service.NormalizeReviewCrawlPlatform(req.ReviewCrawlPlatformCode); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -210,6 +238,9 @@ func (h *Handler) createStore(c *gin.Context) {
 				return err
 			}
 		}
+		if err := saveReviewCrawlConfig(tx, store.ID, req); err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		response.Error(c, http.StatusBadRequest, "创建失败：登录账号可能已存在")
@@ -288,6 +319,9 @@ func (h *Handler) updateStore(c *gin.Context) {
 		if err := savePrimaryPlatformLink(tx, store.ID, req.PrimaryPlatformStyle, req.PlatformURL); err != nil {
 			return err
 		}
+		if err := saveReviewCrawlConfig(tx, store.ID, req); err != nil {
+			return err
+		}
 
 		updated = h.storeView(tx, store, merchant)
 		return nil
@@ -341,6 +375,54 @@ func savePrimaryPlatformLink(db *gorm.DB, storeID uint, platformCode string, tar
 	return db.Save(&link).Error
 }
 
+func saveReviewCrawlConfig(db *gorm.DB, storeID uint, req storeMutationRequest) error {
+	platformCode := strings.TrimSpace(req.ReviewCrawlPlatformCode)
+	externalShopID := strings.TrimSpace(req.ReviewCrawlExternalShopID)
+
+	var item model.StoreReviewCrawlConfig
+	err := db.Where("store_id = ?", storeID).First(&item).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if !req.ReviewCrawlEnabled && externalShopID == "" {
+			return nil
+		}
+		normalizedPlatform, err := service.NormalizeReviewCrawlPlatform(platformCode)
+		if err != nil {
+			return err
+		}
+		item = model.StoreReviewCrawlConfig{
+			StoreID:      storeID,
+			PlatformCode: normalizedPlatform,
+			LastStatus:   model.CrawlStatusNeverRun,
+		}
+	} else if !req.ReviewCrawlEnabled && externalShopID == "" {
+		if platformCode != "" {
+			normalizedPlatform, err := service.NormalizeReviewCrawlPlatform(platformCode)
+			if err != nil {
+				return err
+			}
+			item.PlatformCode = normalizedPlatform
+		}
+		item.ExternalShopID = ""
+		item.Enabled = false
+		return db.Save(&item).Error
+	} else {
+		normalizedPlatform, err := service.NormalizeReviewCrawlPlatform(platformCode)
+		if err != nil {
+			return err
+		}
+		item.PlatformCode = normalizedPlatform
+	}
+	item.ExternalShopID = externalShopID
+	item.Enabled = req.ReviewCrawlEnabled && externalShopID != ""
+	if item.ID == 0 {
+		return db.Create(&item).Error
+	}
+	return db.Save(&item).Error
+}
+
 func (h *Handler) storeView(db *gorm.DB, store model.Store, merchant model.MerchantUser) adminStoreView {
 	view := adminStoreView{
 		Store:           store,
@@ -354,6 +436,30 @@ func (h *Handler) storeView(db *gorm.DB, store model.Store, merchant model.Merch
 	if err := db.Where("store_id = ? AND platform_code = ?", store.ID, store.PrimaryPlatformStyle).
 		First(&link).Error; err == nil {
 		view.PlatformURL = link.TargetURL
+	}
+	var crawlConfig model.StoreReviewCrawlConfig
+	if err := db.Where("store_id = ?", store.ID).First(&crawlConfig).Error; err == nil {
+		view.ReviewCrawl = reviewCrawlView(crawlConfig)
+	}
+	return view
+}
+
+func reviewCrawlView(config model.StoreReviewCrawlConfig) *adminStoreReviewCrawlView {
+	view := &adminStoreReviewCrawlView{
+		PlatformCode:     config.PlatformCode,
+		ExternalShopID:   config.ExternalShopID,
+		Enabled:          config.Enabled,
+		LastStatus:       config.LastStatus,
+		LastErrorMessage: config.LastErrorMessage,
+	}
+	if config.BaselineCompletedAt != nil {
+		view.BaselineCompletedAt = config.BaselineCompletedAt.Format(time.RFC3339)
+	}
+	if config.LastCrawledAt != nil {
+		view.LastCrawledAt = config.LastCrawledAt.Format(time.RFC3339)
+	}
+	if config.NextCrawlAt != nil {
+		view.NextCrawlAt = config.NextCrawlAt.Format(time.RFC3339)
 	}
 	return view
 }

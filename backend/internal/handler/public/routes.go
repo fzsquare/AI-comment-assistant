@@ -3,6 +3,7 @@ package public
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"ppk/backend/internal/model"
 	"ppk/backend/internal/pkg/response"
@@ -51,11 +52,12 @@ func (h *Handler) switchReview(c *gin.Context) {
 }
 
 type eventRequest struct {
-	SessionID     string `json:"sessionId"`
-	ReviewItemID  uint   `json:"reviewItemId"`
-	ActionType    string `json:"actionType"`
-	PlatformCode  string `json:"platformCode"`
-	EditedContent string `json:"editedContent"`
+	SessionID       string `json:"sessionId"`
+	ReviewItemID    uint   `json:"reviewItemId"`
+	ActionType      string `json:"actionType"`
+	PlatformCode    string `json:"platformCode"`
+	EditedContent   string `json:"editedContent"`
+	ClientUserAgent string `json:"clientUserAgent"`
 }
 
 func (h *Handler) createEvent(c *gin.Context) {
@@ -70,17 +72,29 @@ func (h *Handler) createEvent(c *gin.Context) {
 		return
 	}
 	// uuid 落地：URL 为门店级，不区分具体卡片，nfc_tag_id 记 0（无特定卡）。
+	userAgent := eventUserAgent(c, req)
 	if err := h.DB.Transaction(func(tx *gorm.DB) error {
-		log := model.ReviewDisplayLog{StoreID: store.ID, ReviewItemID: req.ReviewItemID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: c.Request.UserAgent()}
+		log := model.ReviewDisplayLog{StoreID: store.ID, ReviewItemID: req.ReviewItemID, SessionID: req.SessionID, ActionType: req.ActionType, PlatformCode: req.PlatformCode, ClientIP: c.ClientIP(), UserAgent: userAgent}
 		if err := tx.Create(&log).Error; err != nil {
 			return err
 		}
-		return h.recordFeedback(tx, store, req, c.ClientIP(), c.Request.UserAgent())
+		return h.recordFeedback(tx, store, req, c.ClientIP(), userAgent)
 	}); err != nil {
 		response.Error(c, http.StatusInternalServerError, "保存失败")
 		return
 	}
 	response.Success(c, gin.H{"saved": true})
+}
+
+func eventUserAgent(c *gin.Context, req eventRequest) string {
+	ua := strings.TrimSpace(c.Request.UserAgent())
+	if ua == "" {
+		ua = strings.TrimSpace(req.ClientUserAgent)
+	}
+	if len(ua) > 255 {
+		return ua[:255]
+	}
+	return ua
 }
 
 func (h *Handler) recordFeedback(tx *gorm.DB, store model.Store, req eventRequest, clientIP string, userAgent string) error {
@@ -140,9 +154,13 @@ func (h *Handler) recordFeedback(tx *gorm.DB, store model.Store, req eventReques
 	}
 
 	if status, ok := reviewStatusForFeedback(feedbackType); ok && review.Status != status {
+		updates := map[string]any{"status": status}
+		if feedbackType == model.ReviewFeedbackAccepted && review.UsedAt == nil {
+			updates["used_at"] = time.Now()
+		}
 		return tx.Model(&model.ReviewItem{}).
 			Where("id = ? AND store_id = ?", review.ID, store.ID).
-			Update("status", status).Error
+			Updates(updates).Error
 	}
 	return nil
 }
@@ -161,7 +179,7 @@ func feedbackTypeForAction(action string) (string, bool) {
 func reviewStatusForFeedback(feedbackType string) (string, bool) {
 	switch feedbackType {
 	case model.ReviewFeedbackAccepted:
-		return model.ReviewStatusDeleted, true
+		return model.ReviewStatusUsed, true
 	case model.ReviewFeedbackRejected:
 		return model.ReviewStatusDisabled, true
 	default:

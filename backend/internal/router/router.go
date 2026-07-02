@@ -1,6 +1,7 @@
 package router
 
 import (
+	"context"
 	"os"
 	"strings"
 
@@ -25,9 +26,11 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 
 	authService := &service.AuthService{DB: db, Config: cfg}
 	reviewPoolService := buildReviewPoolService(cfg, db)
+	reviewCrawlService := service.NewReviewCrawlService(db, cfg)
+	reviewCrawlService.StartScheduler(context.Background())
 
-	merchant := merchantHandler.NewHandler(db, cfg, authService, reviewPoolService)
-	admin := adminHandler.NewHandler(db, cfg, authService, reviewPoolService)
+	merchant := merchantHandler.NewHandler(db, cfg, authService, reviewPoolService, reviewCrawlService)
+	admin := adminHandler.NewHandler(db, cfg, authService, reviewPoolService, reviewCrawlService)
 	public := publicHandler.NewHandler(db, reviewPoolService)
 
 	api := r.Group("/api")
