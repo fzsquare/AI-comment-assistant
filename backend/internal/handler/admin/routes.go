@@ -76,6 +76,8 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		admin.POST("/stores/:id/review-crawl/run", h.runStoreReviewCrawl)
 		admin.GET("/stores/:id/review-crawl/batches", h.listStoreReviewCrawlBatches)
 		admin.GET("/stores/:id/review-crawl/matches", h.listStoreReviewCrawlMatches)
+		admin.GET("/platform-reviews", h.listPlatformReviews)
+		admin.PUT("/platform-reviews/:id/few-shot", h.updatePlatformReviewFewShot)
 		admin.GET("/nfc-tags", h.listTags)
 		admin.POST("/nfc-tags", h.createTag)
 		admin.PUT("/nfc-tags/:id/bind", h.bindTag)

@@ -22,6 +22,8 @@ type ReviewPoolService struct {
 	refillInFlight map[string]struct{}
 }
 
+const maxGenerationReferenceReviews = 5
+
 type LandingPayload struct {
 	SessionID                  string                    `json:"sessionId"`
 	StoreName                  string                    `json:"storeName"`
@@ -67,7 +69,7 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	var keywords []model.StoreKeyword
 	s.DB.Where("store_id = ?", storeID).Order("sort_no asc, id asc").Find(&keywords)
 	feedback := s.feedbackExamples(storeID, platformCode)
-	preferences := s.generationPreferences(storeID)
+	preferences := s.generationPreferences(storeID, platformCode)
 
 	task := model.ReviewGenerationTask{
 		StoreID:               storeID,
@@ -90,6 +92,7 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 			"keywordCount":          len(keywords),
 			"acceptedFeedbackCount": len(feedback.Accepted),
 			"rejectedFeedbackCount": len(feedback.Rejected),
+			"referenceReviewCount":  len(preferences.ReferenceReviews),
 		},
 	})
 
@@ -288,16 +291,18 @@ func generationFailureCount(targetCount int, generatedCount int, err error) int 
 	return targetCount - generatedCount
 }
 
-func (s *ReviewPoolService) generationPreferences(storeID uint) GenerationPreferences {
+func (s *ReviewPoolService) generationPreferences(storeID uint, platformCode string) GenerationPreferences {
 	preferences := GenerationPreferences{LengthVariance: "wide"}
 	if s.DB == nil || storeID == 0 {
 		return preferences
 	}
 	var row model.StoreGenerationPreference
-	if err := s.DB.Where("store_id = ?", storeID).First(&row).Error; err != nil {
-		return preferences
+	if err := s.DB.Where("store_id = ?", storeID).First(&row).Error; err == nil {
+		preferences = generationPreferencesFromRow(row)
 	}
-	return generationPreferencesFromRow(row)
+	platformReferences := s.platformFewShotReferenceReviews(storeID, platformCode, maxGenerationReferenceReviews)
+	preferences.ReferenceReviews = mergeReferenceReviews(platformReferences, preferences.ReferenceReviews, maxGenerationReferenceReviews)
+	return preferences.WithDefaults()
 }
 
 func generationPreferencesFromRow(row model.StoreGenerationPreference) GenerationPreferences {
@@ -330,6 +335,58 @@ func decodeJSONStringSlice(raw string) []string {
 			out = append(out, value)
 		}
 	}
+	return out
+}
+
+func (s *ReviewPoolService) platformFewShotReferenceReviews(storeID uint, platformCode string, limit int) []string {
+	if s.DB == nil || storeID == 0 || strings.TrimSpace(platformCode) == "" || limit <= 0 {
+		return nil
+	}
+
+	var rows []model.ExternalStoreReview
+	if err := s.DB.
+		Table("external_store_reviews").
+		Select("external_store_reviews.content").
+		Joins("JOIN platform_review_few_shots ON platform_review_few_shots.external_review_id = external_store_reviews.id").
+		Where("external_store_reviews.store_id = ? AND external_store_reviews.platform_code = ?", storeID, platformCode).
+		Where("external_store_reviews.content IS NOT NULL AND TRIM(external_store_reviews.content) <> ''").
+		Order("platform_review_few_shots.selected_at desc, platform_review_few_shots.id desc").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil
+	}
+
+	reviews := make([]string, 0, len(rows))
+	for _, row := range rows {
+		content := strings.TrimSpace(row.Content)
+		if content != "" {
+			reviews = append(reviews, content)
+		}
+	}
+	return reviews
+}
+
+func mergeReferenceReviews(primary []string, secondary []string, limit int) []string {
+	if limit <= 0 {
+		return nil
+	}
+	out := make([]string, 0, limit)
+	seen := make(map[string]bool, limit)
+	add := func(values []string) {
+		for _, value := range values {
+			if len(out) >= limit {
+				return
+			}
+			value = strings.TrimSpace(value)
+			if value == "" || seen[value] {
+				continue
+			}
+			seen[value] = true
+			out = append(out, value)
+		}
+	}
+	add(primary)
+	add(secondary)
 	return out
 }
 

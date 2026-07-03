@@ -293,6 +293,19 @@ func (ExternalStoreReview) TableName() string {
 	return "external_store_reviews"
 }
 
+type PlatformReviewFewShot struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	ExternalReviewID uint      `gorm:"uniqueIndex;not null" json:"externalReviewId"`
+	StoreID          uint      `gorm:"index;not null" json:"storeId"`
+	PlatformCode     string    `gorm:"size:64;not null" json:"platformCode"`
+	SelectedAt       time.Time `gorm:"autoCreateTime" json:"selectedAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+func (PlatformReviewFewShot) TableName() string {
+	return "platform_review_few_shots"
+}
+
 type StoreGenerationPreference struct {
 	ID                  uint      `gorm:"primaryKey" json:"id"`
 	StoreID             uint      `gorm:"uniqueIndex;not null" json:"storeId"`

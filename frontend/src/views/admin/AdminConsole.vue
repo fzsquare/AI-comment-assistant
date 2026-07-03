@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { adminApi } from '../../api/admin'
-import type { AdminStats, AdminStore, ExternalStoreReviewMatch, ReviewCrawlBatch } from '../../api/admin'
+import type { AdminStats, AdminStore, ExternalStoreReviewMatch, PlatformReviewLibraryItem, ReviewCrawlBatch } from '../../api/admin'
 import type { DeviceBreakdownItem, ReviewGenerationTask } from '../../api/merchant'
 import { copyToClipboard } from '../../utils/clipboard'
 import { analyticsSourceLabel } from '../../utils/analyticsSource'
@@ -24,6 +24,11 @@ const crawlPanelStore = ref<AdminStore | null>(null)
 const crawlBatches = ref<ReviewCrawlBatch[]>([])
 const crawlMatches = ref<ExternalStoreReviewMatch[]>([])
 const crawlLoading = ref(false)
+const platformReviews = ref<PlatformReviewLibraryItem[]>([])
+const platformReviewTotal = ref(0)
+const platformReviewSelectedCount = ref(0)
+const platformReviewLoading = ref(false)
+const platformReviewSavingId = ref<number | null>(null)
 const selectedStoreId = ref<number | null>(null)
 const storeSearch = ref('')
 type StoreStatusFilter = 'all' | 'active' | 'inactive' | 'official_configured' | 'official_missing' | 'nfc_error' | 'crawl_failed' | 'no_crawl' | 'no_visit' | 'low_conversion'
@@ -50,6 +55,7 @@ const detailTabs = [
 ] as const
 const navItems = [
   { label: '运营总览', href: '#ops-overview' },
+  { label: '平台评论库', href: '#platform-review-library' },
   { label: '商家列表', href: '#merchant-ledger' },
   { label: '商家详情', href: '#merchant-detail' },
   { label: '运营建议', href: '#ops-advice' },
@@ -185,6 +191,12 @@ const selectedStoreIdConfig = reactive({
   platformCode: 'meituan',
   externalShopId: '',
   enabled: false
+})
+const platformReviewFilters = reactive({
+  storeId: 0,
+  platformCode: 'all',
+  q: '',
+  selectedOnly: false
 })
 const lastCreated = ref<{ storeName: string; uuid: string; landingUrl: string; account: string } | null>(null)
 
@@ -572,10 +584,61 @@ async function loadAll() {
       selectedStoreId.value = null
     }
     syncStoreIdConfig(selectedStore.value)
+    await loadPlatformReviewLibrary()
   } catch (err: any) {
     error.value = messageFrom(err, '后台数据加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function loadPlatformReviewLibrary() {
+  platformReviewLoading.value = true
+  try {
+    const { data } = await adminApi.listPlatformReviews({
+      storeId: platformReviewFilters.storeId || undefined,
+      platformCode: platformReviewFilters.platformCode === 'all' ? undefined : platformReviewFilters.platformCode,
+      q: platformReviewFilters.q.trim() || undefined,
+      selectedOnly: platformReviewFilters.selectedOnly || undefined,
+      limit: 80
+    })
+    platformReviews.value = data.data.items
+    platformReviewTotal.value = data.data.total
+    platformReviewSelectedCount.value = data.data.selectedCount
+  } catch (err: any) {
+    error.value = messageFrom(err, '平台评论库加载失败')
+  } finally {
+    platformReviewLoading.value = false
+  }
+}
+
+async function resetPlatformReviewFilters() {
+  platformReviewFilters.storeId = 0
+  platformReviewFilters.platformCode = 'all'
+  platformReviewFilters.q = ''
+  platformReviewFilters.selectedOnly = false
+  await loadPlatformReviewLibrary()
+}
+
+async function togglePlatformReviewFewShot(item: PlatformReviewLibraryItem) {
+  const next = !item.isFewShot
+  platformReviewSavingId.value = item.id
+  error.value = ''
+  notice.value = ''
+  try {
+    await adminApi.updatePlatformReviewFewShot(item.id, next)
+    item.isFewShot = next
+    item.selectedAt = next ? new Date().toISOString() : undefined
+    platformReviewSelectedCount.value = Math.max(0, platformReviewSelectedCount.value + (next ? 1 : -1))
+    if (!next && platformReviewFilters.selectedOnly) {
+      platformReviews.value = platformReviews.value.filter((review) => review.id !== item.id)
+      platformReviewTotal.value = Math.max(0, platformReviewTotal.value - 1)
+    }
+    notice.value = next ? 'few_shot 样本已加入' : 'few_shot 样本已移除'
+  } catch (err: any) {
+    error.value = messageFrom(err, 'few_shot 状态保存失败')
+  } finally {
+    platformReviewSavingId.value = null
   }
 }
 
@@ -1060,6 +1123,80 @@ onBeforeUnmount(() => {
             </ol>
             <p v-else class="empty-note">暂无门店数据。</p>
           </section>
+        </div>
+      </section>
+
+      <section id="platform-review-library" class="screen-card platform-review-screen" aria-labelledby="platform-review-title">
+        <div class="screen-head library-head">
+          <div>
+            <h2 id="platform-review-title">平台评论库</h2>
+            <p class="muted">已入库真实评论 · 同门店同平台参考样本</p>
+          </div>
+          <strong class="library-summary">{{ formatNumber(platformReviewSelectedCount) }} / {{ formatNumber(platformReviewTotal) }} 已选</strong>
+        </div>
+
+        <div class="library-tools">
+          <select v-model.number="platformReviewFilters.storeId" aria-label="评论库商家筛选" @change="loadPlatformReviewLibrary">
+            <option :value="0">全部商家</option>
+            <option v-for="item in stores" :key="item.id" :value="item.id">{{ item.storeName }}</option>
+          </select>
+          <select v-model="platformReviewFilters.platformCode" aria-label="评论库平台筛选" @change="loadPlatformReviewLibrary">
+            <option value="all">全部平台</option>
+            <option v-for="p in platformOptions" :key="p.code" :value="p.code">{{ p.name }}</option>
+          </select>
+          <input v-model="platformReviewFilters.q" type="search" placeholder="搜索门店、用户、内容" @keyup.enter="loadPlatformReviewLibrary" />
+          <label class="check-field inline-check">
+            <input v-model="platformReviewFilters.selectedOnly" type="checkbox" @change="loadPlatformReviewLibrary" />
+            <span>只看已选</span>
+          </label>
+          <button class="secondary" type="button" :disabled="platformReviewLoading" @click="loadPlatformReviewLibrary">查询</button>
+          <button class="secondary" type="button" :disabled="platformReviewLoading" @click="resetPlatformReviewFilters">重置</button>
+        </div>
+
+        <div class="review-library-table" :aria-busy="platformReviewLoading">
+          <table>
+            <thead>
+              <tr>
+                <th>few_shot</th>
+                <th>门店 / 平台</th>
+                <th>评论时间</th>
+                <th>用户</th>
+                <th>评分</th>
+                <th>内容</th>
+                <th>入库批次</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in platformReviews" :key="item.id" :class="{ selected: item.isFewShot }">
+                <td>
+                  <label class="fewshot-toggle">
+                    <input
+                      type="checkbox"
+                      :checked="item.isFewShot"
+                      :disabled="platformReviewSavingId === item.id"
+                      :aria-label="`切换 ${item.storeName} 评论 ${item.id} few_shot`"
+                      @change="togglePlatformReviewFewShot(item)"
+                    />
+                    <span>{{ item.isFewShot ? '已选' : '未选' }}</span>
+                  </label>
+                </td>
+                <td>
+                  <strong>{{ item.storeName }}</strong>
+                  <span class="subtext">{{ platformDisplayName(item.platformCode) }} · 门店 ID {{ item.storeId }}</span>
+                </td>
+                <td>{{ formatDateTime(item.reviewTime || item.createdAt) }}</td>
+                <td>{{ item.userName || '-' }}</td>
+                <td>{{ item.ratingRaw || (item.ratingNormalized ? item.ratingNormalized.toFixed(1) : '-') }}</td>
+                <td class="platform-review-content">{{ item.content }}</td>
+                <td>
+                  #{{ item.batchId }}
+                  <span class="subtext">{{ item.isBaseline ? '基线' : '周期' }}</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p v-if="platformReviewLoading" class="empty-note">加载中...</p>
+          <p v-else-if="!platformReviews.length" class="empty-note review-library-empty">暂无匹配的平台评论。</p>
         </div>
       </section>
 
@@ -2265,12 +2402,14 @@ onBeforeUnmount(() => {
 
 .ledger-table table,
 .crawl-tables table,
+.review-library-table table,
 .fold-card table {
   display: table;
   min-width: 100%;
 }
 
-.ledger-table table {
+.ledger-table table,
+.review-library-table table {
   min-width: 1080px;
 }
 
@@ -2279,32 +2418,42 @@ onBeforeUnmount(() => {
 }
 
 .ledger-table tbody tr:hover,
-.ledger-table tbody tr.selected {
+.ledger-table tbody tr.selected,
+.review-library-table tbody tr:hover,
+.review-library-table tbody tr.selected {
   background: var(--surface-subtle);
 }
 
-.ledger-table tbody tr.selected td {
+.ledger-table tbody tr.selected td,
+.review-library-table tbody tr.selected td {
   background: #eff6ff;
 }
 
-.ledger-table tbody tr.selected td:first-child {
+.ledger-table tbody tr.selected td:first-child,
+.review-library-table tbody tr.selected td:first-child {
   box-shadow: none;
 }
 
 .ledger-table th,
-.ledger-table td {
+.ledger-table td,
+.review-library-table th,
+.review-library-table td {
   font-size: 13px;
   padding: 10px 8px;
   vertical-align: top;
 }
 
 .ledger-table th:first-child,
-.ledger-table td:first-child {
+.ledger-table td:first-child,
+.review-library-table th:first-child,
+.review-library-table td:first-child {
   padding-left: 12px;
 }
 
 .ledger-table th:last-child,
-.ledger-table td:last-child {
+.ledger-table td:last-child,
+.review-library-table th:last-child,
+.review-library-table td:last-child {
   padding-right: 12px;
 }
 
@@ -2313,6 +2462,7 @@ onBeforeUnmount(() => {
 }
 
 .ledger-table th,
+.review-library-table th,
 .crawl-tables th,
 .fold-card th {
   background: var(--surface-subtle);
@@ -2322,6 +2472,87 @@ onBeforeUnmount(() => {
 
 .ledger-table td strong {
   color: var(--text);
+}
+
+.library-head {
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.library-summary {
+  background: #ecfdf5;
+  border: 1px solid #bbf7d0;
+  border-radius: 999px;
+  color: #047857;
+  flex: 0 0 auto;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
+.library-tools {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(160px, 0.9fr) minmax(130px, 0.5fr) minmax(220px, 1fr) auto auto auto;
+  margin-bottom: 12px;
+}
+
+.library-tools input,
+.library-tools select {
+  min-width: 0;
+}
+
+.inline-check {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  justify-content: center;
+  margin: 0;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.review-library-table {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.review-library-table th:first-child,
+.review-library-table td:first-child {
+  width: 120px;
+}
+
+.fewshot-toggle {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.fewshot-toggle input {
+  height: 18px;
+  width: 18px;
+}
+
+.fewshot-toggle span {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.platform-review-content {
+  max-width: 460px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.review-library-empty {
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  margin: 12px;
+  padding: 16px;
 }
 
 .actions-cell {
@@ -2845,7 +3076,7 @@ onBeforeUnmount(() => {
   }
 
   .side-nav {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(96px, 1fr));
     overflow-x: auto;
   }
 
@@ -2873,6 +3104,7 @@ onBeforeUnmount(() => {
 
   .topbar-actions,
   .ledger-tools,
+  .library-tools,
   .inline-form,
   .delivery-preview,
   .url-line {

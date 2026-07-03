@@ -17,6 +17,7 @@ func storeDeletionPlan(includeMerchant bool) []string {
 		"delete_review_display_logs",
 		"delete_review_generation_audit_logs",
 		"delete_review_generation_tasks",
+		"delete_platform_review_few_shots",
 		"delete_external_store_reviews",
 		"delete_review_crawl_batches",
 		"delete_review_crawl_configs",
@@ -53,6 +54,8 @@ func executeStoreDeletionPlan(tx *gorm.DB, store model.Store, includeMerchant bo
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewGenerationTask{}).Error
 		case "delete_review_generation_audit_logs":
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewGenerationAuditLog{}).Error
+		case "delete_platform_review_few_shots":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.PlatformReviewFewShot{}).Error
 		case "delete_external_store_reviews":
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ExternalStoreReview{}).Error
 		case "delete_review_crawl_batches":

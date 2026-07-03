@@ -45,3 +45,25 @@ func TestReviewGenerationAuditLogSchemaExists(t *testing.T) {
 		}
 	}
 }
+
+func TestPlatformReviewFewShotSchemaExists(t *testing.T) {
+	schema, err := os.ReadFile("../../../database/schema.sql")
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	migration, err := os.ReadFile("../../../database/migrations/0006_platform_review_few_shots.sql")
+	if err != nil {
+		t.Fatalf("read few-shot migration: %v", err)
+	}
+
+	for _, sql := range []string{string(schema), string(migration)} {
+		if !strings.Contains(sql, "platform_review_few_shots") {
+			t.Fatalf("expected platform_review_few_shots in SQL:\n%s", sql)
+		}
+		for _, required := range []string{"external_review_id", "store_id", "platform_code", "selected_at"} {
+			if !strings.Contains(sql, required) {
+				t.Fatalf("few-shot SQL missing %q:\n%s", required, sql)
+			}
+		}
+	}
+}

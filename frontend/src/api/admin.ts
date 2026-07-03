@@ -136,6 +136,32 @@ export type ExternalStoreReviewMatch = {
   matchSource: string
 }
 
+export type PlatformReviewLibraryItem = {
+  id: number
+  batchId: number
+  storeId: number
+  storeName: string
+  platformCode: string
+  sourceReviewRef?: string
+  userName?: string
+  ratingRaw?: string
+  ratingNormalized?: number
+  reviewTime?: string
+  content: string
+  isBaseline: boolean
+  isFewShot: boolean
+  selectedAt?: string
+  createdAt: string
+}
+
+export type PlatformReviewLibraryResponse = {
+  items: PlatformReviewLibraryItem[]
+  total: number
+  selectedCount: number
+  limit: number
+  offset: number
+}
+
 export type RegenerateReviewsResult = {
   cleared: number
   generated: number
@@ -191,6 +217,12 @@ export const adminApi = {
   },
   listStoreReviewCrawlMatches(id: number) {
     return http.get<{ code: number; message: string; data: ExternalStoreReviewMatch[] }>(`/admin/stores/${id}/review-crawl/matches`)
+  },
+  listPlatformReviews(params?: { storeId?: number; platformCode?: string; q?: string; selectedOnly?: boolean; limit?: number; offset?: number }) {
+    return http.get<{ code: number; message: string; data: PlatformReviewLibraryResponse }>('/admin/platform-reviews', { params })
+  },
+  updatePlatformReviewFewShot(id: number, selected: boolean) {
+    return http.put(`/admin/platform-reviews/${id}/few-shot`, { selected })
   },
   listTags(storeId?: number) {
     return http.get('/admin/nfc-tags', storeId ? { params: { storeId } } : undefined)

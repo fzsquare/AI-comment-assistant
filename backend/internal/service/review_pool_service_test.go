@@ -31,3 +31,40 @@ func TestGenerationPreferencesFromRowIncludesDiversityDimensions(t *testing.T) {
 		t.Fatalf("length variance got %q, want tight", prefs.LengthVariance)
 	}
 }
+
+func TestMergeReferenceReviewsPrioritizesPlatformFewShotsAndCapsFive(t *testing.T) {
+	got := mergeReferenceReviews(
+		[]string{
+			" 平台真实评论 A ",
+			"平台真实评论 B",
+			"平台真实评论 A",
+			"",
+			"平台真实评论 C",
+			"平台真实评论 D",
+			"平台真实评论 E",
+			"平台真实评论 F",
+		},
+		[]string{
+			"商家手填参考 1",
+			"平台真实评论 B",
+			"商家手填参考 2",
+		},
+		5,
+	)
+
+	want := []string{
+		"平台真实评论 A",
+		"平台真实评论 B",
+		"平台真实评论 C",
+		"平台真实评论 D",
+		"平台真实评论 E",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("item %d got %q, want %q; full=%#v", i, got[i], want[i], got)
+		}
+	}
+}

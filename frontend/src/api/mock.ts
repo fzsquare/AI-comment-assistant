@@ -175,6 +175,55 @@ let externalReviewMatches: any[] = [
   }
 ]
 
+let platformReviewFewShotIds = new Set<number>([1])
+let platformReviewLibrary: any[] = [
+  {
+    id: 1,
+    batchId: 1,
+    storeId: 1,
+    storeName: '巷子里的椒麻鸡（Mock 演示）',
+    platformCode: 'meituan',
+    sourceReviewRef: 'mock-1001',
+    userName: '美团用户',
+    ratingRaw: '50',
+    ratingNormalized: 5,
+    reviewTime: new Date().toISOString(),
+    content: '这家店服务挺热情，团购核销也顺，整体体验不错。',
+    isBaseline: false,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 2,
+    batchId: 1,
+    storeId: 1,
+    storeName: '巷子里的椒麻鸡（Mock 演示）',
+    platformCode: 'meituan',
+    sourceReviewRef: 'mock-1002',
+    userName: '匿名用户',
+    ratingRaw: '45',
+    ratingNormalized: 4.5,
+    reviewTime: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
+    content: '椒麻鸡味道比较稳，朋友聚餐点一桌也不会太踩雷，服务员补水挺主动。',
+    isBaseline: false,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 3,
+    batchId: 2,
+    storeId: 2,
+    storeName: '舒缘足道',
+    platformCode: 'dianping',
+    sourceReviewRef: 'mock-2001',
+    userName: '点评用户',
+    ratingRaw: '50',
+    ratingNormalized: 5,
+    reviewTime: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
+    content: '技师手法挺专业，力度会提前确认，按完肩颈轻松不少。',
+    isBaseline: true,
+    createdAt: new Date().toISOString()
+  }
+]
+
 // 多商家：演示「每个商家有自己独立的数据」（管理员能看到全部，商家只看到自己的）
 const merchants = [
   { id: 1, account: 'merchant', merchantName: '巷子里的椒麻鸡', contactName: '张三', status: 1, createdAt: new Date(Date.now() - 9 * 24 * 60 * 60 * 1000).toISOString() },
@@ -534,6 +583,33 @@ function mockFailure(status: number, message: string): never {
   throw err
 }
 
+function mockPlatformReviewLibrary(params: Record<string, unknown>) {
+  const storeId = Number(params.storeId || 0)
+  const platformCode = String(params.platformCode || '')
+  const q = String(params.q || '').trim().toLowerCase()
+  const selectedOnly = params.selectedOnly === true || params.selectedOnly === 'true'
+  const limit = Math.max(1, Math.min(Number(params.limit || 80), 200))
+  const offset = Math.max(0, Number(params.offset || 0))
+  let items = platformReviewLibrary.map((item) => ({
+    ...item,
+    isFewShot: platformReviewFewShotIds.has(item.id),
+    selectedAt: platformReviewFewShotIds.has(item.id) ? new Date().toISOString() : undefined
+  }))
+  if (storeId) items = items.filter((item) => item.storeId === storeId)
+  if (platformCode) items = items.filter((item) => item.platformCode === platformCode)
+  if (selectedOnly) items = items.filter((item) => item.isFewShot)
+  if (q) {
+    items = items.filter((item) =>
+      [item.storeName, item.userName, item.content, item.sourceReviewRef].some((value) =>
+        String(value || '').toLowerCase().includes(q)
+      )
+    )
+  }
+  const total = items.length
+  const selectedCount = items.filter((item) => item.isFewShot).length
+  return { items: items.slice(offset, offset + limit), total, selectedCount, limit, offset }
+}
+
 const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   // ----- 消费者落地页（重点）-----
   { method: 'GET', re: /\/public\/landing\/[^/]+\/init$/, handler: () => landingPayload() },
@@ -692,6 +768,14 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'GET', re: /\/admin\/stores\/(\d+)\/review-crawl\/matches$/, handler: (m) => {
     const storeId = Number(m[1])
     return externalReviewMatches.filter((item) => item.storeId === storeId)
+  } },
+  { method: 'GET', re: /\/admin\/platform-reviews$/, handler: (_m, _b, params) => mockPlatformReviewLibrary(params) },
+  { method: 'PUT', re: /\/admin\/platform-reviews\/(\d+)\/few-shot$/, handler: (m, b) => {
+    const id = Number(m[1])
+    if (!platformReviewLibrary.some((item) => item.id === id)) mockFailure(404, '平台评论不存在')
+    if (b.selected) platformReviewFewShotIds.add(id)
+    else platformReviewFewShotIds.delete(id)
+    return { id, selected: !!b.selected }
   } },
   { method: 'PUT', re: /\/admin\/stores\/(\d+)\/status$/, handler: (m, b) => { const it = stores.find((x) => x.id === Number(m[1])); if (it) it.status = b.status; return it } },
   { method: 'DELETE', re: /\/admin\/stores\/(\d+)$/, handler: (m) => {

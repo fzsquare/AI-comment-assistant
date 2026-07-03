@@ -281,6 +281,19 @@ CREATE TABLE IF NOT EXISTS external_store_reviews (
   CONSTRAINT fk_external_review_item FOREIGN KEY (matched_review_item_id) REFERENCES review_items(id)
 );
 
+CREATE TABLE IF NOT EXISTS platform_review_few_shots (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  external_review_id BIGINT UNSIGNED NOT NULL,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_code VARCHAR(64) NOT NULL,
+  selected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_platform_review_few_shots_external (external_review_id),
+  INDEX idx_platform_review_few_shots_store_platform (store_id, platform_code, selected_at),
+  CONSTRAINT fk_platform_review_few_shot_external_review FOREIGN KEY (external_review_id) REFERENCES external_store_reviews(id),
+  CONSTRAINT fk_platform_review_few_shot_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
 CREATE TABLE IF NOT EXISTS store_generation_preferences (
   id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
   store_id BIGINT UNSIGNED NOT NULL,
