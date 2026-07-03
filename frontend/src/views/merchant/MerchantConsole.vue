@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { merchantApi } from '../../api/merchant'
 import type { DeviceBreakdownItem, GenerationPreferences, PublishStats, PublishTrendPoint } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
+import { edgeAwareTooltipStyle } from '../../utils/chartTooltip'
 
 const auth = useAuthStore()
 const storeForm = reactive({
@@ -137,11 +138,7 @@ const activeChartPoint = computed(() => {
 const chartTooltipStyle = computed(() => {
   const point = activeChartPoint.value
   if (!point) return {}
-  const metrics = trendChartMetrics.value
-  return {
-    left: `${(point.x / metrics.width) * 100}%`,
-    top: `${(point.y / metrics.height) * 100}%`
-  }
+  return edgeAwareTooltipStyle(point, trendChartMetrics.value)
 })
 const chartAria = computed(() => {
   const mode = activeTrend.value === 'week' ? '按周' : '按月'
@@ -1651,17 +1648,20 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid #bfdbfe;
   border-radius: 8px;
+  box-sizing: border-box;
   box-shadow: 0 14px 34px rgba(37, 99, 235, 0.18);
   color: var(--text);
   display: grid;
   gap: 2px;
   font-size: 12px;
+  max-width: min(220px, calc(100% - 24px));
   opacity: 0;
   padding: 8px 10px;
   pointer-events: none;
   position: absolute;
   transform: translate(12px, -100%);
   transition: opacity 0.18s ease;
+  width: max-content;
   z-index: 2;
 }
 .chart-tooltip.visible {

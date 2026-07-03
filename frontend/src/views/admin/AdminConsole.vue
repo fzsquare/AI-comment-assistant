@@ -5,6 +5,7 @@ import type { AdminStats, AdminStore, ExternalStoreReviewMatch, ReviewCrawlBatch
 import type { DeviceBreakdownItem, ReviewGenerationTask } from '../../api/merchant'
 import { copyToClipboard } from '../../utils/clipboard'
 import { analyticsSourceLabel } from '../../utils/analyticsSource'
+import { edgeAwareTooltipStyle } from '../../utils/chartTooltip'
 import { generationFailureReason, generationLogPreview, generationStageSummary } from '../../utils/generationAudit'
 import { useAuthStore } from '../../stores/auth'
 
@@ -104,11 +105,7 @@ const activeOpsChartPoint = computed(() => {
 const opsTooltipStyle = computed(() => {
   const point = activeOpsChartPoint.value
   if (!point) return {}
-  const metrics = opsChartMetrics.value
-  return {
-    left: `${(point.x / metrics.width) * 100}%`,
-    top: `${(point.y / metrics.height) * 100}%`
-  }
+  return edgeAwareTooltipStyle(point, opsChartMetrics.value)
 })
 const opsChartAria = computed(() => {
   if (!opsChartHasData.value) return '暂无商家访问和官方点击分布数据'
@@ -2097,17 +2094,20 @@ onBeforeUnmount(() => {
   background: #fff;
   border: 1px solid #bfdbfe;
   border-radius: 8px;
+  box-sizing: border-box;
   box-shadow: 0 14px 34px rgba(37, 99, 235, 0.18);
   color: var(--text);
   display: grid;
   gap: 2px;
   font-size: 12px;
+  max-width: min(220px, calc(100% - 24px));
   opacity: 0;
   padding: 8px 10px;
   pointer-events: none;
   position: absolute;
   transform: translate(12px, -100%);
   transition: opacity 0.18s ease;
+  width: max-content;
   z-index: 2;
 }
 
