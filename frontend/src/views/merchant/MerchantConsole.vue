@@ -3,7 +3,6 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'v
 import { merchantApi } from '../../api/merchant'
 import type { DeviceBreakdownItem, GenerationPreferences, PublishStats, PublishTrendPoint } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
-import { analyticsSourceLabel } from '../../utils/analyticsSource'
 
 const auth = useAuthStore()
 const storeForm = reactive({
@@ -161,7 +160,6 @@ const updatedText = computed(() => {
   if (Number.isNaN(d.getTime())) return ''
   return `数据更新至 ${d.toLocaleString('zh-CN', { hour12: false })}`
 })
-const analyticsSourceText = computed(() => analyticsSourceLabel(dashboard.value?.dataSourceLabel))
 const deviceItems = computed(() => dashboard.value?.deviceStats?.items || [])
 const deviceHasData = computed(() => deviceItems.value.length > 0)
 const topDevice = computed<DeviceBreakdownItem | null>(() => {
@@ -695,7 +693,6 @@ onBeforeUnmount(() => {
         </div>
         <div class="analytics-meta">
           <p class="updated">{{ updatedText }}</p>
-          <p class="data-source">来源：{{ analyticsSourceText }}</p>
         </div>
       </div>
 
@@ -1222,8 +1219,7 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 .eyebrow,
-.updated,
-.data-source {
+.updated {
   color: var(--muted);
   font-size: 13px;
   margin: 0;
@@ -1233,8 +1229,7 @@ onBeforeUnmount(() => {
   gap: 4px;
   justify-items: end;
 }
-.updated,
-.data-source {
+.updated {
   text-align: right;
 }
 .platform-filter {
@@ -1937,10 +1932,6 @@ onBeforeUnmount(() => {
   }
   .analytics-meta {
     justify-items: start;
-  }
-  .updated,
-  .data-source {
-    text-align: left;
   }
   .platform-select-wrap {
     align-items: stretch;
