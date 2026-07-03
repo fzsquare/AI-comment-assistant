@@ -1,6 +1,7 @@
 """FastAPI 入口。Go 后端通过 POST /generate-reviews 调用本服务填充评价池。"""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Annotated
@@ -50,7 +51,10 @@ async def generate_reviews(
             req.platform,
             req.count,
         )
-        result = await generate(req)
+        result = await asyncio.wait_for(
+            generate(req),
+            timeout=settings.generation_timeout_seconds,
+        )
         duration_ms = int((time.perf_counter() - started) * 1000)
         logger.info(
             "agent_generation_success task_id=%s platform=%s requested=%s produced=%s duration_ms=%s",
@@ -61,6 +65,20 @@ async def generate_reviews(
             duration_ms,
         )
         return result
+    except asyncio.TimeoutError as exc:
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        logger.exception(
+            "agent_generation_timeout task_id=%s platform=%s count=%s duration_ms=%s timeout_seconds=%s",
+            x_generation_task_id or "",
+            req.platform,
+            req.count,
+            duration_ms,
+            settings.generation_timeout_seconds,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail=f"agent-service 生成超时，超过 {settings.generation_timeout_seconds} 秒",
+        ) from exc
     except RuntimeError as exc:  # 未配置 key 等
         duration_ms = int((time.perf_counter() - started) * 1000)
         logger.exception(

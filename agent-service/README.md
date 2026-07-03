@@ -65,6 +65,9 @@ curl -X POST http://127.0.0.1:8090/generate-reviews \
 - Go 侧会把商家/消费者选择的 `platformCode` 传入本服务，并用同一个平台编码写入 `review_items.platform_style`。
 - Go backend 的 `AGENT_SERVICE_URL` 指向本机或私有网络地址,并通过
   `X-Agent-Internal-Token` 传入与本服务一致的 `AGENT_INTERNAL_TOKEN`。
+- Go backend 会按 `AGENT_GENERATION_BATCH_SIZE` 拆分生成请求；本服务侧的
+  `AGENT_GENERATION_TIMEOUT_SECONDS` 控制单次 `/generate-reviews` 整批生成超时，
+  超时会返回 504 并输出 `agent_generation_timeout` 日志。
 - 前端只请求 Go backend 的 `/api`,不要配置或调用本服务地址。
 - 标题规则：大众点评 / 美团 / 抖音等普通评论不保留标题；只有小红书允许标题，
   并放在 `content` 第一行，不带“标题：”前缀。

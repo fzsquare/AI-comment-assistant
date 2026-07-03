@@ -19,6 +19,8 @@ const (
 	defaultAgentServiceURL                = "http://127.0.0.1:8090"
 	defaultAgentMinGrade                  = "B"
 	defaultAgentInternalToken             = "dev-agent-internal-token-change-me"
+	defaultAgentHTTPTimeoutSeconds        = 300
+	defaultAgentGenerationBatchSize       = 5
 	defaultAllowedOrigins                 = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
 	defaultMaxReviewGenerateCount         = 50
 	defaultReviewTargetCount              = 10
@@ -44,6 +46,10 @@ type Config struct {
 	AgentInternalToken string
 	// 入池最低质量等级（S/A/B/C/D，对应约束手册 6.1），默认 B
 	AgentMinGrade string
+	// Go 后端等待 agent-service 单批生成响应的 HTTP 超时秒数
+	AgentHTTPTimeoutSeconds int
+	// Go 后端调用 agent-service 时每批请求的评价数量
+	AgentGenerationBatchSize int
 	// 单次人工生成评价数量上限
 	MaxReviewGenerateCount int
 	// targetCount 缺省值
@@ -87,6 +93,8 @@ func Load() Config {
 		AgentServiceURL:                strings.TrimRight(getEnv("AGENT_SERVICE_URL", defaultAgentServiceURL), "/"),
 		AgentInternalToken:             getEnv("AGENT_INTERNAL_TOKEN", agentTokenFallback),
 		AgentMinGrade:                  getEnv("AGENT_MIN_GRADE", defaultAgentMinGrade),
+		AgentHTTPTimeoutSeconds:        getEnvInt("AGENT_HTTP_TIMEOUT_SECONDS", defaultAgentHTTPTimeoutSeconds),
+		AgentGenerationBatchSize:       getEnvInt("AGENT_GENERATION_BATCH_SIZE", defaultAgentGenerationBatchSize),
 		MaxReviewGenerateCount:         getEnvInt("MAX_REVIEW_GENERATE_COUNT", defaultMaxReviewGenerateCount),
 		DefaultReviewTargetCount:       getEnvInt("DEFAULT_REVIEW_TARGET_COUNT", defaultReviewTargetCount),
 		UploadDir:                      getEnv("UPLOAD_DIR", defaultUploadDir),
@@ -125,6 +133,12 @@ func (c Config) Validate() error {
 		if !strongSecret(c.AgentInternalToken) {
 			problems = append(problems, fmt.Sprintf("AGENT_INTERNAL_TOKEN must be at least %d characters", minSecretLength))
 		}
+	}
+	if c.AgentHTTPTimeoutSeconds <= 0 {
+		problems = append(problems, "AGENT_HTTP_TIMEOUT_SECONDS must be greater than 0")
+	}
+	if c.AgentGenerationBatchSize <= 0 {
+		problems = append(problems, "AGENT_GENERATION_BATCH_SIZE must be greater than 0")
 	}
 	if c.MaxReviewGenerateCount <= 0 {
 		problems = append(problems, "MAX_REVIEW_GENERATE_COUNT must be greater than 0")

@@ -30,6 +30,8 @@ func TestValidateAllowsDevelopmentDefaults(t *testing.T) {
 		JWTSecret:                      "dev-jwt-secret-change-me-32-bytes",
 		AgentServiceURL:                "http://127.0.0.1:8090",
 		AgentInternalToken:             "dev-agent-internal-token-change-me",
+		AgentHTTPTimeoutSeconds:        300,
+		AgentGenerationBatchSize:       5,
 		AllowedOrigins:                 []string{"http://localhost:5173"},
 		MaxReviewGenerateCount:         50,
 		DefaultReviewTargetCount:       10,
@@ -84,6 +86,56 @@ func TestLoadInvalidIntegerEnvFailsValidation(t *testing.T) {
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected invalid integer env to fail validation")
+	}
+}
+
+func TestLoadAgentGenerationRuntimeConfig(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("AGENT_HTTP_TIMEOUT_SECONDS", "600")
+	t.Setenv("AGENT_GENERATION_BATCH_SIZE", "3")
+
+	cfg := Load()
+	if got, want := cfg.AgentHTTPTimeoutSeconds, 600; got != want {
+		t.Fatalf("agent HTTP timeout got %d, want %d", got, want)
+	}
+	if got, want := cfg.AgentGenerationBatchSize, 3; got != want {
+		t.Fatalf("agent batch size got %d, want %d", got, want)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected agent generation runtime config to validate, got %v", err)
+	}
+}
+
+func TestValidateRejectsInvalidAgentGenerationRuntimeConfig(t *testing.T) {
+	cfg := Config{
+		AppEnv:                         "development",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "dev-jwt-secret-change-me-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "dev-agent-internal-token-change-me",
+		AgentHTTPTimeoutSeconds:        0,
+		AgentGenerationBatchSize:       0,
+		AllowedOrigins:                 []string{"http://localhost:5173"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"AGENT_HTTP_TIMEOUT_SECONDS", "AGENT_GENERATION_BATCH_SIZE"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("expected error to mention %s, got %q", want, msg)
+		}
 	}
 }
 

@@ -95,33 +95,45 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	} else {
 		reviews, err = s.Generator.Generate(store, keywords, targetCount)
 	}
+	agentErr := err
 	if err != nil {
-		task.Status = model.TaskStatusFailed
+		task.GeneratedRawCount = len(reviews)
+		task.Status = model.TaskStatusPartialFailed
+		if len(reviews) == 0 {
+			task.Status = model.TaskStatusFailed
+		}
 		task.ErrorMessage = err.Error()
 		s.DB.Save(&task)
 		s.recordGenerationAudit(generationAuditInput{
 			Task:       task,
 			Stage:      "agent_error",
 			Level:      "error",
-			Status:     model.TaskStatusFailed,
+			Status:     task.Status,
 			Message:    err.Error(),
 			Duration:   time.Since(agentStartedAt),
 			HTTPStatus: auditHTTPStatus(err),
+			Detail: map[string]interface{}{
+				"returnedCount": len(reviews),
+			},
 		})
-		return err
+		if len(reviews) == 0 {
+			return err
+		}
 	}
 	task.GeneratedRawCount = len(reviews)
-	s.recordGenerationAudit(generationAuditInput{
-		Task:     task,
-		Stage:    "agent_response",
-		Level:    "info",
-		Status:   model.TaskStatusRunning,
-		Message:  "agent-service 已返回评价候选",
-		Duration: time.Since(agentStartedAt),
-		Detail: map[string]interface{}{
-			"returnedCount": len(reviews),
-		},
-	})
+	if agentErr == nil {
+		s.recordGenerationAudit(generationAuditInput{
+			Task:     task,
+			Stage:    "agent_response",
+			Level:    "info",
+			Status:   model.TaskStatusRunning,
+			Message:  "agent-service 已返回评价候选",
+			Duration: time.Since(agentStartedAt),
+			Detail: map[string]interface{}{
+				"returnedCount": len(reviews),
+			},
+		})
+	}
 
 	if len(reviews) == 0 {
 		task.Status = model.TaskStatusFailed
@@ -193,8 +205,8 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 
 	task.SuccessCount = len(reviews)
 	task.InsertedRowCount = len(reviews)
-	task.FailedCount = duplicateCount
-	if duplicateCount > 0 {
+	task.FailedCount = duplicateCount + generationFailureCount(targetCount, task.GeneratedRawCount, agentErr)
+	if duplicateCount > 0 || agentErr != nil {
 		task.Status = model.TaskStatusPartialFailed
 	} else {
 		task.Status = model.TaskStatusSuccess
@@ -248,6 +260,13 @@ func (s *ReviewPoolService) duplicateCheckContents(storeID uint, platformCode st
 		}
 	}
 	return contents
+}
+
+func generationFailureCount(targetCount int, generatedCount int, err error) int {
+	if err == nil || targetCount <= generatedCount {
+		return 0
+	}
+	return targetCount - generatedCount
 }
 
 func (s *ReviewPoolService) generationPreferences(storeID uint) GenerationPreferences {

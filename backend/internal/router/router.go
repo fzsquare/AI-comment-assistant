@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 
 	"ppk/backend/internal/config"
 	adminHandler "ppk/backend/internal/handler/admin"
@@ -46,7 +47,13 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 func buildReviewPoolService(cfg config.Config, db *gorm.DB) *service.ReviewPoolService {
 	var generator service.ReviewGenerator = service.NewUnavailableReviewGenerator("AGENT_SERVICE_URL is required")
 	if strings.TrimSpace(cfg.AgentServiceURL) != "" {
-		generator = service.NewAgentReviewGenerator(cfg.AgentServiceURL, cfg.AgentMinGrade, cfg.AgentInternalToken)
+		generator = service.NewAgentReviewGeneratorWithOptions(
+			cfg.AgentServiceURL,
+			cfg.AgentMinGrade,
+			cfg.AgentInternalToken,
+			time.Duration(cfg.AgentHTTPTimeoutSeconds)*time.Second,
+			cfg.AgentGenerationBatchSize,
+		)
 	}
 	return &service.ReviewPoolService{
 		DB:        db,

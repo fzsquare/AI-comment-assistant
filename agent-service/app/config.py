@@ -30,6 +30,7 @@ class Settings:
 
     # --- 批量生成 ---
     max_concurrency: int = 5
+    generation_timeout_seconds: int = 240
 
     # --- 服务 ---
     host: str = "127.0.0.1"
@@ -79,6 +80,9 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         env, "MAX_REVISE_ROUNDS", 2, errors, min_value=0
     )
     max_concurrency = _parse_int(env, "MAX_CONCURRENCY", 5, errors, min_value=1)
+    generation_timeout_seconds = _parse_int(
+        env, "AGENT_GENERATION_TIMEOUT_SECONDS", 240, errors, min_value=1
+    )
     port = _parse_int(env, "AGENT_PORT", 8090, errors, min_value=1, max_value=65535)
     if errors:
         raise RuntimeError("配置错误：" + "；".join(errors))
@@ -89,6 +93,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
         min_pass_score=min_pass_score,
         max_revise_rounds=max_revise_rounds,
         max_concurrency=max_concurrency,
+        generation_timeout_seconds=generation_timeout_seconds,
         host=_read(env, "AGENT_HOST", "127.0.0.1"),
         port=port,
         internal_token=_read(env, "AGENT_INTERNAL_TOKEN", ""),

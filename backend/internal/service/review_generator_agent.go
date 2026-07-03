@@ -14,6 +14,8 @@ import (
 
 // 文案服务响应体上限，防止异常/被劫持的端点流式返回超大 body 耗尽内存
 const maxAgentRespBytes = 8 << 20 // 8MB
+const defaultAgentHTTPTimeout = 300 * time.Second
+const defaultAgentGenerationBatchSize = 5
 
 // AgentReviewGenerator 通过 HTTP 调用 Python 文案 agent 服务生成评价，
 // 实现 ReviewGenerator 接口。只把达到入池等级（默认 B 及以上）的文案返回。
@@ -22,6 +24,7 @@ type AgentReviewGenerator struct {
 	MinGrade      string
 	InternalToken string
 	Client        *http.Client
+	BatchSize     int
 }
 
 type AgentHTTPError struct {
@@ -38,15 +41,26 @@ func (e *AgentHTTPError) Error() string {
 }
 
 func NewAgentReviewGenerator(baseURL, minGrade, internalToken string) *AgentReviewGenerator {
+	return NewAgentReviewGeneratorWithOptions(baseURL, minGrade, internalToken, defaultAgentHTTPTimeout, defaultAgentGenerationBatchSize)
+}
+
+func NewAgentReviewGeneratorWithOptions(baseURL, minGrade, internalToken string, httpTimeout time.Duration, batchSize int) *AgentReviewGenerator {
 	if minGrade == "" {
 		minGrade = "B"
+	}
+	if httpTimeout <= 0 {
+		httpTimeout = defaultAgentHTTPTimeout
+	}
+	if batchSize <= 0 {
+		batchSize = defaultAgentGenerationBatchSize
 	}
 	return &AgentReviewGenerator{
 		BaseURL:       strings.TrimRight(baseURL, "/"),
 		MinGrade:      minGrade,
 		InternalToken: internalToken,
-		// 自评循环 + 批量，单次可能较慢，给足超时
-		Client: &http.Client{Timeout: 180 * time.Second},
+		// 自评循环 + 小批量，单批可能较慢，给足超时
+		Client:    &http.Client{Timeout: httpTimeout},
+		BatchSize: batchSize,
 	}
 }
 
@@ -110,6 +124,9 @@ func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords 
 }
 
 func (g *AgentReviewGenerator) GenerateWithContext(store model.Store, keywords []model.StoreKeyword, context ReviewGenerationContext, targetCount int) ([]model.ReviewItem, error) {
+	if targetCount <= 0 {
+		return nil, fmt.Errorf("非法的生成数量: %d", targetCount)
+	}
 	if !strings.HasPrefix(g.BaseURL, "http://") && !strings.HasPrefix(g.BaseURL, "https://") {
 		return nil, fmt.Errorf("非法的文案服务地址: %q", g.BaseURL)
 	}
@@ -124,6 +141,28 @@ func (g *AgentReviewGenerator) GenerateWithContext(store model.Store, keywords [
 		kw = append(kw, k.Keyword)
 	}
 
+	batchSize := g.BatchSize
+	if batchSize <= 0 || batchSize > targetCount {
+		batchSize = targetCount
+	}
+	totalBatches := (targetCount + batchSize - 1) / batchSize
+	items := make([]model.ReviewItem, 0, targetCount)
+	for batchIndex, remaining := 1, targetCount; remaining > 0; batchIndex++ {
+		batchCount := batchSize
+		if remaining < batchSize {
+			batchCount = remaining
+		}
+		batchItems, err := g.generateBatch(store, kw, platform, context, batchCount)
+		if err != nil {
+			return items, fmt.Errorf("agent-service 第 %d/%d 批生成失败: %w", batchIndex, totalBatches, err)
+		}
+		items = append(items, batchItems...)
+		remaining -= batchCount
+	}
+	return items, nil
+}
+
+func (g *AgentReviewGenerator) generateBatch(store model.Store, keywords []string, platform string, context ReviewGenerationContext, targetCount int) ([]model.ReviewItem, error) {
 	payload, err := json.Marshal(agentRequest{
 		Store: agentStore{
 			StoreName:    store.StoreName,
@@ -132,7 +171,7 @@ func (g *AgentReviewGenerator) GenerateWithContext(store model.Store, keywords [
 			BrandTone:    store.BrandTone,
 			Address:      store.Address,
 		},
-		Keywords:     kw,
+		Keywords:     keywords,
 		Platform:     platform,
 		Count:        targetCount,
 		Satisfaction: "比较满意",

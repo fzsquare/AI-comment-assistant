@@ -6,8 +6,10 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+import types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -197,6 +199,7 @@ def test_load_settings_rejects_invalid_ranges_with_context():
         "MIN_PASS_SCORE": "101",
         "MAX_REVISE_ROUNDS": "-1",
         "MAX_CONCURRENCY": "0",
+        "AGENT_GENERATION_TIMEOUT_SECONDS": "0",
     }
     try:
         load_settings(bad_env)
@@ -205,8 +208,61 @@ def test_load_settings_rejects_invalid_ranges_with_context():
         assert "MIN_PASS_SCORE" in msg
         assert "MAX_REVISE_ROUNDS" in msg
         assert "MAX_CONCURRENCY" in msg
+        assert "AGENT_GENERATION_TIMEOUT_SECONDS" in msg
         return
     raise AssertionError("应抛 RuntimeError")
+
+
+def test_load_settings_accepts_generation_timeout():
+    settings = load_settings({"AGENT_GENERATION_TIMEOUT_SECONDS": "240"})
+    assert settings.generation_timeout_seconds == 240
+
+
+def test_generate_reviews_returns_504_when_generation_times_out():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 agent timeout 路由测试")
+        return
+    try:
+        from fastapi.testclient import TestClient
+        from app.main import app, settings as app_settings
+    except ModuleNotFoundError as exc:
+        if exc.name in {"fastapi", "httpx", "starlette"}:
+            print("SKIP  FastAPI 测试依赖未安装，跳过 agent timeout 路由测试")
+            return
+        raise
+
+    async def slow_generate(_req):
+        await asyncio.sleep(0.05)
+
+    fake_pipeline = types.ModuleType("app.pipeline")
+    fake_pipeline.generate = slow_generate
+    previous_pipeline = sys.modules.get("app.pipeline")
+    previous_token = app_settings.internal_token
+    previous_timeout = app_settings.generation_timeout_seconds
+    sys.modules["app.pipeline"] = fake_pipeline
+    app_settings.internal_token = "expected-token"
+    app_settings.generation_timeout_seconds = 0.001
+    try:
+        client = TestClient(app)
+        resp = client.post(
+            "/generate-reviews",
+            headers={"X-Agent-Internal-Token": "expected-token"},
+            json={
+                "store": {"store_name": "测试店"},
+                "keywords": [],
+                "platform": "dianping",
+                "count": 1,
+            },
+        )
+        assert resp.status_code == 504
+        assert "生成超时" in resp.text
+    finally:
+        app_settings.internal_token = previous_token
+        app_settings.generation_timeout_seconds = previous_timeout
+        if previous_pipeline is None:
+            sys.modules.pop("app.pipeline", None)
+        else:
+            sys.modules["app.pipeline"] = previous_pipeline
 
 
 def test_reviewer_pass_string_false_is_false_even_with_good_score():

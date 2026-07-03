@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"ppk/backend/internal/model"
 )
@@ -215,5 +217,89 @@ func TestAgentReviewGeneratorIncludesErrorBodyForNonOK(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "503") || !strings.Contains(err.Error(), "LLM_API_KEY is required") {
 		t.Fatalf("error got %q, want status and response body", err.Error())
+	}
+}
+
+func TestAgentReviewGeneratorUsesConfiguredTimeoutAndBatchSize(t *testing.T) {
+	generator := NewAgentReviewGeneratorWithOptions("http://127.0.0.1:8090", "B", "agent-token", 7*time.Second, 3)
+
+	if got, want := generator.Client.Timeout, 7*time.Second; got != want {
+		t.Fatalf("timeout got %s, want %s", got, want)
+	}
+	if got, want := generator.BatchSize, 3; got != want {
+		t.Fatalf("batch size got %d, want %d", got, want)
+	}
+}
+
+func TestAgentReviewGeneratorSplitsLargeTargetIntoConfiguredBatches(t *testing.T) {
+	var gotCounts []int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var gotPayload agentRequest
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request failed: %v", err)
+		}
+		gotCounts = append(gotCounts, gotPayload.Count)
+		items := make([]agentItem, 0, gotPayload.Count)
+		for i := 0; i < gotPayload.Count; i++ {
+			items = append(items, agentItem{Content: "服务自然，菜也稳定。", Grade: "B"})
+		}
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: gotPayload.Platform,
+			Produced: gotPayload.Count,
+			Items:    items,
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGeneratorWithOptions(srv.URL, "B", "agent-token", 5*time.Second, 3)
+	items, err := generator.Generate(model.Store{PrimaryPlatformStyle: "dianping"}, nil, 8)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if !reflect.DeepEqual(gotCounts, []int{3, 3, 2}) {
+		t.Fatalf("batch counts got %#v, want [3 3 2]", gotCounts)
+	}
+	if len(items) != 8 {
+		t.Fatalf("got %d items, want 8", len(items))
+	}
+}
+
+func TestAgentReviewGeneratorReturnsPartialItemsWhenLaterBatchFails(t *testing.T) {
+	callNo := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callNo++
+		if callNo == 2 {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			_, _ = w.Write([]byte(`{"detail":"agent-service 生成超时"}`))
+			return
+		}
+		var gotPayload agentRequest
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request failed: %v", err)
+		}
+		items := make([]agentItem, 0, gotPayload.Count)
+		for i := 0; i < gotPayload.Count; i++ {
+			items = append(items, agentItem{Content: "第一批已经生成的评价。", Grade: "B"})
+		}
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: gotPayload.Platform,
+			Produced: gotPayload.Count,
+			Items:    items,
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGeneratorWithOptions(srv.URL, "B", "agent-token", 5*time.Second, 2)
+	items, err := generator.Generate(model.Store{PrimaryPlatformStyle: "dianping"}, nil, 5)
+	if err == nil {
+		t.Fatal("expected later batch failure to return an error")
+	}
+	if !strings.Contains(err.Error(), "第 2/3 批") || !strings.Contains(err.Error(), "504") {
+		t.Fatalf("error got %q, want batch index and HTTP status", err.Error())
+	}
+	if len(items) != 2 {
+		t.Fatalf("got %d partial items, want 2", len(items))
 	}
 }
