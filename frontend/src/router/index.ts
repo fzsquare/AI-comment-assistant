@@ -21,7 +21,7 @@ function loginPath(role?: Role) {
 
 function homePath(role: Role) {
   if (role === 'admin') {
-    return '/admin/console'
+    return '/admin/console/overview'
   }
   if (role === 'merchant') {
     return '/merchant/console'
@@ -42,7 +42,8 @@ const router = createRouter({
     { path: '/merchant/login', component: MerchantLogin },
     { path: '/merchant/console', component: MerchantConsole, meta: { requiresAuth: true, role: 'merchant' } },
     { path: '/admin/login', component: AdminLogin },
-    { path: '/admin/console', component: AdminConsole, meta: { requiresAuth: true, role: 'admin' } }
+    { path: '/admin/console', redirect: '/admin/console/overview' },
+    { path: '/admin/console/:section', name: 'admin-console-section', component: AdminConsole, meta: { requiresAuth: true, role: 'admin' } }
   ]
 })
 

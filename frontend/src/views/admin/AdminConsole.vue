@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { adminApi } from '../../api/admin'
 import type { AdminStats, AdminStore, ExternalStoreReviewMatch, PlatformReviewLibraryItem, ReviewCrawlBatch } from '../../api/admin'
 import type { DeviceBreakdownItem, ReviewGenerationTask } from '../../api/merchant'
@@ -10,6 +11,8 @@ import { generationFailureReason, generationLogPreview, generationStageSummary }
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
+const route = useRoute()
+const router = useRouter()
 const merchants = ref<any[]>([])
 const storeTypes = ref<any[]>([])
 const stores = ref<AdminStore[]>([])
@@ -53,14 +56,22 @@ const detailTabs = [
   { key: 'advice', label: '运营建议' },
   { key: 'config', label: '配置资料' }
 ] as const
+type AdminConsoleSection = 'overview' | 'platform-reviews' | 'stores' | 'store-detail' | 'operations' | 'settings'
 const navItems = [
-  { label: '运营总览', href: '#ops-overview' },
-  { label: '平台评论库', href: '#platform-review-library' },
-  { label: '商家列表', href: '#merchant-ledger' },
-  { label: '商家详情', href: '#merchant-detail' },
-  { label: '运营建议', href: '#ops-advice' },
-  { label: '配置资料', href: '#config-drawer-anchor' }
-]
+  { label: '运营总览', section: 'overview' },
+  { label: '平台评论库', section: 'platform-reviews' },
+  { label: '商家列表', section: 'stores' },
+  { label: '商家详情', section: 'store-detail' },
+  { label: '运营建议', section: 'operations' },
+  { label: '后台配置', section: 'settings' }
+] as const satisfies ReadonlyArray<{ label: string; section: AdminConsoleSection }>
+const adminSectionSet = new Set<AdminConsoleSection>(navItems.map((item) => item.section))
+const activeAdminSection = computed<AdminConsoleSection>(() => {
+  const section = String(route.params.section || 'overview') as AdminConsoleSection
+  return adminSectionSet.has(section) ? section : 'overview'
+})
+const detailSectionTitle = computed(() => activeAdminSection.value === 'operations' ? '运营建议' : '商家详情')
+const detailSectionSubtitle = computed(() => activeAdminSection.value === 'operations' ? '围绕当前选中商家处理使用风险和转化建议。' : '当前选中商家的链接、采集和转化资料。')
 
 // 自定义类型只能挂在 9 个预置行业之一之下（生成/隔离基准）
 const presetTypes = computed(() => storeTypes.value.filter((t) => t.isPreset))
@@ -529,6 +540,15 @@ function syncStoreIdConfig(item: AdminStore | null) {
   selectedStoreIdConfig.enabled = !!item?.reviewCrawl?.enabled
 }
 
+function adminSectionRoute(section: AdminConsoleSection) {
+  return { name: 'admin-console-section', params: { section } }
+}
+
+async function goAdminSection(section: AdminConsoleSection) {
+  if (activeAdminSection.value === section) return
+  await router.push(adminSectionRoute(section))
+}
+
 function resetStoreForm() {
   editingStoreId.value = null
   newStore.account = ''
@@ -558,6 +578,32 @@ function closeConfigPanel() {
   configPanelOpen.value = false
   resetStoreForm()
 }
+
+watch(
+  () => route.params.section,
+  (value) => {
+    const section = String(value || 'overview') as AdminConsoleSection
+    if (!adminSectionSet.has(section)) {
+      void router.replace(adminSectionRoute('overview'))
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  activeAdminSection,
+  (section) => {
+    if (section === 'operations') {
+      activeDetailTab.value = 'advice'
+    } else if (section === 'store-detail' && activeDetailTab.value === 'advice') {
+      activeDetailTab.value = 'overview'
+    }
+    if (section !== 'store-detail' && section !== 'operations') {
+      crawlPanelStore.value = null
+    }
+  },
+  { immediate: true }
+)
 
 async function loadAll() {
   loading.value = true
@@ -800,6 +846,7 @@ async function regenerateStoreReviews(item: AdminStore) {
 async function loadReviewCrawl(item: AdminStore) {
   selectedStoreId.value = item.id
   syncStoreIdConfig(item)
+  await goAdminSection('store-detail')
   crawlLoading.value = true
   error.value = ''
   try {
@@ -820,6 +867,9 @@ async function loadReviewCrawl(item: AdminStore) {
 function selectStore(item: AdminStore) {
   selectedStoreId.value = item.id
   syncStoreIdConfig(item)
+  if (activeAdminSection.value !== 'store-detail' && activeAdminSection.value !== 'operations') {
+    void goAdminSection('store-detail')
+  }
 }
 
 function clearStoreFilters() {
@@ -832,6 +882,7 @@ async function applyWorkFilter(filter: StoreStatusFilter) {
   storeStatusFilter.value = filter
   await nextTick()
   selectedStoreId.value = filteredStores.value[0]?.id || null
+  await goAdminSection('stores')
 }
 
 async function saveSelectedStoreIdConfig() {
@@ -910,10 +961,15 @@ onBeforeUnmount(() => {
         <span>NFC 评价助手 · 管理员</span>
       </div>
       <nav class="side-nav">
-        <a v-for="item in navItems" :key="item.href" :href="item.href">
+        <RouterLink
+          v-for="item in navItems"
+          :key="item.section"
+          :to="adminSectionRoute(item.section)"
+          :class="{ active: activeAdminSection === item.section }"
+        >
           <i aria-hidden="true"></i>
           <span>{{ item.label }}</span>
-        </a>
+        </RouterLink>
       </nav>
       <div class="side-summary">
         <span>核心状态</span>
@@ -938,9 +994,8 @@ onBeforeUnmount(() => {
 
       <p v-if="error" class="alert">{{ error }}</p>
       <p v-else-if="notice" class="notice">{{ notice }}</p>
-      <span id="config-drawer-anchor" class="sr-only">配置资料</span>
 
-      <section id="ops-overview" class="screen-card overview-screen" aria-labelledby="overview-title">
+      <section v-if="activeAdminSection === 'overview'" id="ops-overview" class="screen-card overview-screen" aria-labelledby="overview-title">
         <div class="screen-head">
           <div>
             <h2 id="overview-title">商家运营总览</h2>
@@ -1126,7 +1181,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section id="platform-review-library" class="screen-card platform-review-screen" aria-labelledby="platform-review-title">
+      <section v-if="activeAdminSection === 'platform-reviews'" id="platform-review-library" class="screen-card platform-review-screen" aria-labelledby="platform-review-title">
         <div class="screen-head library-head">
           <div>
             <h2 id="platform-review-title">平台评论库</h2>
@@ -1200,7 +1255,7 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section id="merchant-ledger" class="screen-card ledger-screen" aria-labelledby="ledger-title">
+      <section v-if="activeAdminSection === 'stores'" id="merchant-ledger" class="screen-card ledger-screen" aria-labelledby="ledger-title">
         <div class="screen-head ledger-head">
           <div>
             <h2 id="ledger-title">商家管理列表</h2>
@@ -1224,7 +1279,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div class="ledger-layout">
+        <div class="ledger-layout ledger-layout-list">
           <div class="ledger-table">
             <table class="desktop-table">
               <thead>
@@ -1324,8 +1379,19 @@ onBeforeUnmount(() => {
               </article>
             </div>
           </div>
+        </div>
+      </section>
 
-          <aside v-if="selectedStore" id="merchant-detail" class="detail-aside" aria-label="当前选中商家摘要">
+      <section v-if="activeAdminSection === 'store-detail' || activeAdminSection === 'operations'" id="merchant-detail" class="screen-card detail-route-screen" aria-labelledby="detail-route-title">
+        <div class="screen-head">
+          <div>
+            <h2 id="detail-route-title">{{ detailSectionTitle }}</h2>
+            <p class="muted">{{ detailSectionSubtitle }}</p>
+          </div>
+          <button class="secondary" type="button" @click="goAdminSection('stores')">返回商家列表</button>
+        </div>
+
+        <aside v-if="selectedStore" class="detail-aside detail-aside-route" aria-label="当前选中商家摘要">
             <div class="detail-head">
               <div>
                 <p class="eyebrow">当前选中商家</p>
@@ -1471,8 +1537,8 @@ onBeforeUnmount(() => {
                 {{ isStoreActive(selectedStore) ? '停用商家' : '激活商家' }}
               </button>
             </div>
-          </aside>
-        </div>
+        </aside>
+        <p v-else class="empty-note">暂无可查看的商家。</p>
 
         <section v-if="crawlPanelStore" class="crawl-panel" aria-labelledby="crawl-panel-title">
           <div class="panel-head">
@@ -1520,7 +1586,7 @@ onBeforeUnmount(() => {
         </section>
       </section>
 
-      <section class="fold-grid" aria-label="低频管理">
+      <section v-if="activeAdminSection === 'settings'" class="fold-grid" aria-label="低频管理">
         <details class="fold-card">
           <summary>
             <span>
@@ -1787,7 +1853,8 @@ onBeforeUnmount(() => {
   text-decoration: none;
 }
 
-.side-nav a:first-child,
+.side-nav a.active,
+.side-nav a.router-link-active,
 .side-nav a:hover {
   background: rgba(37, 99, 235, 0.18);
   color: #fff;
@@ -2392,6 +2459,10 @@ onBeforeUnmount(() => {
   grid-template-columns: minmax(0, 1fr) 360px;
 }
 
+.ledger-layout-list {
+  grid-template-columns: 1fr;
+}
+
 .ledger-table {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -2591,6 +2662,15 @@ onBeforeUnmount(() => {
   padding: 14px;
   position: sticky;
   top: 16px;
+}
+
+.detail-route-screen {
+  display: grid;
+  gap: 14px;
+}
+
+.detail-aside-route {
+  position: static;
 }
 
 .detail-head h3 {
