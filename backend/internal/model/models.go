@@ -29,9 +29,10 @@ const (
 )
 
 const (
-	TriggerInit       = "init"
-	TriggerManual     = "manual"
-	TriggerAutoRefill = "auto_refill"
+	TriggerInit            = "init"
+	TriggerManual          = "manual"
+	TriggerAdminRegenerate = "admin_regenerate"
+	TriggerAutoRefill      = "auto_refill"
 )
 
 const (

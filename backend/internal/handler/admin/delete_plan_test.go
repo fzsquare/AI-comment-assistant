@@ -62,6 +62,7 @@ func TestAdminRegisterExposesDeleteRoutes(t *testing.T) {
 		"DELETE /api/admin/merchants/:id",
 		"DELETE /api/admin/stores/:id",
 		"PUT /api/admin/stores/:id",
+		"POST /api/admin/stores/:id/reviews/regenerate",
 		"POST /api/admin/stores/:id/review-crawl/run",
 		"GET /api/admin/stores/:id/review-crawl/batches",
 		"GET /api/admin/stores/:id/review-crawl/matches",

@@ -19,6 +19,7 @@ const loading = ref(false)
 const error = ref('')
 const notice = ref('')
 const editingStoreId = ref<number | null>(null)
+const regeneratingStoreId = ref<number | null>(null)
 const crawlPanelStore = ref<AdminStore | null>(null)
 const crawlBatches = ref<ReviewCrawlBatch[]>([])
 const crawlMatches = ref<ExternalStoreReviewMatch[]>([])
@@ -370,6 +371,14 @@ function hasOfficialLink(item: AdminStore) {
   return !!String(item.platformUrl || '').trim()
 }
 
+function canRegenerateStoreReviews(item: AdminStore) {
+  return hasOfficialLink(item)
+}
+
+function isRegeneratingStore(item: AdminStore) {
+  return regeneratingStoreId.value === item.id
+}
+
 function officialLinkStatusText(item: AdminStore) {
   return hasOfficialLink(item) ? '已配置' : '未配置'
 }
@@ -701,6 +710,27 @@ async function runStoreReviewCrawl(item: AdminStore) {
   await runAction(() => adminApi.runStoreReviewCrawl(item.id), '评论采集已同步')
   if (crawlPanelStore.value?.id === item.id) {
     await loadReviewCrawl(item)
+  }
+}
+
+async function regenerateStoreReviews(item: AdminStore) {
+  const platformCode = item.primaryPlatformStyle || ''
+  const platformName = platformDisplayName(platformCode)
+  if (!window.confirm(`确认清空「${item.storeName}」当前 ${platformName} 评论库存，并重新生成一批？旧库存将不再发放。`)) return
+
+  selectedStoreId.value = item.id
+  error.value = ''
+  notice.value = ''
+  regeneratingStoreId.value = item.id
+  try {
+    const { data } = await adminApi.regenerateStoreReviews(item.id, platformCode, 10)
+    const result = data.data
+    notice.value = `已清空 ${formatNumber(result.cleared)} 条库存，并重新生成 ${formatNumber(result.generated)} 条${platformDisplayName(result.platformCode)}评论`
+    await loadAll()
+  } catch (err: any) {
+    error.value = messageFrom(err, '重生成评论库存失败')
+  } finally {
+    regeneratingStoreId.value = null
   }
 }
 
@@ -1101,6 +1131,9 @@ onBeforeUnmount(() => {
                     <span class="table-actions">
                       <button class="secondary" :disabled="loading" @click.stop="editStore(item)">编辑</button>
                       <button class="secondary" :disabled="loading" @click.stop="loadReviewCrawl(item)">采集</button>
+                      <button class="danger" :disabled="loading || regeneratingStoreId !== null || !canRegenerateStoreReviews(item)" @click.stop="regenerateStoreReviews(item)">
+                        {{ isRegeneratingStore(item) ? '生成中' : '重生成库存' }}
+                      </button>
                       <button class="secondary" :disabled="loading" @click.stop="toggleStoreStatus(item)">
                         {{ isStoreActive(item) ? '停用' : '激活' }}
                       </button>
@@ -1144,6 +1177,9 @@ onBeforeUnmount(() => {
                 <div class="mobile-store-actions">
                   <button class="secondary" :disabled="loading" @click.stop="editStore(item)">编辑</button>
                   <button class="secondary" :disabled="loading" @click.stop="copyText(storeLandingUrl(item))">复制服务器链接</button>
+                  <button class="danger" :disabled="loading || regeneratingStoreId !== null || !canRegenerateStoreReviews(item)" @click.stop="regenerateStoreReviews(item)">
+                    {{ isRegeneratingStore(item) ? '生成中' : '重生成库存' }}
+                  </button>
                   <button class="secondary" :disabled="loading" @click.stop="toggleStoreStatus(item)">
                     {{ isStoreActive(item) ? '停用' : '激活' }}
                   </button>
@@ -1291,6 +1327,9 @@ onBeforeUnmount(() => {
               <button class="secondary" type="button" :disabled="loading" @click="editStore(selectedStore)">编辑配置</button>
               <button class="secondary" type="button" :disabled="loading || !selectedStore.reviewCrawl?.enabled" @click="runStoreReviewCrawl(selectedStore)">同步评论</button>
               <button class="secondary" type="button" :disabled="loading" @click="loadReviewCrawl(selectedStore)">采集明细</button>
+              <button class="danger" type="button" :disabled="loading || regeneratingStoreId !== null || !canRegenerateStoreReviews(selectedStore)" @click="regenerateStoreReviews(selectedStore)">
+                {{ isRegeneratingStore(selectedStore) ? '生成中' : '清空并重生成库存' }}
+              </button>
               <button type="button" :disabled="loading" @click="toggleStoreStatus(selectedStore)">
                 {{ isStoreActive(selectedStore) ? '停用商家' : '激活商家' }}
               </button>
@@ -2257,7 +2296,7 @@ onBeforeUnmount(() => {
 .table-actions {
   display: inline-grid;
   gap: 6px;
-  grid-template-columns: repeat(3, auto);
+  grid-template-columns: repeat(2, auto);
 }
 
 .table-actions.compact {
@@ -2728,7 +2767,7 @@ onBeforeUnmount(() => {
 .mobile-store-actions {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .mobile-store-actions button {

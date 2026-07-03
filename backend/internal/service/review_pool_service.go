@@ -37,6 +37,25 @@ func (s *ReviewPoolService) GenerateForStore(storeID uint, triggerType string, t
 	return s.GenerateForStorePlatform(storeID, "", triggerType, targetCount)
 }
 
+func (s *ReviewPoolService) RegenerateForStorePlatform(storeID uint, platformCode string, targetCount int) (int64, error) {
+	var store model.Store
+	if err := s.DB.First(&store, storeID).Error; err != nil {
+		return 0, err
+	}
+	platformCode = normalizePlatformCode(platformCode, store.PrimaryPlatformStyle)
+	if platformCode == "" {
+		return 0, errors.New("platformCode is required")
+	}
+
+	result := s.DB.Model(&model.ReviewItem{}).
+		Where("store_id = ? AND platform_style = ? AND status <> ?", storeID, platformCode, model.ReviewStatusDeleted).
+		Update("status", model.ReviewStatusDeleted)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, s.GenerateForStorePlatform(storeID, platformCode, model.TriggerAdminRegenerate, targetCount)
+}
+
 func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode string, triggerType string, targetCount int) error {
 	var store model.Store
 	if err := s.DB.First(&store, storeID).Error; err != nil {

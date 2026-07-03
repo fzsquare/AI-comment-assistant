@@ -136,6 +136,12 @@ export type ExternalStoreReviewMatch = {
   matchSource: string
 }
 
+export type RegenerateReviewsResult = {
+  cleared: number
+  generated: number
+  platformCode: string
+}
+
 export const adminApi = {
   login(payload: { account: string; password: string }) {
     return http.post('/admin/auth/login', payload)
@@ -169,6 +175,13 @@ export const adminApi = {
   },
   deleteStore(id: number) {
     return http.delete(`/admin/stores/${id}`)
+  },
+  regenerateStoreReviews(id: number, platformCode: string, targetCount = 10) {
+    return http.post<{ code: number; message: string; data: RegenerateReviewsResult }>(
+      `/admin/stores/${id}/reviews/regenerate`,
+      { platformCode, targetCount },
+      { timeout: 180000 }
+    )
   },
   runStoreReviewCrawl(id: number) {
     return http.post(`/admin/stores/${id}/review-crawl/run`)

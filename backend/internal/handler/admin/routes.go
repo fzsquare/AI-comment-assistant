@@ -1,8 +1,10 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"ppk/backend/internal/model"
@@ -70,6 +72,7 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		admin.PUT("/stores/:id", h.updateStore)
 		admin.PUT("/stores/:id/status", h.updateStoreStatus)
 		admin.DELETE("/stores/:id", h.deleteStore)
+		admin.POST("/stores/:id/reviews/regenerate", h.regenerateStoreReviews)
 		admin.POST("/stores/:id/review-crawl/run", h.runStoreReviewCrawl)
 		admin.GET("/stores/:id/review-crawl/batches", h.listStoreReviewCrawlBatches)
 		admin.GET("/stores/:id/review-crawl/matches", h.listStoreReviewCrawlMatches)
@@ -80,6 +83,78 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		admin.GET("/review-generation-tasks", h.listTasks)
 		admin.GET("/stats", h.stats)
 	}
+}
+
+func (h *Handler) regenerateStoreReviews(c *gin.Context) {
+	if h.ReviewPool == nil {
+		response.Error(c, http.StatusServiceUnavailable, "评论生成服务未配置")
+		return
+	}
+
+	var store model.Store
+	if err := h.DB.First(&store, uintParam(c)).Error; err != nil {
+		response.Error(c, http.StatusNotFound, "门店不存在")
+		return
+	}
+
+	var req struct {
+		TargetCount  int    `json:"targetCount"`
+		PlatformCode string `json:"platformCode"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	targetCount, err := normalizeAdminTargetCount(req.TargetCount, h.Config.DefaultReviewTargetCount, h.Config.MaxReviewGenerateCount)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "targetCount 超出允许范围")
+		return
+	}
+	platformCode, err := h.activeStorePlatformCode(store.ID, req.PlatformCode, store.PrimaryPlatformStyle)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	cleared, err := h.ReviewPool.RegenerateForStorePlatform(store.ID, platformCode, targetCount)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, gin.H{
+		"cleared":      cleared,
+		"generated":    targetCount,
+		"platformCode": platformCode,
+	})
+}
+
+func normalizeAdminTargetCount(value, defaultValue, maxValue int) (int, error) {
+	if value == 0 {
+		value = defaultValue
+	}
+	if value <= 0 {
+		return 0, errors.New("targetCount must be greater than 0")
+	}
+	if value > maxValue {
+		return 0, errors.New("targetCount exceeds maximum")
+	}
+	return value, nil
+}
+
+func (h *Handler) activeStorePlatformCode(storeID uint, requested string, fallback string) (string, error) {
+	platformCode := strings.TrimSpace(requested)
+	if platformCode == "" {
+		platformCode = strings.TrimSpace(fallback)
+	}
+	if platformCode == "" {
+		return "", errors.New("请选择评价平台")
+	}
+	var link model.StorePlatformLink
+	if err := h.DB.Where("store_id = ? AND platform_code = ? AND status = ?", storeID, platformCode, model.StatusEnabled).First(&link).Error; err != nil {
+		return "", errors.New("评价平台不可用")
+	}
+	return platformCode, nil
 }
 
 func (h *Handler) runStoreReviewCrawl(c *gin.Context) {

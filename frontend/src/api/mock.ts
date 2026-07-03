@@ -61,7 +61,7 @@ let platformLinks = [
   { id: 4, storeId: 1, platformCode: 'douyin', platformName: '抖音', buttonText: '打开抖音店铺', targetUrl: 'https://www.douyin.com', backupUrl: '', sortNo: 4, status: 1 }
 ]
 
-let merchantReviews = [
+let merchantReviews: any[] = [
   { id: 901, platformStyle: 'xiaohongshu', content: '周五和朋友来的，椒麻鸡不错，麻香不冲。', tags: '招牌椒麻鸡', sourceType: 'ai', status: 'available' }
 ]
 
@@ -607,6 +607,52 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
     saveMockPlatformLink(item.id, item.primaryPlatformStyle, b.platformUrl)
     saveMockReviewCrawlConfig(item.id, b)
     return adminStoreView(item)
+  } },
+  { method: 'POST', re: /\/admin\/stores\/(\d+)\/reviews\/regenerate$/, handler: (m, b) => {
+    const storeId = Number(m[1])
+    const item = stores.find((x) => x.id === storeId)
+    if (!item) mockFailure(404, '门店不存在')
+    const platformCode = b.platformCode || item.primaryPlatformStyle || 'dianping'
+    const cleared = merchantReviews.filter((review: any) =>
+      (!review.storeId || review.storeId === storeId) &&
+      review.platformStyle === platformCode &&
+      review.status !== 'deleted'
+    ).length
+    merchantReviews = merchantReviews.filter((review: any) =>
+      !((!review.storeId || review.storeId === storeId) && review.platformStyle === platformCode)
+    )
+    const targetCount = Number(b.targetCount) || 10
+    for (let i = 0; i < Math.min(targetCount, 3); i += 1) {
+      merchantReviews.unshift({
+        id: nextId(),
+        storeId,
+        platformStyle: platformCode,
+        content: `重新生成的评价 ${i + 1}：上周和朋友过去，体验挺自然，服务也主动。`,
+        tags: '重新生成',
+        sourceType: 'ai',
+        status: 'available'
+      })
+    }
+    const now = new Date().toISOString()
+    const taskId = nextId()
+    tasks.unshift({
+      id: taskId,
+      storeId,
+      platformStyle: platformCode,
+      triggerType: 'admin_regenerate',
+      targetCount,
+      generatedRawCount: targetCount,
+      insertedRowCount: targetCount,
+      duplicateFilteredCount: 0,
+      successCount: targetCount,
+      failedCount: 0,
+      status: 'success',
+      errorMessage: '',
+      createdAt: now,
+      updatedAt: now,
+      auditLogs: []
+    })
+    return { cleared, generated: targetCount, platformCode }
   } },
   { method: 'POST', re: /\/admin\/stores\/(\d+)\/review-crawl\/run$/, handler: (m) => {
     const storeId = Number(m[1])
