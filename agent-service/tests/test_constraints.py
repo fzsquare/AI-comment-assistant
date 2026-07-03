@@ -24,7 +24,8 @@ from app.content_normalizer import normalize_generated_content  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
 from app.internal_auth import check_internal_token  # noqa: E402
 from app.jsonutil import extract_json  # noqa: E402
-from app.prompts.writer import build_writer_user  # noqa: E402
+from app.prompts.reviewer import REVIEWER_SYSTEM, build_reviewer_user  # noqa: E402
+from app.prompts.writer import build_writer_system, build_writer_user  # noqa: E402
 from app.reviewer_logic import reviewer_passes  # noqa: E402
 
 try:
@@ -129,8 +130,8 @@ def test_non_xiaohongshu_generated_content_keeps_normal_sentence_with_title_word
 
 
 def test_xiaohongshu_generated_content_keeps_title_without_label():
-    content = "标题：人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
-    assert normalize_generated_content("xiaohongshu", content) == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    content = "标题：周末挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("xiaohongshu", content) == "周末挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
 
 
 def test_xiaohongshu_generated_content_can_prepend_json_title():
@@ -138,10 +139,56 @@ def test_xiaohongshu_generated_content_can_prepend_json_title():
         normalize_generated_content(
             "xiaohongshu",
             "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。",
-            title="人均70挖到宝藏小店",
+            title="周末挖到宝藏小店",
         )
-        == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+        == "周末挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
     )
+
+
+def test_natural_review_violations_flag_store_name_and_per_capita_spend():
+    from app import content_normalizer as normalizer
+
+    violations = normalizer.find_natural_review_violations(
+        "七欣天香辣蟹这家店味道不错，人均80左右，朋友聚餐挺方便。",
+        "七欣天香辣蟹",
+    )
+
+    joined = "；".join(violations)
+    assert "店名" in joined
+    assert "人均" in joined
+    assert normalizer.find_natural_review_violations(
+        "上周和朋友过去吃饭，蟹肉挺入味，服务员换盘也主动。",
+        "七欣天香辣蟹",
+    ) == []
+
+
+def test_writer_and_reviewer_prompts_do_not_request_store_name_or_spend():
+    if StoreContext is None:
+        print("SKIP  pydantic 未安装，跳过自然评论 prompt 测试")
+        return
+
+    spec = get_spec("meituan")
+    writer_prompt = build_writer_system(spec, "比较满意") + "\n" + build_writer_user(
+        spec,
+        StoreContext(store_name="七欣天香辣蟹", industry_type="餐饮"),
+        ["香辣蟹", "服务热情"],
+        "比较满意",
+        0,
+    )
+    reviewer_prompt = REVIEWER_SYSTEM + "\n" + build_reviewer_user(
+        spec,
+        "比较满意",
+        "上周和朋友过去吃饭，蟹肉挺入味，服务员换盘也主动。",
+        "七欣天香辣蟹",
+        ["香辣蟹", "服务热情"],
+    )
+
+    assert "正文不要出现店名" in writer_prompt
+    assert "不要写人均" in writer_prompt
+    assert "必须原样使用给定店名" not in writer_prompt
+    assert "价格参考" not in writer_prompt
+    assert "缺少具体价格" not in reviewer_prompt
+    assert "不得因为正文未出现店名或人均花费扣分" in reviewer_prompt
 
 
 def test_extract_json_plain():

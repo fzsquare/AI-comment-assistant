@@ -8,6 +8,12 @@ TITLE_LABEL_RE = re.compile(
     r"(?:标题|题目|评论标题|小标题|title)\s*[:：])\s*(?P<title>.*)$",
     re.IGNORECASE,
 )
+SPEND_RE = re.compile(
+    r"(?:人均|客单价|总价|消费|花了|花费)\s*(?:大概|差不多|不到|约|大约|在)?\s*"
+    r"(?:[¥￥]?\s*\d+(?:\.\d+)?\s*(?:元|块|rmb|RMB)?|[一二三四五六七八九十百]+(?:元|块)?)",
+    re.IGNORECASE,
+)
+MONEY_RE = re.compile(r"[¥￥]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*(?:元|块|rmb|RMB)")
 
 
 def _strip_title_label(line: str) -> tuple[bool, str]:
@@ -48,3 +54,28 @@ def normalize_generated_content(platform: str, content: str, title: str = "") ->
         if matched:
             lines = lines[1:]
     return "\n".join(lines).strip()
+
+
+def find_natural_review_violations(content: str, store_name: str) -> list[str]:
+    """Find content that makes generated text read unlike a normal user review."""
+    text = content or ""
+    violations: list[str] = []
+    name = (store_name or "").strip()
+    if name and name in text:
+        violations.append(f"正文出现店名：{name}。正常用户评论不要写店铺名。")
+
+    spend_hits = []
+    for pattern in (SPEND_RE, MONEY_RE):
+        for match in pattern.finditer(text):
+            hit = match.group(0).strip()
+            if hit and hit not in spend_hits:
+                spend_hits.append(hit)
+    if "人均" in text and not any("人均" in hit for hit in spend_hits):
+        spend_hits.append("人均")
+    if spend_hits:
+        violations.append(
+            "正文出现人均花费或具体消费金额："
+            + "、".join(spend_hits[:4])
+            + "。正常用户评论不要写人均、总价或具体花费。"
+        )
+    return violations
