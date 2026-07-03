@@ -25,14 +25,14 @@ type ReviewPoolService struct {
 const maxGenerationReferenceReviews = 5
 
 type LandingPayload struct {
-	SessionID                  string                    `json:"sessionId"`
-	StoreName                  string                    `json:"storeName"`
-	PrimaryPlatformStyle       string                    `json:"primaryPlatformStyle"`
-	Review                     *model.ReviewItem         `json:"review,omitempty"`
-	Keywords                   []model.StoreKeyword      `json:"keywords"` // 顾客可选的菜品/场景 chips
-	Images                     []model.StoreImage        `json:"images"`
-	PlatformLinks              []model.StorePlatformLink `json:"platformLinks"`
-	RemainingDispatchableCount int64                     `json:"remainingDispatchableCount"`
+	SessionID                  string                `json:"sessionId"`
+	StoreName                  string                `json:"storeName"`
+	PrimaryPlatformStyle       string                `json:"primaryPlatformStyle"`
+	Review                     *model.ReviewItem     `json:"review,omitempty"`
+	Keywords                   []model.StoreKeyword  `json:"keywords"` // 顾客可选的菜品/场景 chips
+	Images                     []model.StoreImage    `json:"images"`
+	PlatformLinks              []LandingPlatformLink `json:"platformLinks"`
+	RemainingDispatchableCount int64                 `json:"remainingDispatchableCount"`
 }
 
 func (s *ReviewPoolService) GenerateForStore(storeID uint, triggerType string, targetCount int) error {
@@ -573,7 +573,7 @@ func (s *ReviewPoolService) InitLandingByUUID(uuid string) (*LandingPayload, err
 		PrimaryPlatformStyle:       store.PrimaryPlatformStyle,
 		Keywords:                   keywords,
 		Images:                     images,
-		PlatformLinks:              links,
+		PlatformLinks:              buildLandingPlatformLinks(links, defaultRedirectURLResolver),
 		RemainingDispatchableCount: 0,
 	}, nil
 }

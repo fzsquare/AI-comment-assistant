@@ -14,7 +14,7 @@ type LandingData = {
   review?: { id: number; content: string; platformStyle?: string } | null
   keywords: Keyword[]
   images: Array<{ id: number; imageUrl?: string; url?: string; thumbnailUrl?: string }>
-  platformLinks: Array<{ id: number; platformCode: string; platformName: string; buttonText: string; targetUrl: string; backupUrl?: string }>
+  platformLinks: Array<{ id: number; platformCode: string; platformName: string; buttonText: string; targetUrl: string; backupUrl?: string; openUrl?: string; openMode?: string }>
   remainingDispatchableCount: number
 }
 
@@ -159,10 +159,10 @@ async function copyReview() {
   }
 }
 
-async function jump(link: { platformCode: string; targetUrl: string; backupUrl?: string }) {
+async function jump(link: { platformCode: string; targetUrl: string; backupUrl?: string; openUrl?: string }) {
   const text = editedContent.value.trim()
   if (!payload.value || !payload.value.review || !text) return
-  if (!link.targetUrl && !link.backupUrl) {
+  if (!link.openUrl && !link.targetUrl && !link.backupUrl) {
     reviewStateMessage.value = '该平台暂时没有店铺链接，请换一个来源或联系店员。'
     return
   }
@@ -177,8 +177,8 @@ async function jump(link: { platformCode: string; targetUrl: string; backupUrl?:
     editedContent: text
   })
   acceptedReviewIds.value = [...acceptedReviewIds.value, payload.value.review.id]
-  // deeplink 唤起对应 App，唤不起回退商家网页链接
-  openPlatform(link.platformCode, link.targetUrl, link.backupUrl)
+  // 后端已根据短链 302 结果决定是走官方短链还是走直达唤醒链接。
+  openPlatform(link.platformCode, link.openUrl || link.targetUrl, link.backupUrl)
 }
 
 onMounted(load)

@@ -307,7 +307,11 @@ function landingPayload() {
     review: null,
     keywords,
     images,
-    platformLinks,
+    platformLinks: platformLinks.map((link) => ({
+      ...link,
+      openMode: 'official_link',
+      openUrl: link.targetUrl || link.backupUrl || ''
+    })),
     remainingDispatchableCount: remaining
   }
 }
