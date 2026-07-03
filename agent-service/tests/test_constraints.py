@@ -119,6 +119,19 @@ def test_meituan_platform_uses_dianping_constraints():
     assert get_spec("meituan").display_name == "大众点评"
 
 
+def test_dianping_prompt_allows_brief_natural_reviews_without_forced_three_part_structure():
+    spec = get_spec("meituan")
+    writer_prompt = build_writer_system(spec, "比较满意")
+    reviewer_prompt = REVIEWER_SYSTEM
+
+    assert spec.total_min_chars <= 60
+    assert "三段式结构（强制）" not in writer_prompt
+    assert "不强制三段式" in writer_prompt
+    assert "简约短评" in writer_prompt
+    assert "流水账" in writer_prompt
+    assert "不得因为不是三段式" in reviewer_prompt
+
+
 def test_non_xiaohongshu_generated_content_strips_explicit_title():
     content = "标题：适合朋友聚餐的小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
     assert normalize_generated_content("dianping", content) == "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
