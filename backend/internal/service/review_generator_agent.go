@@ -24,6 +24,19 @@ type AgentReviewGenerator struct {
 	Client        *http.Client
 }
 
+type AgentHTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *AgentHTTPError) Error() string {
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return fmt.Sprintf("文案服务返回状态 %d", e.StatusCode)
+	}
+	return fmt.Sprintf("文案服务返回状态 %d: %s", e.StatusCode, body)
+}
+
 func NewAgentReviewGenerator(baseURL, minGrade, internalToken string) *AgentReviewGenerator {
 	if minGrade == "" {
 		minGrade = "B"
@@ -35,6 +48,10 @@ func NewAgentReviewGenerator(baseURL, minGrade, internalToken string) *AgentRevi
 		// 自评循环 + 批量，单次可能较慢，给足超时
 		Client: &http.Client{Timeout: 180 * time.Second},
 	}
+}
+
+func (g *AgentReviewGenerator) AuditEndpoint() string {
+	return g.BaseURL
 }
 
 type agentStore struct {
@@ -136,6 +153,9 @@ func (g *AgentReviewGenerator) GenerateWithContext(store model.Store, keywords [
 	if g.InternalToken != "" {
 		req.Header.Set("X-Agent-Internal-Token", g.InternalToken)
 	}
+	if context.TaskID > 0 {
+		req.Header.Set("X-Generation-Task-ID", fmt.Sprintf("%d", context.TaskID))
+	}
 
 	resp, err := g.Client.Do(req)
 	if err != nil {
@@ -143,7 +163,8 @@ func (g *AgentReviewGenerator) GenerateWithContext(store model.Store, keywords [
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("文案服务返回状态 %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &AgentHTTPError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var out agentResponse

@@ -13,6 +13,7 @@ func TestStoreDeletionPlanClearsChildrenBeforeDeletingStore(t *testing.T) {
 		"unbind_nfc_tags",
 		"delete_review_feedbacks",
 		"delete_review_display_logs",
+		"delete_review_generation_audit_logs",
 		"delete_review_generation_tasks",
 		"delete_external_store_reviews",
 		"delete_review_crawl_batches",

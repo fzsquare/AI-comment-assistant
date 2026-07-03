@@ -35,6 +35,7 @@ func (p GenerationPreferences) HasAnyInput() bool {
 }
 
 type ReviewGenerationContext struct {
+	TaskID      uint
 	Feedback    ReviewGenerationFeedback
 	Preferences GenerationPreferences
 }

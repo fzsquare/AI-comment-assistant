@@ -1,5 +1,5 @@
 import http from './http'
-import type { DeviceStats } from './merchant'
+import type { DeviceStats, ReviewGenerationTask } from './merchant'
 
 export type AdminStats = {
   merchantCount: number
@@ -192,7 +192,7 @@ export const adminApi = {
     return http.put(`/admin/nfc-tags/${id}/status`, { status })
   },
   listTasks() {
-    return http.get('/admin/review-generation-tasks')
+    return http.get<{ code: number; message: string; data: ReviewGenerationTask[] }>('/admin/review-generation-tasks')
   },
   getStats() {
     return http.get<{ code: number; message: string; data: AdminStats }>('/admin/stats')

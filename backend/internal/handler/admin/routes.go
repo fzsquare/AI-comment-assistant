@@ -11,6 +11,7 @@ import (
 	"ppk/backend/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 	"ppk/backend/internal/middleware"
 )
 
@@ -299,7 +300,9 @@ func (h *Handler) updateTagStatus(c *gin.Context) {
 
 func (h *Handler) listTasks(c *gin.Context) {
 	var items []model.ReviewGenerationTask
-	h.DB.Order("id desc").Find(&items)
+	h.DB.Preload("AuditLogs", func(db *gorm.DB) *gorm.DB {
+		return db.Order("id desc")
+	}).Order("id desc").Find(&items)
 	response.Success(c, items)
 }
 

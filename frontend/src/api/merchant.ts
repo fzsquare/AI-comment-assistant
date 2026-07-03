@@ -68,6 +68,46 @@ export type GenerationPreferences = {
   updatedAt?: string
 }
 
+export type ReviewGenerationAuditLog = {
+  id: number
+  taskId: number
+  storeId: number
+  platformStyle: string
+  triggerType: string
+  stage: string
+  level: string
+  status: string
+  message: string
+  detail?: string
+  agentEndpoint?: string
+  httpStatus: number
+  durationMs: number
+  targetCount: number
+  generatedRawCount: number
+  insertedRowCount: number
+  duplicateFilteredCount: number
+  createdAt?: string
+}
+
+export type ReviewGenerationTask = {
+  id: number
+  storeId: number
+  platformStyle: string
+  triggerType: string
+  targetCount: number
+  generatedRawCount: number
+  insertedRowCount: number
+  duplicateFilteredCount: number
+  duplicateCheckVersion?: string
+  successCount: number
+  failedCount: number
+  status: string
+  errorMessage?: string
+  createdAt?: string
+  updatedAt?: string
+  auditLogs?: ReviewGenerationAuditLog[]
+}
+
 export const merchantApi = {
   login(payload: { account: string; password: string }) {
     return http.post('/merchant/auth/login', payload)
@@ -142,6 +182,6 @@ export const merchantApi = {
     return http.post('/merchant/reviews/generate', { targetCount, platformCode }, { timeout: 180000 })
   },
   listTasks() {
-    return http.get('/merchant/review-generation-tasks')
+    return http.get<{ code: number; message: string; data: ReviewGenerationTask[] }>('/merchant/review-generation-tasks')
   }
 }

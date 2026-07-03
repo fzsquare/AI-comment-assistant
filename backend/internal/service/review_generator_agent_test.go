@@ -172,3 +172,48 @@ func TestAgentReviewGeneratorSendsGenerationPreferences(t *testing.T) {
 		t.Fatalf("feedback should still be sent with preferences, got %#v", gotPayload.Feedback)
 	}
 }
+
+func TestAgentReviewGeneratorIncludesTaskIDHeader(t *testing.T) {
+	var gotTaskID string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTaskID = r.Header.Get("X-Generation-Task-ID")
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: "dianping",
+			Produced: 1,
+			Items:    []agentItem{{Content: "服务挺自然，整体体验不错。", Grade: "B"}},
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGenerator(srv.URL, "B", "agent-token")
+	_, err := generator.GenerateWithContext(
+		model.Store{PrimaryPlatformStyle: "dianping"},
+		nil,
+		ReviewGenerationContext{TaskID: 42},
+		1,
+	)
+	if err != nil {
+		t.Fatalf("GenerateWithContext returned error: %v", err)
+	}
+	if gotTaskID != "42" {
+		t.Fatalf("task id header got %q, want 42", gotTaskID)
+	}
+}
+
+func TestAgentReviewGeneratorIncludesErrorBodyForNonOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"detail":"LLM_API_KEY is required"}`))
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGenerator(srv.URL, "B", "agent-token")
+	_, err := generator.Generate(model.Store{PrimaryPlatformStyle: "dianping"}, nil, 1)
+	if err == nil {
+		t.Fatal("expected non-OK response to return an error")
+	}
+	if !strings.Contains(err.Error(), "503") || !strings.Contains(err.Error(), "LLM_API_KEY is required") {
+		t.Fatalf("error got %q, want status and response body", err.Error())
+	}
+}

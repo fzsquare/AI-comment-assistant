@@ -61,11 +61,32 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	if err := s.DB.Create(&task).Error; err != nil {
 		return err
 	}
+	s.recordGenerationAudit(generationAuditInput{
+		Task:    task,
+		Stage:   "task_started",
+		Level:   "info",
+		Status:  model.TaskStatusRunning,
+		Message: "生成任务已创建",
+		Detail: map[string]interface{}{
+			"keywordCount":          len(keywords),
+			"acceptedFeedbackCount": len(feedback.Accepted),
+			"rejectedFeedbackCount": len(feedback.Rejected),
+		},
+	})
 
 	var reviews []model.ReviewItem
 	var err error
+	agentStartedAt := time.Now()
+	s.recordGenerationAudit(generationAuditInput{
+		Task:    task,
+		Stage:   "agent_request",
+		Level:   "info",
+		Status:  model.TaskStatusRunning,
+		Message: "开始调用 agent-service 生成评价",
+	})
 	if generator, ok := s.Generator.(PreferenceAwareReviewGenerator); ok {
 		reviews, err = generator.GenerateWithContext(store, keywords, ReviewGenerationContext{
+			TaskID:      task.ID,
 			Feedback:    feedback,
 			Preferences: preferences,
 		}, targetCount)
@@ -78,25 +99,70 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = err.Error()
 		s.DB.Save(&task)
+		s.recordGenerationAudit(generationAuditInput{
+			Task:       task,
+			Stage:      "agent_error",
+			Level:      "error",
+			Status:     model.TaskStatusFailed,
+			Message:    err.Error(),
+			Duration:   time.Since(agentStartedAt),
+			HTTPStatus: auditHTTPStatus(err),
+		})
 		return err
 	}
+	task.GeneratedRawCount = len(reviews)
+	s.recordGenerationAudit(generationAuditInput{
+		Task:     task,
+		Stage:    "agent_response",
+		Level:    "info",
+		Status:   model.TaskStatusRunning,
+		Message:  "agent-service 已返回评价候选",
+		Duration: time.Since(agentStartedAt),
+		Detail: map[string]interface{}{
+			"returnedCount": len(reviews),
+		},
+	})
 
 	if len(reviews) == 0 {
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = "no reviews generated"
 		s.DB.Save(&task)
+		s.recordGenerationAudit(generationAuditInput{
+			Task:    task,
+			Stage:   "pool_empty",
+			Level:   "error",
+			Status:  model.TaskStatusFailed,
+			Message: "agent-service 未返回可入池评价",
+		})
 		return errors.New("no reviews generated")
 	}
-	task.GeneratedRawCount = len(reviews)
 	existingContents := s.duplicateCheckContents(storeID, platformCode)
 	filteredReviews, duplicateCount := filterDuplicateGeneratedReviews(reviews, existingContents)
 	task.DuplicateFilteredCount = duplicateCount
 	reviews = filteredReviews
+	s.recordGenerationAudit(generationAuditInput{
+		Task:    task,
+		Stage:   "duplicate_filter",
+		Level:   "info",
+		Status:  model.TaskStatusRunning,
+		Message: "完成重复评价过滤",
+		Detail: map[string]interface{}{
+			"duplicateCount": duplicateCount,
+			"remainingCount": len(reviews),
+		},
+	})
 	if len(reviews) == 0 {
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = "all generated reviews were duplicates"
 		task.FailedCount = duplicateCount
 		s.DB.Save(&task)
+		s.recordGenerationAudit(generationAuditInput{
+			Task:    task,
+			Stage:   "duplicate_filter",
+			Level:   "error",
+			Status:  model.TaskStatusFailed,
+			Message: "所有候选评价都被判定为重复，未入池",
+		})
 		return errors.New("all generated reviews were duplicates")
 	}
 
@@ -115,6 +181,13 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = err.Error()
 		s.DB.Save(&task)
+		s.recordGenerationAudit(generationAuditInput{
+			Task:    task,
+			Stage:   "db_insert_error",
+			Level:   "error",
+			Status:  model.TaskStatusFailed,
+			Message: err.Error(),
+		})
 		return err
 	}
 
@@ -126,6 +199,18 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	} else {
 		task.Status = model.TaskStatusSuccess
 	}
+	s.recordGenerationAudit(generationAuditInput{
+		Task:    task,
+		Stage:   "task_completed",
+		Level:   "info",
+		Status:  task.Status,
+		Message: "生成任务完成",
+		Detail: map[string]interface{}{
+			"successCount":     task.SuccessCount,
+			"duplicateCount":   task.DuplicateFilteredCount,
+			"insertedRowCount": task.InsertedRowCount,
+		},
+	})
 	return s.DB.Save(&task).Error
 }
 

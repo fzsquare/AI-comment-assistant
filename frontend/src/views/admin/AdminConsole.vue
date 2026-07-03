@@ -2,16 +2,17 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { adminApi } from '../../api/admin'
 import type { AdminStats, AdminStore, ExternalStoreReviewMatch, ReviewCrawlBatch } from '../../api/admin'
-import type { DeviceBreakdownItem } from '../../api/merchant'
+import type { DeviceBreakdownItem, ReviewGenerationTask } from '../../api/merchant'
 import { copyToClipboard } from '../../utils/clipboard'
 import { analyticsSourceLabel } from '../../utils/analyticsSource'
+import { generationFailureReason, generationLogPreview, generationStageSummary } from '../../utils/generationAudit'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
 const merchants = ref<any[]>([])
 const storeTypes = ref<any[]>([])
 const stores = ref<AdminStore[]>([])
-const tasks = ref<any[]>([])
+const tasks = ref<ReviewGenerationTask[]>([])
 const stats = ref<AdminStats>(emptyStats())
 const loading = ref(false)
 const error = ref('')
@@ -1411,20 +1412,34 @@ onBeforeUnmount(() => {
           <summary>
             <span>
               <strong>生成任务</strong>
-              <small>评价生成记录和成功数量</small>
+              <small>评价生成记录、失败原因和 agent 调用日志</small>
             </span>
             <span class="fold-hint">展开</span>
           </summary>
           <div class="fold-body">
             <table>
-              <thead><tr><th>ID</th><th>门店</th><th>类型</th><th>状态</th><th>成功数</th></tr></thead>
+              <thead><tr><th>ID</th><th>门店</th><th>平台</th><th>类型</th><th>状态</th><th>入池</th><th>失败原因</th><th>最近日志</th></tr></thead>
               <tbody>
                 <tr v-for="item in tasks" :key="item.id">
                   <td>{{ item.id }}</td>
                   <td>{{ item.storeId }}</td>
+                  <td>{{ platformDisplayName(item.platformStyle) }}</td>
                   <td>{{ item.triggerType }}</td>
-                  <td>{{ item.status }}</td>
-                  <td>{{ item.successCount }}</td>
+                  <td>
+                    <strong>{{ item.status }}</strong>
+                    <span class="subtext">目标 {{ formatNumber(item.targetCount) }}</span>
+                  </td>
+                  <td>
+                    <strong>{{ formatNumber(item.successCount) }}</strong>
+                    <span class="subtext">原始 {{ formatNumber(item.generatedRawCount) }} / 过滤 {{ formatNumber(item.duplicateFilteredCount) }}</span>
+                  </td>
+                  <td class="audit-reason">{{ generationFailureReason(item) }}</td>
+                  <td class="audit-cell">
+                    <span class="subtext">{{ generationStageSummary(item) }}</span>
+                    <span v-for="log in generationLogPreview(item)" :key="log.id" :class="['audit-line', log.level]">
+                      {{ formatDateTime(log.createdAt) }} · {{ log.stage }} · {{ log.message }}
+                    </span>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -1691,6 +1706,28 @@ onBeforeUnmount(() => {
   color: var(--muted);
   font-size: 13px;
   margin: 0;
+}
+
+.audit-reason {
+  max-width: 320px;
+  white-space: normal;
+}
+
+.audit-cell {
+  min-width: 280px;
+}
+
+.audit-line {
+  color: var(--muted);
+  display: block;
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 4px;
+  white-space: normal;
+}
+
+.audit-line.error {
+  color: #b91c1c;
 }
 
 .eyebrow {

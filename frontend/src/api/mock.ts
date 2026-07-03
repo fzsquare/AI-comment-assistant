@@ -66,7 +66,44 @@ let merchantReviews = [
 ]
 
 let tasks = [
-  { id: 1, storeId: 1, platformStyle: 'xiaohongshu', triggerType: 'manual', targetCount: 10, successCount: 8, failedCount: 2, status: 'success' }
+  {
+    id: 1,
+    storeId: 1,
+    platformStyle: 'xiaohongshu',
+    triggerType: 'manual',
+    targetCount: 10,
+    generatedRawCount: 10,
+    insertedRowCount: 8,
+    duplicateFilteredCount: 2,
+    successCount: 8,
+    failedCount: 2,
+    status: 'partial_failed',
+    errorMessage: '',
+    createdAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
+    updatedAt: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+    auditLogs: [
+      {
+        id: 101,
+        taskId: 1,
+        storeId: 1,
+        platformStyle: 'xiaohongshu',
+        triggerType: 'manual',
+        stage: 'task_completed',
+        level: 'info',
+        status: 'partial_failed',
+        message: '生成任务完成',
+        detail: '{"successCount":8,"duplicateCount":2}',
+        agentEndpoint: 'http://127.0.0.1:8001',
+        httpStatus: 0,
+        durationMs: 28430,
+        targetCount: 10,
+        generatedRawCount: 10,
+        insertedRowCount: 8,
+        duplicateFilteredCount: 2,
+        createdAt: new Date(Date.now() - 18 * 60 * 1000).toISOString()
+      }
+    ]
+  }
 ]
 
 let generationPreferences = {

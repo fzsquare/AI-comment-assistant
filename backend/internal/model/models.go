@@ -167,21 +167,43 @@ type ReviewFeedback struct {
 }
 
 type ReviewGenerationTask struct {
+	ID                     uint                       `gorm:"primaryKey" json:"id"`
+	StoreID                uint                       `gorm:"index;not null" json:"storeId"`
+	PlatformStyle          string                     `gorm:"size:64;not null" json:"platformStyle"`
+	TriggerType            string                     `gorm:"size:32;not null" json:"triggerType"`
+	TargetCount            int                        `gorm:"not null" json:"targetCount"`
+	GeneratedRawCount      int                        `gorm:"default:0;not null" json:"generatedRawCount"`
+	InsertedRowCount       int                        `gorm:"default:0;not null" json:"insertedRowCount"`
+	DuplicateFilteredCount int                        `gorm:"default:0;not null" json:"duplicateFilteredCount"`
+	DuplicateCheckVersion  string                     `gorm:"size:64;default:''" json:"duplicateCheckVersion"`
+	SuccessCount           int                        `gorm:"default:0;not null" json:"successCount"`
+	FailedCount            int                        `gorm:"default:0;not null" json:"failedCount"`
+	Status                 string                     `gorm:"size:32;default:'pending';not null" json:"status"`
+	ErrorMessage           string                     `gorm:"type:text" json:"errorMessage"`
+	CreatedAt              time.Time                  `json:"createdAt"`
+	UpdatedAt              time.Time                  `json:"updatedAt"`
+	AuditLogs              []ReviewGenerationAuditLog `gorm:"foreignKey:TaskID" json:"auditLogs,omitempty"`
+}
+
+type ReviewGenerationAuditLog struct {
 	ID                     uint      `gorm:"primaryKey" json:"id"`
+	TaskID                 uint      `gorm:"index;not null" json:"taskId"`
 	StoreID                uint      `gorm:"index;not null" json:"storeId"`
 	PlatformStyle          string    `gorm:"size:64;not null" json:"platformStyle"`
 	TriggerType            string    `gorm:"size:32;not null" json:"triggerType"`
-	TargetCount            int       `gorm:"not null" json:"targetCount"`
+	Stage                  string    `gorm:"size:64;index;not null" json:"stage"`
+	Level                  string    `gorm:"size:16;not null" json:"level"`
+	Status                 string    `gorm:"size:32;not null" json:"status"`
+	Message                string    `gorm:"size:512;not null" json:"message"`
+	Detail                 string    `gorm:"type:text" json:"detail"`
+	AgentEndpoint          string    `gorm:"size:255" json:"agentEndpoint"`
+	HTTPStatus             int       `gorm:"default:0;not null" json:"httpStatus"`
+	DurationMS             int64     `gorm:"default:0;not null" json:"durationMs"`
+	TargetCount            int       `gorm:"default:0;not null" json:"targetCount"`
 	GeneratedRawCount      int       `gorm:"default:0;not null" json:"generatedRawCount"`
 	InsertedRowCount       int       `gorm:"default:0;not null" json:"insertedRowCount"`
 	DuplicateFilteredCount int       `gorm:"default:0;not null" json:"duplicateFilteredCount"`
-	DuplicateCheckVersion  string    `gorm:"size:64;default:''" json:"duplicateCheckVersion"`
-	SuccessCount           int       `gorm:"default:0;not null" json:"successCount"`
-	FailedCount            int       `gorm:"default:0;not null" json:"failedCount"`
-	Status                 string    `gorm:"size:32;default:'pending';not null" json:"status"`
-	ErrorMessage           string    `gorm:"type:text" json:"errorMessage"`
 	CreatedAt              time.Time `json:"createdAt"`
-	UpdatedAt              time.Time `json:"updatedAt"`
 }
 
 const (

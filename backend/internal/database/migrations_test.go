@@ -25,3 +25,23 @@ func TestReviewCrawlAnalyticsMigrationGuardsExistingColumns(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewGenerationAuditLogSchemaExists(t *testing.T) {
+	schema, err := os.ReadFile("../../../database/schema.sql")
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	migration, err := os.ReadFile("../../../database/migrations/0005_review_generation_audit_logs.sql")
+	if err != nil {
+		t.Fatalf("read audit migration: %v", err)
+	}
+
+	for _, sql := range []string{string(schema), string(migration)} {
+		if !strings.Contains(sql, "review_generation_audit_logs") {
+			t.Fatalf("expected review_generation_audit_logs in SQL:\n%s", sql)
+		}
+		if !strings.Contains(sql, "task_id") || !strings.Contains(sql, "stage") || !strings.Contains(sql, "duration_ms") {
+			t.Fatalf("audit SQL missing required columns:\n%s", sql)
+		}
+	}
+}
