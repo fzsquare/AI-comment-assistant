@@ -1187,7 +1187,7 @@ onBeforeUnmount(() => {
 }
 .value-shell {
   background: var(--surface);
-  border: 1px solid rgba(219, 228, 240, 0.9);
+  border: 1px solid var(--border);
   border-radius: 8px;
   margin-bottom: 16px;
   padding: 20px;
@@ -1231,7 +1231,7 @@ onBeforeUnmount(() => {
 }
 .platform-filter {
   align-items: center;
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1261,8 +1261,8 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 .platform-select-wrap select {
-  background: #f8fafc;
-  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   font: inherit;
@@ -1289,8 +1289,8 @@ onBeforeUnmount(() => {
 }
 .metric-zone {
   align-items: end;
-  border-bottom: 1px solid var(--border-soft);
-  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 18px;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1318,7 +1318,8 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(96px, 1fr));
 }
 .secondary-metrics div {
-  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -1391,7 +1392,8 @@ onBeforeUnmount(() => {
 }
 .device-panel,
 .publish-summary {
-  border: 1px solid var(--border-soft);
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px;
 }
@@ -1454,7 +1456,7 @@ onBeforeUnmount(() => {
   display: none;
 }
 .device-content {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   padding: 14px;
 }
 .device-bars {
@@ -1478,7 +1480,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 .device-track {
-  background: #eef2f7;
+  background: #e5edf7;
   border-radius: 999px;
   height: 10px;
   overflow: hidden;
@@ -1496,8 +1498,8 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 .compact-metrics div {
-  background: #f8fafc;
-  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
 }
@@ -1514,7 +1516,7 @@ onBeforeUnmount(() => {
   margin: 4px 0 0;
 }
 .trend-section {
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border);
   margin-bottom: 18px;
   padding-bottom: 18px;
 }
@@ -1529,8 +1531,8 @@ onBeforeUnmount(() => {
   margin: 2px 0 0;
 }
 .trend-tabs {
-  background: #f8fafc;
-  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: inline-flex;
   padding: 3px;
@@ -1545,13 +1547,11 @@ onBeforeUnmount(() => {
 .trend-tabs button.active {
   background: var(--surface);
   color: var(--text);
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 .chart-wrap {
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.85) 0%, rgba(255, 255, 255, 0.96) 46%),
-    #fff;
-  border: 1px solid #dbeafe;
+  background: var(--chart-surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
   padding: 14px 14px 8px;
@@ -1646,10 +1646,10 @@ onBeforeUnmount(() => {
 }
 .chart-tooltip {
   background: #fff;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-sizing: border-box;
-  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.18);
+  box-shadow: var(--shadow-popover);
   color: var(--text);
   display: grid;
   gap: 2px;
@@ -1695,7 +1695,7 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 .preference-form {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   margin-top: 18px;
   padding-top: 18px;
 }
@@ -1715,7 +1715,7 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .select-chip {
-  background: #f8fafc;
+  background: var(--surface-subtle);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: #334155;
@@ -1747,7 +1747,7 @@ onBeforeUnmount(() => {
   line-height: 1.35;
 }
 .dimension-chip.selected small {
-  color: #1d4ed8;
+  color: var(--primary-strong);
 }
 .compact-row {
   margin-top: 10px;
@@ -1832,6 +1832,12 @@ onBeforeUnmount(() => {
   list-style: none;
   padding: 16px 18px;
 }
+.fold-card summary:hover {
+  background: var(--surface-subtle);
+}
+.fold-card[open] summary {
+  background: var(--surface-subtle);
+}
 .fold-card summary::-webkit-details-marker {
   display: none;
 }
@@ -1860,7 +1866,7 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .fold-body {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   padding: 14px 18px 18px;
 }
 .upload-btn {
@@ -1882,7 +1888,7 @@ onBeforeUnmount(() => {
   background: #2563eb;
 }
 .suggest-chip {
-  background: #f0f7ff;
+  background: var(--primary-soft);
   border: 1px dashed #93c5fd;
   border-radius: 8px;
   color: #1d4ed8;

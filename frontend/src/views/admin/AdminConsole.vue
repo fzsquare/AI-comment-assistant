@@ -1587,7 +1587,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .admin-console {
-  background: #eef3f8;
+  background: var(--bg);
   color: var(--text);
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
@@ -1724,7 +1724,7 @@ onBeforeUnmount(() => {
 .screen-card,
 .fold-card {
   background: var(--surface);
-  border: 1px solid rgba(219, 228, 240, 0.86);
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: none;
   min-width: 0;
@@ -1783,6 +1783,8 @@ onBeforeUnmount(() => {
 
 .workload-pill,
 .status-pill {
+  align-items: center;
+  border: 1px solid transparent;
   border-radius: 999px;
   display: inline-flex;
   flex: 0 0 auto;
@@ -1793,33 +1795,39 @@ onBeforeUnmount(() => {
 }
 
 .workload-pill.warn {
-  background: #fffbeb;
-  color: #92400e;
+  background: var(--warning-soft);
+  border-color: #fde68a;
+  color: var(--warning-text);
 }
 
 .workload-pill.stable,
 .status-pill.enabled {
   background: var(--success-bg);
+  border-color: #bbf7d0;
   color: var(--success-text);
 }
 
 .status-pill.disabled {
   background: #f1f5f9;
+  border-color: #e2e8f0;
   color: #64748b;
 }
 
 .status-pill.ready {
   background: #eff6ff;
+  border-color: #bfdbfe;
   color: #1d4ed8;
 }
 
 .status-pill.missing {
   background: #fff7ed;
+  border-color: #fed7aa;
   color: #c2410c;
 }
 
 .status-pill.error {
-  background: #fef2f2;
+  background: var(--danger-soft);
+  border-color: #fecaca;
   color: #b91c1c;
 }
 
@@ -1839,12 +1847,12 @@ onBeforeUnmount(() => {
 .conversion-funnel div,
 .advice-card,
 .config-section {
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border);
   border-radius: 8px;
 }
 
 .kpi {
-  background: #fbfdff;
+  background: var(--surface-subtle);
   min-width: 0;
   padding: 12px;
 }
@@ -1880,7 +1888,7 @@ onBeforeUnmount(() => {
 }
 
 .ops-panel {
-  background: #fbfdff;
+  background: var(--surface);
   padding: 14px;
 }
 
@@ -1905,7 +1913,7 @@ onBeforeUnmount(() => {
 .work-item {
   align-items: center;
   background: #fff;
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   display: flex;
@@ -1968,8 +1976,8 @@ onBeforeUnmount(() => {
 }
 
 .mini-funnel div {
-  background: #fff;
-  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
 }
@@ -1988,10 +1996,8 @@ onBeforeUnmount(() => {
 }
 
 .ops-line-chart {
-  background:
-    linear-gradient(180deg, rgba(239, 246, 255, 0.86) 0%, rgba(255, 255, 255, 0.96) 48%),
-    #fff;
-  border: 1px solid #dbeafe;
+  background: var(--chart-surface);
+  border: 1px solid var(--border);
   border-radius: 8px;
   overflow: hidden;
   padding: 10px 10px 6px;
@@ -2131,10 +2137,10 @@ onBeforeUnmount(() => {
 
 .ops-chart-tooltip {
   background: #fff;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--border);
   border-radius: 8px;
   box-sizing: border-box;
-  box-shadow: 0 14px 34px rgba(37, 99, 235, 0.18);
+  box-shadow: var(--shadow-popover);
   color: var(--text);
   display: grid;
   gap: 2px;
@@ -2198,7 +2204,7 @@ onBeforeUnmount(() => {
 .store-rank button {
   align-items: center;
   background: #fff;
-  border: 1px solid var(--border-soft);
+  border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
   display: flex;
@@ -2250,6 +2256,9 @@ onBeforeUnmount(() => {
 }
 
 .ledger-table {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
   min-width: 0;
   overflow-x: auto;
 }
@@ -2271,11 +2280,15 @@ onBeforeUnmount(() => {
 
 .ledger-table tbody tr:hover,
 .ledger-table tbody tr.selected {
-  background: #f8fafc;
+  background: var(--surface-subtle);
+}
+
+.ledger-table tbody tr.selected td {
+  background: #eff6ff;
 }
 
 .ledger-table tbody tr.selected td:first-child {
-  box-shadow: inset 3px 0 0 var(--primary);
+  box-shadow: none;
 }
 
 .ledger-table th,
@@ -2283,6 +2296,28 @@ onBeforeUnmount(() => {
   font-size: 13px;
   padding: 10px 8px;
   vertical-align: top;
+}
+
+.ledger-table th:first-child,
+.ledger-table td:first-child {
+  padding-left: 12px;
+}
+
+.ledger-table th:last-child,
+.ledger-table td:last-child {
+  padding-right: 12px;
+}
+
+.ledger-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ledger-table th,
+.crawl-tables th,
+.fold-card th {
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .ledger-table td strong {
@@ -2319,7 +2354,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-aside {
-  background: #f8fafc;
+  background: var(--surface-subtle);
   display: grid;
   gap: 12px;
   padding: 14px;
@@ -2366,7 +2401,7 @@ onBeforeUnmount(() => {
 
 .merchant-id-panel {
   background: #fff;
-  border: 1px solid #bfdbfe;
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: grid;
   gap: 10px;
@@ -2407,7 +2442,7 @@ onBeforeUnmount(() => {
 .detail-metrics div,
 .usage-list div,
 .conversion-funnel div {
-  background: #fff;
+  background: var(--surface);
   min-width: 0;
   padding: 9px;
 }
@@ -2423,7 +2458,8 @@ onBeforeUnmount(() => {
 }
 
 .detail-tabs {
-  background: #eaf0f7;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: grid;
   gap: 3px;
@@ -2434,7 +2470,7 @@ onBeforeUnmount(() => {
 .detail-tabs button {
   background: transparent;
   border-radius: 6px;
-  color: #475569;
+  color: var(--muted);
   font-size: 12px;
   min-height: 34px;
   padding: 6px 4px;
@@ -2443,6 +2479,7 @@ onBeforeUnmount(() => {
 .detail-tabs button.active {
   background: #fff;
   color: var(--primary-strong);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
 .detail-tab-panel {
@@ -2450,7 +2487,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-block {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 8px;
   padding-top: 12px;
@@ -2466,7 +2503,7 @@ onBeforeUnmount(() => {
 }
 
 .detail-url {
-  background: #fff;
+  background: var(--surface);
   margin: 0;
   overflow-wrap: anywhere;
   padding: 9px;
@@ -2496,7 +2533,7 @@ onBeforeUnmount(() => {
 }
 
 .crawl-panel {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   margin-top: 18px;
   padding-top: 16px;
 }
@@ -2536,6 +2573,13 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   list-style: none;
   padding: 16px 18px;
+}
+
+.fold-card summary:hover {
+  background: var(--surface-subtle);
+}
+.fold-card[open] summary {
+  background: var(--surface-subtle);
 }
 
 .fold-card summary::-webkit-details-marker {
@@ -2595,7 +2639,7 @@ onBeforeUnmount(() => {
 .config-drawer {
   background: var(--surface);
   border-left: 1px solid var(--border);
-  box-shadow: -18px 0 40px rgba(15, 23, 42, 0.16);
+  box-shadow: -8px 0 24px rgba(15, 23, 42, 0.14);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   gap: 14px;
@@ -2606,7 +2650,7 @@ onBeforeUnmount(() => {
 }
 
 .drawer-head {
-  border-bottom: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border);
   padding-bottom: 12px;
 }
 
@@ -2624,7 +2668,7 @@ onBeforeUnmount(() => {
 }
 
 .config-section.important {
-  background: #f8fafc;
+  background: var(--surface-subtle);
 }
 
 .config-section h3 {
@@ -2640,7 +2684,7 @@ onBeforeUnmount(() => {
 
 .fld,
 .check-field {
-  color: #374151;
+  color: var(--text-secondary);
   display: block;
   font-size: 13px;
 }
@@ -2670,7 +2714,7 @@ onBeforeUnmount(() => {
 }
 
 .delivery-preview {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   display: grid;
   gap: 10px;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -2680,8 +2724,8 @@ onBeforeUnmount(() => {
 .delivery-preview code,
 .created code,
 .url-line code {
-  background: #f8fafc;
-  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
   border-radius: 8px;
   display: block;
   font-size: 12px;
@@ -2715,7 +2759,7 @@ onBeforeUnmount(() => {
 
 .drawer-actions {
   background: var(--surface);
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   bottom: 0;
   display: grid;
   gap: 8px;
@@ -2725,7 +2769,7 @@ onBeforeUnmount(() => {
 }
 
 .mobile-store-item {
-  border-top: 1px solid var(--border-soft);
+  border-top: 1px solid var(--border);
   padding: 14px 0;
 }
 

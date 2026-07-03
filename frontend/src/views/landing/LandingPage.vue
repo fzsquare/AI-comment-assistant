@@ -290,7 +290,7 @@ onMounted(load)
       </section>
 
       <!-- 配图素材 -->
-      <section class="card" v-if="payload.images.length">
+      <section class="card" v-if="payload.review && payload.images.length">
         <h2 class="step">配图素材（长按图片保存）</h2>
         <div class="img-row">
           <a
@@ -310,6 +310,7 @@ onMounted(load)
 
 <style scoped>
 .landing {
+  width: 100%;
   max-width: 640px;
   margin: 0 auto;
   padding: 16px 14px;
@@ -317,6 +318,7 @@ onMounted(load)
   padding-right: max(14px, env(safe-area-inset-right));
   padding-bottom: calc(24px + env(safe-area-inset-bottom));
   min-height: 100dvh;
+  overflow-x: hidden;
 }
 
 .store-head {
@@ -329,17 +331,17 @@ onMounted(load)
 }
 .sub {
   margin: 6px 0 0;
-  color: #667085;
+  color: var(--muted);
   font-size: 14px;
   line-height: 1.5;
 }
 
 .card {
-  background: #fff;
-  border-radius: 16px;
+  background: var(--surface);
+  border-radius: 8px;
   padding: 18px 16px;
-  border: 1px solid rgba(219, 228, 240, 0.72);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--border);
+  box-shadow: none;
   margin-bottom: 14px;
 }
 .error-card {
@@ -361,7 +363,7 @@ onMounted(load)
 .error-mark {
   align-items: center;
   background: #fef2f2;
-  border-radius: 12px;
+  border-radius: 8px;
   color: #b42318;
   display: inline-flex;
   font-size: 24px;
@@ -373,7 +375,7 @@ onMounted(load)
 .error-meta {
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 8px;
   display: grid;
   gap: 10px;
   margin: 18px 0 0;
@@ -426,17 +428,19 @@ onMounted(load)
 /* 平台选择 */
 .choice-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 .choice {
   min-height: 54px;
   border: 1.5px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #f8fafc;
   color: #1f2937;
   font-size: 15px;
   font-weight: 600;
+  min-width: 0;
+  padding-inline: 10px;
   touch-action: manipulation;
 }
 .choice.active {
@@ -477,7 +481,7 @@ onMounted(load)
 .tag-panel {
   margin-top: 12px;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #f8fafc;
 }
 .tag-panel summary {
@@ -542,7 +546,7 @@ onMounted(load)
   line-height: 1.75;
   padding: 14px;
   border: 1px solid #dbe2ea;
-  border-radius: 14px;
+  border-radius: 8px;
   background: #fcfdff;
   resize: vertical;
 }
@@ -553,7 +557,7 @@ onMounted(load)
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.65);
-  border-radius: 14px;
+  border-radius: 8px;
   color: #475569;
   font-size: 14px;
 }
@@ -567,7 +571,7 @@ onMounted(load)
   background: #f1f5f9;
   color: #334155;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 15px;
   margin-bottom: 0;
 }
@@ -582,7 +586,7 @@ onMounted(load)
   background: #f1f5f9;
   color: #334155;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 15px;
   font-weight: 600;
 }
@@ -592,7 +596,7 @@ onMounted(load)
   background: #3b82f6;
   color: #fff;
   border: none;
-  border-radius: 12px;
+  border-radius: 8px;
   font-size: 16px;
   font-weight: 600;
 }
@@ -615,7 +619,7 @@ onMounted(load)
   width: 150px;
   height: 110px;
   object-fit: cover;
-  border-radius: 12px;
+  border-radius: 8px;
   flex: 0 0 auto;
 }
 
@@ -647,11 +651,23 @@ onMounted(load)
 }
 .sk-block {
   height: 150px;
-  border-radius: 14px;
+  border-radius: 8px;
 }
 @keyframes sk {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
+}
+
+@media (min-width: 430px) {
+  .choice-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 560px) {
+  .choice-grid {
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  }
 }
 
 @media (max-width: 380px) {
@@ -660,6 +676,14 @@ onMounted(load)
   }
   .act-copy {
     flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-line,
+  .sk-pill,
+  .sk-block {
+    animation: none;
   }
 }
 </style>

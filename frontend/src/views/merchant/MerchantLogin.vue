@@ -60,10 +60,10 @@ async function submit() {
 .auth-card {
   width: min(100%, 420px);
   padding: 22px;
-  background: #fff;
-  border: 1px solid #dbe4f0;
-  border-radius: 18px;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: none;
 }
 .auth-kicker {
   margin: 0 0 8px;
@@ -79,13 +79,13 @@ h1 {
 }
 .auth-sub {
   margin: 8px 0 18px;
-  color: #64748b;
+  color: var(--muted);
 }
 .field {
   display: grid;
   gap: 7px;
   margin-bottom: 14px;
-  color: #334155;
+  color: var(--text-secondary);
   font-size: 14px;
   font-weight: 700;
 }
@@ -97,7 +97,7 @@ h1 {
 }
 .auth-hint {
   margin: 14px 0 0;
-  color: #64748b;
+  color: var(--muted);
   font-size: 13px;
   text-align: center;
 }

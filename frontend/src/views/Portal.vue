@@ -48,10 +48,10 @@
 }
 .entry-notice {
   align-items: center;
-  background: #fff;
-  border: 1px solid #dbe4f0;
-  border-radius: 16px;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: none;
   display: grid;
   gap: 12px;
   grid-template-columns: 48px minmax(0, 1fr);
@@ -64,7 +64,7 @@
   justify-content: center;
   width: 48px;
   height: 48px;
-  border-radius: 14px;
+  border-radius: 8px;
   color: #1d4ed8;
   background: #dbeafe;
 }
