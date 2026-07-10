@@ -10,12 +10,15 @@ test('landing page prefers backend-resolved openUrl when opening platform links'
   assert.match(landingPageSource, /openPlatform\(link\.platformCode, link\.openUrl \|\| link\.targetUrl, link\.backupUrl \|\| link\.targetUrl\)/)
 })
 
-test('mock landing payload returns the configured platform URL', () => {
-  assert.match(mockSource, /openMode: 'official_link'/)
-  assert.match(mockSource, /openUrl: link\.targetUrl \|\| link\.backupUrl \|\| ''/)
-  assert.doesNotMatch(mockSource, /platformHomeAppUrl/)
+test('mock landing payload prefers verified app schemes and preserves official URLs', () => {
+  assert.match(mockSource, /openUrl: platformHomeAppUrl\(link\.platformCode\) \|\| link\.targetUrl \|\| link\.backupUrl \|\| ''/)
+  assert.match(mockSource, /openMode: platformHomeAppUrl\(link\.platformCode\) \? 'app_link' : 'official_link'/)
+  assert.match(mockSource, /function platformHomeAppUrl/)
 })
 
-test('app links do not automatically fall back to a web page', () => {
-  assert.doesNotMatch(deeplinkSource, /window\.setTimeout/)
+test('app links fall back to the configured official URL when the page stays visible', () => {
+  assert.match(deeplinkSource, /window\.setTimeout/)
+  assert.match(deeplinkSource, /visibilitychange/)
+  assert.match(deeplinkSource, /pagehide/)
+  assert.match(deeplinkSource, /fallbackUrl/)
 })

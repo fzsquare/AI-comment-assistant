@@ -13,6 +13,15 @@ const landingPath = (uuid: string) => `${import.meta.env.BASE_URL}landing/${uuid
 const analyticsDataSource = 'mock_review_display_logs'
 const analyticsDataSourceLabel = 'Mock 客户端落地页事件日志'
 
+function platformHomeAppUrl(platformCode: string): string {
+  switch (platformCode.trim().toLowerCase()) {
+    case 'meituan': return 'imeituan://'
+    case 'dianping': return 'dianping://'
+    case 'douyin': return 'snssdk1128://'
+    default: return ''
+  }
+}
+
 // 自包含 SVG 占位图（无需联网也能显示）
 const ph = (text: string, bg: string) =>
   'data:image/svg+xml;utf8,' +
@@ -309,8 +318,8 @@ function landingPayload() {
     images,
     platformLinks: platformLinks.map((link) => ({
       ...link,
-      openMode: 'official_link',
-      openUrl: link.targetUrl || link.backupUrl || ''
+      openMode: platformHomeAppUrl(link.platformCode) ? 'app_link' : 'official_link',
+      openUrl: platformHomeAppUrl(link.platformCode) || link.targetUrl || link.backupUrl || ''
     })),
     remainingDispatchableCount: remaining
   }

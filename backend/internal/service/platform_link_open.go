@@ -68,6 +68,12 @@ func landingPlatformLinkFromModel(link model.StorePlatformLink) LandingPlatformL
 func decideLandingPlatformLinkOpen(link model.StorePlatformLink) landingPlatformLinkOpen {
 	targetURL := strings.TrimSpace(link.TargetURL)
 	backupURL := strings.TrimSpace(link.BackupURL)
+	if appURL := platformHomeAppOpenURL(link.PlatformCode); appURL != "" {
+		return landingPlatformLinkOpen{
+			OpenMode: platformLinkOpenModeApp,
+			OpenURL:  appURL,
+		}
+	}
 	if targetURL != "" {
 		return landingPlatformLinkOpen{
 			OpenMode: platformLinkOpenModeOfficial,
@@ -78,12 +84,6 @@ func decideLandingPlatformLinkOpen(link model.StorePlatformLink) landingPlatform
 		return landingPlatformLinkOpen{
 			OpenMode: platformLinkOpenModeOfficial,
 			OpenURL:  backupURL,
-		}
-	}
-	if appURL := platformHomeAppOpenURL(link.PlatformCode); appURL != "" {
-		return landingPlatformLinkOpen{
-			OpenMode: platformLinkOpenModeApp,
-			OpenURL:  appURL,
 		}
 	}
 	return landingPlatformLinkOpen{
@@ -100,8 +100,6 @@ func platformHomeAppOpenURL(platformCode string) string {
 		return "dianping://"
 	case "douyin":
 		return "snssdk1128://"
-	case "xiaohongshu":
-		return "xhsdiscover://"
 	default:
 		return ""
 	}
