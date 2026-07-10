@@ -177,8 +177,8 @@ async function jump(link: { platformCode: string; targetUrl: string; backupUrl?:
     editedContent: text
   })
   acceptedReviewIds.value = [...acceptedReviewIds.value, payload.value.review.id]
-  // 后端已根据短链 302 结果决定是走官方短链还是走直达唤醒链接。
-  openPlatform(link.platformCode, link.openUrl || link.targetUrl, link.backupUrl)
+  // 后端原样下发后台配置的平台 URL，例如官方提供的 App 唤起链接。
+  openPlatform(link.platformCode, link.openUrl || link.targetUrl, link.backupUrl || link.targetUrl)
 }
 
 onMounted(load)

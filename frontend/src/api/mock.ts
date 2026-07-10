@@ -55,7 +55,7 @@ let images = [
 ]
 
 let platformLinks = [
-  { id: 1, storeId: 1, platformCode: 'meituan', platformName: '美团', buttonText: '打开美团店铺', targetUrl: 'https://www.meituan.com', backupUrl: '', sortNo: 1, status: 1 },
+  { id: 1, storeId: 1, platformCode: 'meituan', platformName: '美团', buttonText: '打开美团', targetUrl: 'https://w.dianping.com/cube/evoke/meituan.html', backupUrl: '', sortNo: 1, status: 1 },
   { id: 2, storeId: 1, platformCode: 'dianping', platformName: '大众点评', buttonText: '打开大众点评店铺', targetUrl: 'https://www.dianping.com', backupUrl: '', sortNo: 2, status: 1 },
   { id: 3, storeId: 1, platformCode: 'xiaohongshu', platformName: '小红书', buttonText: '打开小红书店铺', targetUrl: 'https://www.xiaohongshu.com', backupUrl: '', sortNo: 3, status: 1 },
   { id: 4, storeId: 1, platformCode: 'douyin', platformName: '抖音', buttonText: '打开抖音店铺', targetUrl: 'https://www.douyin.com', backupUrl: '', sortNo: 4, status: 1 }

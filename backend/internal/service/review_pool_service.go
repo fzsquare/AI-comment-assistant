@@ -573,7 +573,7 @@ func (s *ReviewPoolService) InitLandingByUUID(uuid string) (*LandingPayload, err
 		PrimaryPlatformStyle:       store.PrimaryPlatformStyle,
 		Keywords:                   keywords,
 		Images:                     images,
-		PlatformLinks:              buildLandingPlatformLinks(links, defaultRedirectURLResolver),
+		PlatformLinks:              buildLandingPlatformLinks(links),
 		RemainingDispatchableCount: 0,
 	}, nil
 }

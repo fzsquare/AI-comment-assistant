@@ -32,7 +32,7 @@ FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account
 AND NOT EXISTS (SELECT 1 FROM store_images existing WHERE existing.store_id = s.id AND existing.image_url = 'https://images.unsplash.com/photo-1552566626-52f8b828add9');
 
 INSERT INTO store_platform_links (store_id, platform_code, platform_name, button_text, target_url, backup_url, sort_no, status)
-SELECT s.id, 'meituan', '美团', '去美团评论', 'https://www.meituan.com/', 'https://www.meituan.com/', 1, 1
+SELECT s.id, 'meituan', '美团', '打开美团', 'https://w.dianping.com/cube/evoke/meituan.html', 'https://www.meituan.com/', 1, 1
 FROM stores s JOIN merchant_users m ON s.merchant_user_id = m.id WHERE m.account = 'merchant'
 ON DUPLICATE KEY UPDATE platform_name = VALUES(platform_name), button_text = VALUES(button_text), target_url = VALUES(target_url), backup_url = VALUES(backup_url), sort_no = VALUES(sort_no), status = VALUES(status);
 

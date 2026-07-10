@@ -6,61 +6,57 @@ import (
 	"ppk/backend/internal/model"
 )
 
-func TestDecideLandingPlatformLinkOpenUsesOfficialLinkWhenResolvedURLContainsPOIID(t *testing.T) {
-	link := model.StorePlatformLink{
-		TargetURL: "http://dpurl.cn/M5mipdSz",
+func TestDecideLandingPlatformLinkOpenUsesConfiguredURLForSupportedPlatforms(t *testing.T) {
+	tests := []struct {
+		name         string
+		platformCode string
+		targetURL    string
+	}{
+		{name: "meituan", platformCode: "meituan", targetURL: "https://w.dianping.com/cube/evoke/meituan.html"},
+		{name: "dianping", platformCode: "dianping", targetURL: "https://m.dianping.com/shop/123456"},
+		{name: "douyin", platformCode: "douyin", targetURL: "https://www.douyin.com/poi/example"},
+		{name: "xiaohongshu", platformCode: "xiaohongshu", targetURL: "https://www.xiaohongshu.com/explore/example"},
 	}
-	resolvedURL := "https://w.dianping.com/cube/evoke/meituan.html?url=imeituan%3A%2F%2Fwww.meituan.com%2Fmrn%3Fmrn_biz%3Dmeishi%26mrn_entry%3Dfood-poi%26mrn_component%3Dfood-poi%26poiId%3D1953748828%26poiIdEncrypt%3Dabc123&utm_source=appshare"
 
-	got := decideLandingPlatformLinkOpen(link, resolvedURL, nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := decideLandingPlatformLinkOpen(model.StorePlatformLink{
+				PlatformCode: tt.platformCode,
+				TargetURL:    tt.targetURL,
+			})
+
+			if got.OpenMode != platformLinkOpenModeOfficial {
+				t.Fatalf("open mode got %q, want %q", got.OpenMode, platformLinkOpenModeOfficial)
+			}
+			if got.OpenURL != tt.targetURL {
+				t.Fatalf("open url got %q, want configured url %q", got.OpenURL, tt.targetURL)
+			}
+		})
+	}
+}
+
+func TestDecideLandingPlatformLinkOpenFallsBackToAppSchemeOnlyWithoutConfiguredURL(t *testing.T) {
+	got := decideLandingPlatformLinkOpen(model.StorePlatformLink{PlatformCode: "meituan"})
+
+	if got.OpenMode != platformLinkOpenModeApp {
+		t.Fatalf("open mode got %q, want %q", got.OpenMode, platformLinkOpenModeApp)
+	}
+	if got.OpenURL != "imeituan://" {
+		t.Fatalf("open url got %q, want %q", got.OpenURL, "imeituan://")
+	}
+}
+
+func TestDecideLandingPlatformLinkOpenUsesBackupURLForUnknownPlatform(t *testing.T) {
+	backupURL := "https://example.com/backup"
+	got := decideLandingPlatformLinkOpen(model.StorePlatformLink{
+		PlatformCode: "other",
+		BackupURL:    backupURL,
+	})
 
 	if got.OpenMode != platformLinkOpenModeOfficial {
 		t.Fatalf("open mode got %q, want %q", got.OpenMode, platformLinkOpenModeOfficial)
 	}
-	if got.OpenURL != link.TargetURL {
-		t.Fatalf("open url got %q, want %q", got.OpenURL, link.TargetURL)
-	}
-}
-
-func TestDecideLandingPlatformLinkOpenUsesResolvedURLWhenNoPOIIDIsPresent(t *testing.T) {
-	link := model.StorePlatformLink{
-		TargetURL: "http://dpurl.cn/kTryCrPz",
-	}
-	resolvedURL := "https://www.meituan.com/cate/1357905152?utm_source=appshare&utm_fromapp=copy"
-
-	got := decideLandingPlatformLinkOpen(link, resolvedURL, nil)
-
-	if got.OpenMode != platformLinkOpenModeApp {
-		t.Fatalf("open mode got %q, want %q", got.OpenMode, platformLinkOpenModeApp)
-	}
-	if got.OpenURL != resolvedURL {
-		t.Fatalf("open url got %q, want %q", got.OpenURL, resolvedURL)
-	}
-}
-
-func TestDecideLandingPlatformLinkOpenUsesResolvedURLWhenOnlyPOIIDEncryptIsPresent(t *testing.T) {
-	link := model.StorePlatformLink{
-		TargetURL: "http://dpurl.cn/onlyEncrypt",
-	}
-	resolvedURL := "https://w.dianping.com/cube/evoke/meituan.html?url=imeituan%3A%2F%2Fwww.meituan.com%2Fmrn%3FpoiIdEncrypt%3Dabc123&utm_source=appshare"
-
-	got := decideLandingPlatformLinkOpen(link, resolvedURL, nil)
-
-	if got.OpenMode != platformLinkOpenModeApp {
-		t.Fatalf("open mode got %q, want %q", got.OpenMode, platformLinkOpenModeApp)
-	}
-	if got.OpenURL != resolvedURL {
-		t.Fatalf("open url got %q, want %q", got.OpenURL, resolvedURL)
-	}
-}
-
-func TestRedirectURLHasParamFindsNestedPOIIDBeforePOIIDEncrypt(t *testing.T) {
-	resolvedURL := "https://w.dianping.com/cube/evoke/meituan.html?url=imeituan%3A%2F%2Fwww.meituan.com%2Fmrn%3Fmrn_biz%3Dmeishi%26poiId%3D1953748828%26poiIdEncrypt%3Dabc123&utm_source=appshare"
-
-	if !redirectURLHasParam(resolvedURL, "poiId") {
-		t.Fatalf("expected nested poiId to be detected")
-	}
-	if !redirectURLHasParam(resolvedURL, "poiIdEncrypt") {
-		t.Fatalf("expected nested poiIdEncrypt to be detected")
+	if got.OpenURL != backupURL {
+		t.Fatalf("open url got %q, want backup url %q", got.OpenURL, backupURL)
 	}
 }
