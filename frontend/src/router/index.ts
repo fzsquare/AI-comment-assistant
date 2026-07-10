@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 // 消费者碰卡的入口，保持同步导入 → 进首屏主包，开得最快
 import LandingPage from '../views/landing/LandingPage.vue'
 import Portal from '../views/Portal.vue'
+import SchemeTestPage from '../views/SchemeTestPage.vue'
 import type { Role } from '../stores/auth'
 
 // 商家/管理后台按需加载，消费者落地页不下载这些重代码（CRUD 表格/表单）
@@ -39,6 +40,7 @@ const router = createRouter({
   routes: [
     { path: '/', component: Portal },
     { path: '/landing/:token', component: LandingPage },
+    { path: '/scheme-test', component: SchemeTestPage },
     { path: '/merchant/login', component: MerchantLogin },
     { path: '/merchant/console', component: MerchantConsole, meta: { requiresAuth: true, role: 'merchant' } },
     { path: '/admin/login', component: AdminLogin },
