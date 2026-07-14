@@ -170,8 +170,22 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
         async with sem:
             return await _generate_one(writer, reviewer, spec, req, i, industry)
 
+    tasks = [asyncio.create_task(worker(i)) for i in range(req.count)]
+    soft_timeout = max(1, settings.generation_timeout_seconds - 5)
+    done, pending = await asyncio.wait(tasks, timeout=soft_timeout)
+    for task in pending:
+        task.cancel()
+    if pending:
+        logging.warning(
+            "本批次有 %d/%d 条超过 %d 秒未完成，取消后返回已完成结果",
+            len(pending),
+            req.count,
+            soft_timeout,
+        )
+        await asyncio.gather(*pending, return_exceptions=True)
+
     results = await asyncio.gather(
-        *[worker(i) for i in range(req.count)], return_exceptions=True
+        *done, return_exceptions=True
     )
     items: List[ReviewItem] = []
     for i, r in enumerate(results):

@@ -381,7 +381,7 @@ Pinia 状态管理，当前主要是：
 | `AGENT_SERVICE_URL` | backend 内部调用 agent-service 的地址；为空时评论生成直接失败，不使用 mock | `http://127.0.0.1:8090` |
 | `AGENT_INTERNAL_TOKEN` | backend 与 agent-service 共享的内部令牌 | 本地开发令牌 |
 | `AGENT_HTTP_TIMEOUT_SECONDS` | backend 等待 agent-service 单批生成响应的超时秒数 | `300` |
-| `AGENT_GENERATION_BATCH_SIZE` | backend 调用 agent-service 时每批请求的评价数量 | `5` |
+| `AGENT_GENERATION_BATCH_SIZE` | backend 调用 agent-service 时每批请求的评价数量 | `2` |
 
 建议启动时显式传入：
 
@@ -395,7 +395,7 @@ ALLOWED_ORIGINS="https://app.example.com"
 AGENT_SERVICE_URL="http://127.0.0.1:8090"
 AGENT_INTERNAL_TOKEN="<random-32-plus-char-token>"
 AGENT_HTTP_TIMEOUT_SECONDS=300
-AGENT_GENERATION_BATCH_SIZE=5
+AGENT_GENERATION_BATCH_SIZE=2
 ```
 
 ## 6.2 frontend 环境变量
@@ -559,7 +559,7 @@ ALLOWED_ORIGINS="https://app.example.com" \
 AGENT_SERVICE_URL="http://127.0.0.1:8090" \
 AGENT_INTERNAL_TOKEN="<same-token-as-agent-service>" \
 AGENT_HTTP_TIMEOUT_SECONDS=300 \
-AGENT_GENERATION_BATCH_SIZE=5 \
+AGENT_GENERATION_BATCH_SIZE=2 \
 ./ppk-server
 ```
 

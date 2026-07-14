@@ -15,7 +15,7 @@ import (
 // 文案服务响应体上限，防止异常/被劫持的端点流式返回超大 body 耗尽内存
 const maxAgentRespBytes = 8 << 20 // 8MB
 const defaultAgentHTTPTimeout = 300 * time.Second
-const defaultAgentGenerationBatchSize = 5
+const defaultAgentGenerationBatchSize = 2
 
 // AgentReviewGenerator 通过 HTTP 调用 Python 文案 agent 服务生成评价，
 // 实现 ReviewGenerator 接口。只把达到入池等级（默认 B 及以上）的文案返回。

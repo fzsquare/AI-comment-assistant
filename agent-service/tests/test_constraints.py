@@ -278,6 +278,61 @@ def test_load_settings_accepts_generation_timeout():
     assert settings.generation_timeout_seconds == 240
 
 
+def test_load_settings_defaults_to_conservative_concurrency():
+    settings = load_settings({})
+    assert settings.max_concurrency == 2
+
+
+def test_pipeline_returns_completed_items_before_soft_timeout():
+    if ReviewItem is None:
+        print("SKIP  pydantic 未安装，跳过 pipeline partial timeout 测试")
+        return
+    try:
+        import app.pipeline as pipeline
+    except ModuleNotFoundError as exc:
+        if exc.name in {"agents", "openai"}:
+            print("SKIP  openai-agents 未安装，跳过 pipeline partial timeout 测试")
+            return
+        raise
+
+    req = GenerateRequest(
+        store={"store_name": "测试店"},
+        keywords=[],
+        platform="dianping",
+        count=2,
+    )
+    previous_settings = pipeline.settings
+    previous_make_writer = pipeline.make_writer_agent
+    previous_make_reviewer = pipeline.make_reviewer_agent
+    previous_generate_one = pipeline._generate_one
+
+    class FakeSettings:
+        max_concurrency = 2
+        generation_timeout_seconds = 1
+
+        def require_key(self):
+            return None
+
+    async def fake_generate_one(_writer, _reviewer, _spec, _req, index, _industry):
+        if index == 0:
+            return ReviewItem(content="服务自然，菜也稳定。", tags=[], score=80, grade="A")
+        await asyncio.sleep(5)
+
+    pipeline.settings = FakeSettings()
+    pipeline.make_writer_agent = lambda *_args, **_kwargs: object()
+    pipeline.make_reviewer_agent = lambda *_args, **_kwargs: object()
+    pipeline._generate_one = fake_generate_one
+    try:
+        result = asyncio.run(pipeline.generate(req))
+        assert result.produced == 1
+        assert result.items[0].content == "服务自然，菜也稳定。"
+    finally:
+        pipeline.settings = previous_settings
+        pipeline.make_writer_agent = previous_make_writer
+        pipeline.make_reviewer_agent = previous_make_reviewer
+        pipeline._generate_one = previous_generate_one
+
+
 def test_generate_reviews_returns_504_when_generation_times_out():
     if GenerateRequest is None:
         print("SKIP  pydantic 未安装，跳过 agent timeout 路由测试")

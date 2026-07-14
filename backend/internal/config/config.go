@@ -20,7 +20,7 @@ const (
 	defaultAgentMinGrade                  = "B"
 	defaultAgentInternalToken             = "dev-agent-internal-token-change-me"
 	defaultAgentHTTPTimeoutSeconds        = 300
-	defaultAgentGenerationBatchSize       = 5
+	defaultAgentGenerationBatchSize       = 2
 	defaultAllowedOrigins                 = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
 	defaultMaxReviewGenerateCount         = 50
 	defaultReviewTargetCount              = 10

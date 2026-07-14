@@ -31,7 +31,7 @@ func TestValidateAllowsDevelopmentDefaults(t *testing.T) {
 		AgentServiceURL:                "http://127.0.0.1:8090",
 		AgentInternalToken:             "dev-agent-internal-token-change-me",
 		AgentHTTPTimeoutSeconds:        300,
-		AgentGenerationBatchSize:       5,
+		AgentGenerationBatchSize:       2,
 		AllowedOrigins:                 []string{"http://localhost:5173"},
 		MaxReviewGenerateCount:         50,
 		DefaultReviewTargetCount:       10,

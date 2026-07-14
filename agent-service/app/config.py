@@ -29,7 +29,7 @@ class Settings:
     max_revise_rounds: int = 2
 
     # --- 批量生成 ---
-    max_concurrency: int = 5
+    max_concurrency: int = 2
     generation_timeout_seconds: int = 240
 
     # --- 服务 ---
@@ -79,7 +79,7 @@ def load_settings(environ: Mapping[str, str] | None = None) -> Settings:
     max_revise_rounds = _parse_int(
         env, "MAX_REVISE_ROUNDS", 2, errors, min_value=0
     )
-    max_concurrency = _parse_int(env, "MAX_CONCURRENCY", 5, errors, min_value=1)
+    max_concurrency = _parse_int(env, "MAX_CONCURRENCY", 2, errors, min_value=1)
     generation_timeout_seconds = _parse_int(
         env, "AGENT_GENERATION_TIMEOUT_SECONDS", 240, errors, min_value=1
     )
