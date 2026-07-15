@@ -178,6 +178,7 @@ HTTP 接口层，按角色拆分：
 ### `src/router`
 前端路由定义，当前主要页面：
 - `/landing/:token`
+- `/landing/:token/review/:platformCode`
 - `/merchant/login`
 - `/merchant/console`
 - `/admin/login`
@@ -192,8 +193,8 @@ Pinia 状态管理，当前主要是：
 页面按角色拆分：
 
 - `landing/`
-  - 消费者落地页
-  - 先选择评价平台，再按平台展示文案、复制、换一换、平台入口跳转
+  - 平台选择页只展示门店和可用评价平台
+  - 评论页按 `platformCode` 展示可编辑文案、复制、换一换和平台入口跳转
 
 - `merchant/`
   - 商家登录页

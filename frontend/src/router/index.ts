@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
-// 消费者碰卡的入口，保持同步导入 → 进首屏主包，开得最快
-import LandingPage from '../views/landing/LandingPage.vue'
+// 消费者碰卡的两页入口保持同步导入，平台选择和评价页都进轻量首屏主包。
+import LandingPlatformPage from '../views/landing/LandingPlatformPage.vue'
+import LandingReviewPage from '../views/landing/LandingReviewPage.vue'
 import Portal from '../views/Portal.vue'
 import SchemeTestPage from '../views/SchemeTestPage.vue'
 import type { Role } from '../stores/auth'
@@ -39,7 +40,8 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', component: Portal },
-    { path: '/landing/:token', component: LandingPage },
+    { path: '/landing/:token', name: 'landing-platforms', component: LandingPlatformPage },
+    { path: '/landing/:token/review/:platformCode', name: 'landing-review', component: LandingReviewPage },
     { path: '/scheme-test', component: SchemeTestPage },
     { path: '/merchant/login', component: MerchantLogin },
     { path: '/merchant/console', component: MerchantConsole, meta: { requiresAuth: true, role: 'merchant' } },

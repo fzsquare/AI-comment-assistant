@@ -1,0 +1,457 @@
+.landing-page {
+  width: 100%;
+  max-width: 640px;
+  min-height: 100dvh;
+  margin: 0 auto;
+  padding: calc(20px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  background: #faf9f6;
+  box-shadow: 0 0 0 100vmax #faf9f6;
+  clip-path: inset(0 -100vmax);
+}
+
+.landing-store-head {
+  display: grid;
+  gap: 4px;
+  padding: 24px 4px;
+}
+
+.landing-store-head h1,
+.landing-panel h1,
+.landing-panel h2 {
+  margin: 0;
+  color: #1d2733;
+  letter-spacing: -0.02em;
+}
+
+.landing-store-head h1,
+.landing-panel h1 {
+  font-size: clamp(24px, 7vw, 32px);
+  line-height: 1.2;
+  font-weight: 720;
+}
+
+.landing-panel h2 {
+  font-size: 20px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+.landing-eyebrow {
+  margin: 0;
+  color: #52606d;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.landing-panel {
+  padding: 24px 0;
+  border-top: 1px solid #d9d6cf;
+}
+
+.landing-platform-panel {
+  display: grid;
+  gap: 20px;
+}
+
+.landing-platform-list {
+  display: grid;
+  gap: 12px;
+}
+
+.landing-platform-button {
+  display: flex;
+  min-height: 60px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid #cfd5dd;
+  border-radius: 10px;
+  background: #fff;
+  color: #1d2733;
+  font-size: 17px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.landing-platform-button:hover {
+  border-color: #173f73;
+  background: #f7f9fc;
+  color: #173f73;
+}
+
+.landing-platform-button span:last-child {
+  color: #173f73;
+  font-size: 20px;
+}
+
+.landing-trust {
+  margin: 8px 4px 0;
+  color: #52606d;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.landing-empty {
+  padding: 24px;
+  border: 1px dashed #b9c1ca;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.landing-empty h2 {
+  font-size: 18px;
+}
+
+.landing-empty p,
+.landing-error p {
+  margin: 8px 0 0;
+  color: #52606d;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.landing-error {
+  margin-top: 14vh;
+}
+
+.landing-error-mark {
+  display: inline-grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 16px;
+  place-items: center;
+  border-radius: 10px;
+  background: #fbeceb;
+  color: #a52a2a;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.landing-secondary-button {
+  margin-top: 20px;
+  border: 1px solid #b9c1ca;
+  background: #fff;
+  color: #173f73;
+  font-weight: 700;
+}
+
+.landing-secondary-button:hover {
+  background: #f4f6f8;
+}
+
+.landing-skeleton {
+  display: block;
+  overflow: hidden;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #ebe8e1 25%, #f6f4ef 50%, #ebe8e1 75%);
+  background-size: 200% 100%;
+  animation: landing-shimmer 1.4s infinite linear;
+}
+
+.landing-skeleton-title {
+  width: 58%;
+  height: 32px;
+}
+
+.landing-skeleton-copy,
+.landing-skeleton-heading {
+  width: 38%;
+  height: 18px;
+}
+
+.landing-skeleton-button {
+  width: 100%;
+  height: 60px;
+}
+
+.landing-skeleton-review {
+  width: 100%;
+  height: 240px;
+  margin-top: 20px;
+}
+
+@keyframes landing-shimmer {
+  to { background-position: -200% 0; }
+}
+
+.landing-back-row {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+}
+
+.landing-back-link {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: #173f73;
+  font-size: 16px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.landing-review-head {
+  padding-top: 16px;
+}
+
+.landing-review-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.landing-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.landing-section-heading > div {
+  display: grid;
+  gap: 6px;
+}
+
+.landing-review-wrap {
+  position: relative;
+}
+
+.landing-review-editor {
+  width: 100%;
+  min-height: 232px;
+  padding: 16px;
+  border: 1px solid #bcc5cf;
+  border-radius: 10px;
+  background: #fff;
+  color: #1d2733;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+  resize: vertical;
+}
+
+.landing-review-editor:focus {
+  border-color: #173f73;
+}
+
+.landing-busy-mask {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: rgba(250, 249, 246, 0.84);
+  color: #34475b;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.landing-review-placeholder {
+  min-height: 232px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 1px solid #d9d6cf;
+  border-radius: 10px;
+  background: #fff;
+  color: #52606d;
+  font-size: 16px;
+  text-align: center;
+}
+
+.landing-tag-panel,
+.landing-optional-media {
+  border-top: 1px solid #d9d6cf;
+  border-bottom: 1px solid #d9d6cf;
+  background: transparent;
+}
+
+.landing-tag-panel summary,
+.landing-optional-media summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #34475b;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.landing-tag-panel summary::after,
+.landing-optional-media summary::after {
+  content: '展开';
+  color: #173f73;
+  font-size: 14px;
+}
+
+.landing-tag-panel[open] summary::after,
+.landing-optional-media[open] summary::after {
+  content: '收起';
+}
+
+.landing-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 0 16px;
+}
+
+.landing-chip {
+  min-height: 44px;
+  padding: 8px 14px;
+  border: 1px solid #bcc5cf;
+  border-radius: 10px;
+  background: #fff;
+  color: #34475b;
+  font-size: 16px;
+  font-weight: 650;
+}
+
+.landing-chip.is-active {
+  border-color: #173f73;
+  background: #eaf0f7;
+  color: #173f73;
+}
+
+.landing-action-message {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 6px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.landing-action-message.is-error {
+  border: 1px solid #efc5c2;
+  background: #fbeceb;
+  color: #8f2424;
+}
+
+.landing-action-message.is-success {
+  border: 1px solid #b8d8c6;
+  background: #edf7f1;
+  color: #17603a;
+}
+
+.landing-action-message button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 8px;
+  background: transparent;
+  color: currentColor;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.landing-optional-media {
+  margin-top: 8px;
+}
+
+.landing-image-list {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 0 0 16px;
+  scrollbar-width: thin;
+}
+
+.landing-image-list a {
+  flex: 0 0 152px;
+}
+
+.landing-image-list img {
+  width: 152px;
+  height: 108px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.landing-review-trust {
+  margin-top: 20px;
+  text-align: center;
+}
+
+.landing-review-actions {
+  position: sticky;
+  z-index: 10;
+  bottom: 0;
+  display: grid;
+  gap: 10px;
+  margin: 24px -16px calc(-32px - env(safe-area-inset-bottom));
+  padding: 12px max(16px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left));
+  border-top: 1px solid #d9d6cf;
+  background: rgba(250, 249, 246, 0.96);
+  backdrop-filter: blur(12px);
+}
+
+.landing-review-actions.is-editing {
+  position: static;
+  margin: 24px 0 0;
+  padding: 0;
+  border-top: 0;
+  background: transparent;
+  backdrop-filter: none;
+}
+
+.landing-primary-button {
+  width: 100%;
+  min-height: 54px;
+  border-radius: 10px;
+  background: #173f73;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 750;
+}
+
+.landing-primary-button:hover {
+  background: #102f58;
+}
+
+.landing-secondary-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.landing-secondary-actions button {
+  min-height: 48px;
+  border: 1px solid #bcc5cf;
+  border-radius: 10px;
+  background: #fff;
+  color: #34475b;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.landing-secondary-actions button:hover {
+  background: #f4f6f8;
+}
+
+@media (min-width: 640px) {
+  .landing-page {
+    padding-inline: 24px;
+  }
+
+  .landing-review-actions {
+    margin-inline: -24px;
+    padding-inline: 24px;
+  }
+
+  .landing-review-actions.is-editing {
+    margin-inline: 0;
+    padding-inline: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-skeleton {
+    animation: none;
+  }
+}
