@@ -8,6 +8,9 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 const (
@@ -87,7 +90,7 @@ func Load() Config {
 		AppEnv:                         appEnv,
 		AppHost:                        getEnv("APP_HOST", defaultAppHost),
 		AppPort:                        getEnv("APP_PORT", defaultAppPort),
-		MySQLDSN:                       getEnv("MYSQL_DSN", mysqlFallback),
+		MySQLDSN:                       normalizeMySQLDSN(getEnv("MYSQL_DSN", mysqlFallback)),
 		JWTSecret:                      getEnv("JWT_SECRET", jwtFallback),
 		AllowedOrigins:                 parseCSV(getEnv("ALLOWED_ORIGINS", allowedOriginsFallback)),
 		AgentServiceURL:                strings.TrimRight(getEnv("AGENT_SERVICE_URL", defaultAgentServiceURL), "/"),
@@ -106,6 +109,26 @@ func Load() Config {
 		ReviewCrawlHTTPTimeoutSeconds:  getEnvInt("REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS", defaultReviewCrawlHTTPTimeoutSeconds),
 		ReviewCrawlMaxDownloadBytes:    getEnvInt("REVIEW_CRAWL_MAX_DOWNLOAD_BYTES", defaultReviewCrawlMaxDownloadBytes),
 	}
+}
+
+func normalizeMySQLDSN(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return raw
+	}
+	parsed, err := mysql.ParseDSN(raw)
+	if err != nil {
+		return raw
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
+	}
+	parsed.Loc = loc
+	if parsed.Params == nil {
+		parsed.Params = map[string]string{}
+	}
+	parsed.Params["time_zone"] = "'+08:00'"
+	return parsed.FormatDSN()
 }
 
 func (c Config) Validate() error {

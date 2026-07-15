@@ -113,6 +113,7 @@ CREATE TABLE IF NOT EXISTS review_items (
   is_dispatched TINYINT(1) NOT NULL DEFAULT 0,
   status VARCHAR(32) NOT NULL DEFAULT 'available',
   dispatched_at DATETIME NULL,
+  dispatched_session_id VARCHAR(128) NOT NULL DEFAULT '',
   used_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -136,6 +137,8 @@ CREATE TABLE IF NOT EXISTS review_display_logs (
   INDEX idx_review_logs_store_id (store_id),
   INDEX idx_review_logs_session_id (session_id),
   INDEX idx_review_logs_store_action_created (store_id, action_type, created_at),
+  INDEX idx_review_logs_store_action_created_platform_session (store_id, action_type, created_at, platform_code, session_id),
+  INDEX idx_review_logs_store_platform_action_created_session (store_id, platform_code, action_type, created_at, session_id),
   CONSTRAINT fk_log_store FOREIGN KEY (store_id) REFERENCES stores(id)
 );
 

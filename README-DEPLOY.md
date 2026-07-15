@@ -227,7 +227,7 @@ backend 通过环境变量读取配置：
 | `APP_HOST` | 后端监听地址，脚本部署固定为本机 | `127.0.0.1` |
 | `APP_PORT` | 后端监听端口 | `8080` |
 | `APP_ENV` | 运行环境，生产使用 `production` | `production` |
-| `MYSQL_DSN` | MySQL 连接串，使用最小权限账号 | `ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local` |
+| `MYSQL_DSN` | MySQL 连接串，使用最小权限账号 | `ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai` |
 | `JWT_SECRET` | JWT 密钥，至少 32 字符 | `<random-32-plus-char-secret>` |
 | `ALLOWED_ORIGINS` | 允许访问 API 的前端 origin，逗号分隔 | `https://app.example.com` |
 | `AGENT_SERVICE_URL` | backend 内部调用 agent-service 的地址 | `http://127.0.0.1:8090` |
@@ -236,6 +236,8 @@ backend 通过环境变量读取配置：
 > 当前实现中，backend 启动时**不自动建表**，默认依赖 `database/schema.sql` 已经执行完成。
 > 生产环境会校验 `APP_ENV=production` 下的关键配置，缺少强 `JWT_SECRET`、`MYSQL_DSN`、`ALLOWED_ORIGINS` 或 `AGENT_INTERNAL_TOKEN` 会拒绝启动。
 
+backend 会统一使用 `Asia/Shanghai` / `+08:00` 解释和写入 MySQL `DATETIME`。旧库首次应用 `0007_publish_stats_index.sql` 前，必须确认旧 backend 主机的 `Local` 时区；若历史值按 UTC 或其他时区写入，先备份并按明确切换时间迁移。完成审计后在 `.env.deploy` 设置 `HISTORICAL_DATETIME_TIMEZONE_AUDITED=true`。部署脚本检测到旧评价日志但未确认时会停止；新库和空库不会触发。
+
 ## 5.2 本地直接启动
 
 ```bash
@@ -243,7 +245,7 @@ cd backend
 APP_ENV=development \
 APP_HOST=127.0.0.1 \
 APP_PORT=8080 \
-MYSQL_DSN="ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local" \
+MYSQL_DSN="ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai" \
 JWT_SECRET="dev-jwt-secret-change-me-32-bytes" \
 ALLOWED_ORIGINS="http://127.0.0.1:5173,http://localhost:5173" \
 AGENT_SERVICE_URL="http://127.0.0.1:8090" \
@@ -260,7 +262,7 @@ go build -o ppk-server ./cmd/server
 APP_ENV=production \
 APP_HOST=127.0.0.1 \
 APP_PORT=18989 \
-MYSQL_DSN="ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local" \
+MYSQL_DSN="ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai" \
 JWT_SECRET="<random-32-plus-char-secret>" \
 ALLOWED_ORIGINS="https://app.example.com" \
 AGENT_SERVICE_URL="http://127.0.0.1:8090" \
@@ -282,7 +284,7 @@ WorkingDirectory=/opt/ppk/backend
 Environment="APP_ENV=production"
 Environment="APP_HOST=127.0.0.1"
 Environment="APP_PORT=18989"
-Environment="MYSQL_DSN=ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
+Environment="MYSQL_DSN=ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
 Environment="JWT_SECRET=<random-32-plus-char-secret>"
 Environment="ALLOWED_ORIGINS=https://app.example.com"
 Environment="AGENT_SERVICE_URL=http://127.0.0.1:8090"

@@ -9,7 +9,7 @@ import {
 } from '../../api/public'
 import { copyToClipboard } from '../../utils/clipboard'
 import { openPlatform } from '../../utils/deeplink'
-import { readLandingSession, trackLandingEvent } from './landingFlow'
+import { discardLandingSession, isLandingSessionError, readLandingSession, trackLandingEvent } from './landingFlow'
 
 const route = useRoute()
 const router = useRouter()
@@ -89,7 +89,11 @@ async function load() {
 
 async function fetchReview(tag: string, actionType: string) {
   const session = readLandingSession(token.value)
-  if (!session || !platform.value || switching.value) return false
+  if (!session) {
+    await redirectToPlatformSelection()
+    return false
+  }
+  if (!platform.value || switching.value) return false
   switching.value = true
   clearActionMessage()
   try {
@@ -109,6 +113,11 @@ async function fetchReview(tag: string, actionType: string) {
     }
     return true
   } catch (reviewError: any) {
+    if (isLandingSessionError(reviewError)) {
+      discardLandingSession(token.value, session.sessionId)
+      await redirectToPlatformSelection()
+      return false
+    }
     actionError.value = reviewError?.response?.data?.message || '暂时没有可用评价，请返回选择平台或联系店员。'
     return false
   } finally {
@@ -155,7 +164,11 @@ function recordCopy(sessionId: string, text: string) {
 async function copyReview() {
   const session = readLandingSession(token.value)
   const text = editedContent.value.trim()
-  if (!session || !review.value || !text || actionPending.value) return
+  if (!session) {
+    await redirectToPlatformSelection()
+    return
+  }
+  if (!review.value || !text || actionPending.value) return
   actionPending.value = true
   clearActionMessage()
   try {
@@ -174,7 +187,11 @@ async function copyAndOpenPlatform() {
   const session = readLandingSession(token.value)
   const link = platform.value
   const text = editedContent.value.trim()
-  if (!session || !review.value || !link || !text || actionPending.value) return
+  if (!session) {
+    await redirectToPlatformSelection()
+    return
+  }
+  if (!review.value || !link || !text || actionPending.value) return
   actionPending.value = true
   clearActionMessage()
   try {

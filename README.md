@@ -390,7 +390,7 @@ Pinia 状态管理，当前主要是：
 APP_ENV=production
 APP_HOST=127.0.0.1
 APP_PORT=18989
-MYSQL_DSN="ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
+MYSQL_DSN="ppk_app:<password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
 JWT_SECRET="<random-32-plus-char-secret>"
 ALLOWED_ORIGINS="https://app.example.com"
 AGENT_SERVICE_URL="http://127.0.0.1:8090"
@@ -398,6 +398,10 @@ AGENT_INTERNAL_TOKEN="<random-32-plus-char-token>"
 AGENT_HTTP_TIMEOUT_SECONDS=300
 AGENT_GENERATION_BATCH_SIZE=2
 ```
+
+backend 会把 MySQL driver location 与连接级 `time_zone` 统一为 `Asia/Shanghai` / `+08:00`，确保 7/30 天看板按中国自然日分桶。既有数据库升级前必须先确认旧 backend 所在主机的 `Local` 时区：如果历史 `DATETIME` 是在 UTC 或其他时区写入，先备份并制定带明确切换时间的历史数据迁移；不要直接对未知口径的全表时间统一加减 8 小时。全新数据库无需处理。
+
+一键部署在首次应用 `0007_publish_stats_index.sql` 且检测到旧评价日志时会停止。完成上述审计及必要迁移后，在 `.env.deploy` 设置 `HISTORICAL_DATETIME_TIMEZONE_AUDITED=true` 再重新部署；新库和空库不会触发门禁。
 
 ## 6.2 frontend 环境变量
 
@@ -554,7 +558,7 @@ go build -o ppk-server ./cmd/server
 APP_ENV=production \
 APP_HOST=127.0.0.1 \
 APP_PORT=18989 \
-MYSQL_DSN="ppk_app:<strong-password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local" \
+MYSQL_DSN="ppk_app:<strong-password>@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai" \
 JWT_SECRET="<random-32-plus-char-secret>" \
 ALLOWED_ORIGINS="https://app.example.com" \
 AGENT_SERVICE_URL="http://127.0.0.1:8090" \
@@ -678,7 +682,7 @@ mysql -h 127.0.0.1 -P 3306 -u root -p111111 ppk < database/seed.sql
 cd backend
 APP_ENV=development \
 APP_PORT=8080 \
-MYSQL_DSN="ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local" \
+MYSQL_DSN="ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai" \
 JWT_SECRET="dev-jwt-secret-change-me-32-bytes" \
 ALLOWED_ORIGINS="http://127.0.0.1:5173,http://localhost:5173" \
 AGENT_SERVICE_URL="http://127.0.0.1:8090" \

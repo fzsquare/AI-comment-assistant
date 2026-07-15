@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 func TestValidateRejectsProductionWithMissingRequiredSecrets(t *testing.T) {
@@ -182,5 +184,22 @@ func TestListenAddressUsesConfiguredHostAndPort(t *testing.T) {
 
 	if got, want := cfg.ListenAddress(), "127.0.0.1:18989"; got != want {
 		t.Fatalf("got listen address %q, want %q", got, want)
+	}
+}
+
+func TestLoadPinsMySQLConnectionsToShanghaiTimezone(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("MYSQL_DSN", "user:password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local")
+
+	cfg := Load()
+	parsed, err := mysql.ParseDSN(cfg.MySQLDSN)
+	if err != nil {
+		t.Fatalf("parse normalized DSN: %v", err)
+	}
+	if got := parsed.Loc.String(); got != "Asia/Shanghai" {
+		t.Fatalf("mysql loc got %q, want Asia/Shanghai", got)
+	}
+	if got := parsed.Params["time_zone"]; got != "'+08:00'" {
+		t.Fatalf("mysql session time_zone got %q, want '+08:00'", got)
 	}
 }

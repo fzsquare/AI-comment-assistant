@@ -1,6 +1,11 @@
 package merchant
 
-import "testing"
+import (
+	"testing"
+	"time"
+
+	"ppk/backend/internal/service"
+)
 
 func TestNormalizeGenerationPreferencesDefaultsAndDedupes(t *testing.T) {
 	prefs, err := normalizeGenerationPreferenceRequest(generationPreferenceRequest{
@@ -69,4 +74,51 @@ func repeatRune(r rune, n int) string {
 		out[i] = r
 	}
 	return string(out)
+}
+
+func TestSummarizePlatformContentHealthRequiresEveryEnabledPlatform(t *testing.T) {
+	hasInventory, generationFailed := summarizePlatformContentHealth(
+		[]string{"meituan", "dianping"},
+		map[string]int64{"meituan": 12},
+		map[string]string{"meituan": "success", "dianping": "failed"},
+	)
+
+	if hasInventory {
+		t.Fatal("one stocked platform must not hide another enabled platform with no inventory")
+	}
+	if !generationFailed {
+		t.Fatal("a failed latest task on any enabled platform should be surfaced")
+	}
+}
+
+type legacyStatsCounterFunc func(actionType string, platformCode string, start time.Time, end time.Time) (int64, error)
+
+func (fn legacyStatsCounterFunc) Count(actionType string, platformCode string, start time.Time, end time.Time) (int64, error) {
+	return fn(actionType, platformCode, start, end)
+}
+
+func TestLoadLegacyPublishStatsKeepsAllTimeTotalsAndTwelvePeriodSeries(t *testing.T) {
+	counter := legacyStatsCounterFunc(func(actionType string, platformCode string, start time.Time, end time.Time) (int64, error) {
+		if start.IsZero() && end.IsZero() {
+			switch actionType {
+			case service.ReviewActionPlatformLinkClick:
+				return 900, nil
+			case service.ReviewActionPlatformSelect:
+				return 400, nil
+			}
+		}
+		return 7, nil
+	})
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, dashboardLocation())
+
+	legacy, err := loadLegacyPublishStats(counter, "meituan", now)
+	if err != nil {
+		t.Fatalf("load legacy stats: %v", err)
+	}
+	if legacy.totalClicks != 900 || legacy.totalVisits != 400 {
+		t.Fatalf("legacy all-time totals changed semantics: %#v", legacy)
+	}
+	if len(legacy.weeklySeries) != 12 || len(legacy.monthlySeries) != 12 {
+		t.Fatalf("legacy series must retain 12 periods: weeks=%d months=%d", len(legacy.weeklySeries), len(legacy.monthlySeries))
+	}
 }

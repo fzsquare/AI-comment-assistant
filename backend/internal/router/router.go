@@ -56,7 +56,8 @@ func buildReviewPoolService(cfg config.Config, db *gorm.DB) *service.ReviewPoolS
 		)
 	}
 	return &service.ReviewPoolService{
-		DB:        db,
-		Generator: generator,
+		DB:            db,
+		Generator:     generator,
+		SessionSecret: cfg.JWTSecret,
 	}
 }

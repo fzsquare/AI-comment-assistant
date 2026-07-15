@@ -13,6 +13,7 @@ import (
 const (
 	ReviewActionPageView          = "page_view"
 	ReviewActionPlatformSelect    = "platform_select"
+	ReviewActionReviewCopy        = "review_copy"
 	ReviewActionPlatformLinkClick = "platform_link_click"
 )
 

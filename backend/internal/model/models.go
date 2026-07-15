@@ -124,32 +124,33 @@ type StorePlatformLink struct {
 }
 
 type ReviewItem struct {
-	ID                uint       `gorm:"primaryKey" json:"id"`
-	StoreID           uint       `gorm:"index;not null" json:"storeId"`
-	PlatformStyle     string     `gorm:"size:64;not null" json:"platformStyle"`
-	Content           string     `gorm:"type:text;not null" json:"content"`
-	Tags              string     `gorm:"size:255;default:''" json:"tags"`
-	SourceType        string     `gorm:"size:32;not null" json:"sourceType"`
-	GenerationBatchNo string     `gorm:"size:64;not null" json:"generationBatchNo"`
-	IsDispatched      bool       `gorm:"default:false;not null" json:"isDispatched"`
-	Status            string     `gorm:"size:32;default:'available';not null" json:"status"`
-	DispatchedAt      *time.Time `json:"dispatchedAt"`
-	UsedAt            *time.Time `json:"usedAt"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	ID                  uint       `gorm:"primaryKey" json:"id"`
+	StoreID             uint       `gorm:"index;not null" json:"storeId"`
+	PlatformStyle       string     `gorm:"size:64;not null" json:"platformStyle"`
+	Content             string     `gorm:"type:text;not null" json:"content"`
+	Tags                string     `gorm:"size:255;default:''" json:"tags"`
+	SourceType          string     `gorm:"size:32;not null" json:"sourceType"`
+	GenerationBatchNo   string     `gorm:"size:64;not null" json:"generationBatchNo"`
+	IsDispatched        bool       `gorm:"default:false;not null" json:"isDispatched"`
+	Status              string     `gorm:"size:32;default:'available';not null" json:"status"`
+	DispatchedAt        *time.Time `json:"dispatchedAt"`
+	DispatchedSessionID string     `gorm:"size:128;default:'';not null" json:"-"`
+	UsedAt              *time.Time `json:"usedAt"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 type ReviewDisplayLog struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
-	StoreID      uint      `gorm:"index;index:idx_review_logs_store_action_created,priority:1;not null" json:"storeId"`
+	StoreID      uint      `gorm:"index;index:idx_review_logs_store_action_created,priority:1;index:idx_review_logs_store_action_created_platform_session,priority:1;index:idx_review_logs_store_platform_action_created_session,priority:1;not null" json:"storeId"`
 	ReviewItemID uint      `gorm:"index" json:"reviewItemId"`
 	NFCTagID     uint      `gorm:"index" json:"nfcTagId"`
-	SessionID    string    `gorm:"size:128;index;not null" json:"sessionId"`
-	ActionType   string    `gorm:"size:64;index:idx_review_logs_store_action_created,priority:2;not null" json:"actionType"`
-	PlatformCode string    `gorm:"size:64" json:"platformCode"`
+	SessionID    string    `gorm:"size:128;index;index:idx_review_logs_store_action_created_platform_session,priority:5;index:idx_review_logs_store_platform_action_created_session,priority:5;not null" json:"sessionId"`
+	ActionType   string    `gorm:"size:64;index:idx_review_logs_store_action_created,priority:2;index:idx_review_logs_store_action_created_platform_session,priority:2;index:idx_review_logs_store_platform_action_created_session,priority:3;not null" json:"actionType"`
+	PlatformCode string    `gorm:"size:64;index:idx_review_logs_store_action_created_platform_session,priority:4;index:idx_review_logs_store_platform_action_created_session,priority:2" json:"platformCode"`
 	ClientIP     string    `gorm:"size:64" json:"clientIp"`
 	UserAgent    string    `gorm:"size:255" json:"userAgent"`
-	CreatedAt    time.Time `gorm:"index:idx_review_logs_store_action_created,priority:3" json:"createdAt"`
+	CreatedAt    time.Time `gorm:"index:idx_review_logs_store_action_created,priority:3;index:idx_review_logs_store_action_created_platform_session,priority:3;index:idx_review_logs_store_platform_action_created_session,priority:4" json:"createdAt"`
 }
 
 type ReviewFeedback struct {

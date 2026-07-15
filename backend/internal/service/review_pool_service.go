@@ -1,9 +1,14 @@
 package service
 
 import (
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,14 +20,17 @@ import (
 )
 
 type ReviewPoolService struct {
-	DB        *gorm.DB
-	Generator ReviewGenerator
+	DB            *gorm.DB
+	Generator     ReviewGenerator
+	SessionSecret string
 
 	refillMu       sync.Mutex
 	refillInFlight map[string]struct{}
 }
 
 const maxGenerationReferenceReviews = 5
+
+const landingSessionTTL = 24 * time.Hour
 
 type LandingPayload struct {
 	SessionID                  string                `json:"sessionId"`
@@ -477,7 +485,7 @@ func (s *ReviewPoolService) EnsureDispatchableStockAsync(storeID uint, platformC
 // 并发安全：用「条件更新 + 重试」而非 select-then-save，避免两个并发请求
 // 选中同一行后双双发放（双发）。UPDATE ... WHERE is_dispatched=false 是原子的，
 // RowsAffected==0 说明被别的请求抢先发放了，重新选一条。
-func (s *ReviewPoolService) dispatchOne(storeID uint, platformCode string, tag string) (*model.ReviewItem, error) {
+func (s *ReviewPoolService) dispatchOne(storeID uint, platformCode string, tag string, sessionID string) (*model.ReviewItem, error) {
 	const maxAttempts = 5
 	// base 每次重建：GORM 会就地改写 *gorm.DB，链式条件不能复用
 	base := func() *gorm.DB {
@@ -505,13 +513,14 @@ func (s *ReviewPoolService) dispatchOne(storeID uint, platformCode string, tag s
 		now := time.Now()
 		res := s.DB.Model(&model.ReviewItem{}).
 			Where("id = ? AND is_dispatched = ?", review.ID, false).
-			Updates(map[string]any{"is_dispatched": true, "dispatched_at": now})
+			Updates(map[string]any{"is_dispatched": true, "dispatched_at": now, "dispatched_session_id": sessionID})
 		if res.Error != nil {
 			return nil, res.Error
 		}
 		if res.RowsAffected == 1 {
 			review.IsDispatched = true
 			review.DispatchedAt = &now
+			review.DispatchedSessionID = sessionID
 			return &review, nil
 		}
 		// RowsAffected==0：被并发抢走，重试
@@ -520,8 +529,8 @@ func (s *ReviewPoolService) dispatchOne(storeID uint, platformCode string, tag s
 	return nil, gorm.ErrRecordNotFound
 }
 
-func (s *ReviewPoolService) dispatchAvailable(store model.Store, platformCode string, tag string) (*model.ReviewItem, error) {
-	review, err := s.dispatchOne(store.ID, platformCode, tag)
+func (s *ReviewPoolService) dispatchAvailable(store model.Store, platformCode string, tag string, sessionID string) (*model.ReviewItem, error) {
+	review, err := s.dispatchOne(store.ID, platformCode, tag, sessionID)
 	if err == nil {
 		return review, nil
 	}
@@ -567,8 +576,13 @@ func (s *ReviewPoolService) InitLandingByUUID(uuid string) (*LandingPayload, err
 	var links []model.StorePlatformLink
 	s.DB.Where("store_id = ? AND status = ?", store.ID, model.StatusEnabled).Order("sort_no asc, id asc").Find(&links)
 
+	sessionID, err := s.IssueLandingSession(uuid, time.Now())
+	if err != nil {
+		return nil, errors.New("页面暂不可用")
+	}
+
 	return &LandingPayload{
-		SessionID:                  utils.RandomString(16),
+		SessionID:                  sessionID,
 		StoreName:                  store.StoreName,
 		PrimaryPlatformStyle:       store.PrimaryPlatformStyle,
 		Keywords:                   keywords,
@@ -578,8 +592,57 @@ func (s *ReviewPoolService) InitLandingByUUID(uuid string) (*LandingPayload, err
 	}, nil
 }
 
+func (s *ReviewPoolService) IssueLandingSession(storeUUID string, now time.Time) (string, error) {
+	secret := strings.TrimSpace(s.SessionSecret)
+	storeUUID = strings.TrimSpace(storeUUID)
+	if secret == "" || storeUUID == "" {
+		return "", errors.New("landing session configuration is invalid")
+	}
+	nonce := make([]byte, 12)
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	expiresAt := strconv.FormatInt(now.Add(landingSessionTTL).Unix(), 36)
+	payload := expiresAt + "." + base64.RawURLEncoding.EncodeToString(nonce)
+	signature := signLandingSession(storeUUID, payload, secret)
+	return payload + "." + signature, nil
+}
+
+func (s *ReviewPoolService) VerifyLandingSession(storeUUID string, token string, now time.Time) error {
+	secret := strings.TrimSpace(s.SessionSecret)
+	storeUUID = strings.TrimSpace(storeUUID)
+	parts := strings.Split(token, ".")
+	if secret == "" || storeUUID == "" || len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return errors.New("landing session is invalid")
+	}
+	payload := parts[0] + "." + parts[1]
+	wantSignature := signLandingSession(storeUUID, payload, secret)
+	if !hmac.Equal([]byte(parts[2]), []byte(wantSignature)) {
+		return errors.New("landing session is invalid")
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(parts[1]); err != nil {
+		return errors.New("landing session is invalid")
+	}
+	expiresAt, err := strconv.ParseInt(parts[0], 36, 64)
+	if err != nil {
+		return errors.New("landing session is invalid")
+	}
+	if expiresAt <= 0 || now.Unix() >= expiresAt {
+		return errors.New("landing session has expired")
+	}
+	return nil
+}
+
+func signLandingSession(storeUUID string, payload string, secret string) string {
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(storeUUID))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
 // SwitchReview 换一换；tag 非空时按顾客选择的菜品/场景标签取。
-func (s *ReviewPoolService) SwitchReview(uuid string, platformCode string, tag string) (*model.ReviewItem, int64, error) {
+func (s *ReviewPoolService) SwitchReview(uuid string, platformCode string, tag string, sessionID string) (*model.ReviewItem, int64, error) {
 	store, err := s.activeStoreByUUID(uuid)
 	if err != nil {
 		return nil, 0, errors.New("页面暂不可用")
@@ -589,7 +652,7 @@ func (s *ReviewPoolService) SwitchReview(uuid string, platformCode string, tag s
 		return nil, 0, err
 	}
 
-	review, err := s.dispatchAvailable(*store, platformCode, tag)
+	review, err := s.dispatchAvailable(*store, platformCode, tag, sessionID)
 	if err != nil {
 		return nil, 0, err
 	}

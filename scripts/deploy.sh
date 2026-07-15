@@ -42,6 +42,8 @@ Useful env:
   INIT_DB=true                Optionally create/import MySQL schema
   MIGRATE_DB=true             Run database/migrations/*.sql once (default; requires root)
   MIGRATE_DB=false            Skip DB migrations only when applied manually
+  HISTORICAL_DATETIME_TIMEZONE_AUDITED=true
+                              Confirm old DATETIME timezone before migration 0007
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
   REVIEW_CRAWL_SERVICE_URL=   Optional backend-only real review crawl service URL
   SMOKE_TEST=true             Check frontend gateway and management APIs after start
@@ -135,6 +137,7 @@ configure_defaults() {
   MYSQL_ROOT_USER="${MYSQL_ROOT_USER:-root}"
   MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
   MIGRATE_DB="${MIGRATE_DB:-true}"
+  HISTORICAL_DATETIME_TIMEZONE_AUDITED="${HISTORICAL_DATETIME_TIMEZONE_AUDITED:-false}"
 
   case "${MYSQL_DSN:-}" in
     *replace-with*|*CHANGE_ME*|*change-me*)
@@ -145,7 +148,7 @@ configure_defaults() {
   esac
   if [[ -z "${MYSQL_DSN:-}" ]]; then
     if [[ -n "$DB_APP_PASSWORD" ]]; then
-      MYSQL_DSN="$DB_APP_USER:$DB_APP_PASSWORD@tcp($MYSQL_HOST:$MYSQL_PORT)/$DB_NAME?charset=utf8mb4&parseTime=True&loc=Local"
+      MYSQL_DSN="$DB_APP_USER:$DB_APP_PASSWORD@tcp($MYSQL_HOST:$MYSQL_PORT)/$DB_NAME?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
     fi
   fi
 
@@ -404,6 +407,26 @@ ensure_migrations_table() {
   mysql_cmd "$DB_NAME" -e "CREATE TABLE IF NOT EXISTS schema_migrations (filename VARCHAR(255) PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);"
 }
 
+require_historical_datetime_timezone_audit() {
+  local migration="0007_publish_stats_index.sql"
+  local has_logs_table has_logs has_migrations_table already_applied=0
+
+  has_logs_table="$(mysql_cmd -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME' AND table_name = 'review_display_logs';")"
+  [[ "$has_logs_table" == "1" ]] || return
+
+  has_logs="$(mysql_cmd "$DB_NAME" -N -B -e "SELECT EXISTS(SELECT 1 FROM review_display_logs LIMIT 1);")"
+  [[ "$has_logs" == "1" ]] || return
+
+  has_migrations_table="$(mysql_cmd -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME' AND table_name = 'schema_migrations';")"
+  if [[ "$has_migrations_table" == "1" ]]; then
+    already_applied="$(mysql_cmd "$DB_NAME" -N -B -e "SELECT COUNT(*) FROM schema_migrations WHERE filename = '$migration';")"
+  fi
+  [[ "$already_applied" == "0" ]] || return
+  if ! truthy "$HISTORICAL_DATETIME_TIMEZONE_AUDITED"; then
+    die "existing review_display_logs use timezone-less DATETIME values; audit the old backend host's Local timezone, migrate historical rows if needed, then set HISTORICAL_DATETIME_TIMEZONE_AUDITED=true before applying $migration"
+  fi
+}
+
 # 以 root 运行 database/migrations/*.sql，每个文件经 schema_migrations 去重只跑一次。
 # 迁移本身用 information_schema 守卫，幂等，全新库/旧库均可安全运行。
 apply_migrations() {
@@ -451,6 +474,7 @@ prepare_database() {
   fi
 
   # 迁移在 schema 之后、seed 之前；旧库在此补齐 uuid/type_id 等列
+  require_historical_datetime_timezone_audit
   apply_migrations
 
   if [[ "$do_init" == "true" ]]; then

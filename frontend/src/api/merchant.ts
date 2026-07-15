@@ -7,6 +7,33 @@ export type PublishTrendPoint = {
   count: number
 }
 
+export type PublishStatsRange = '7d' | '30d'
+
+export type PublishFunnelStage = {
+  code: 'page_view' | 'platform_select' | 'review_copy' | 'platform_link_click'
+  label: string
+  count: number
+  conversionRate: number
+  conversionAvailable: boolean
+  conversionLabel?: string
+}
+
+export type PublishDailyPoint = {
+  date: string
+  pageViews: number
+  platformSelections: number
+  reviewCopies: number
+  platformLinkClicks: number
+}
+
+export type PublishStatsRecommendation = {
+  code: string
+  title: string
+  message: string
+  actionLabel: string
+  actionTarget: string
+}
+
 export type DeviceBreakdownItem = {
   code: string
   label: string
@@ -20,6 +47,14 @@ export type DeviceStats = {
 }
 
 export type PublishStats = {
+  range: PublishStatsRange
+  rangeStart: string
+  rangeEnd: string
+  dataState: 'empty' | 'accumulating' | 'ready'
+  uniqueSessions: number
+  funnel: PublishFunnelStage[]
+  dailySeries: PublishDailyPoint[]
+  recommendation: PublishStatsRecommendation
   platformCode: string
   platformName: string
   totalPublishClicks: number
@@ -118,8 +153,8 @@ export const merchantApi = {
   updateStoreDetail(payload: Record<string, unknown>) {
     return http.put('/merchant/store/detail', payload)
   },
-  getPublishStats(platformCode = '') {
-    const params = platformCode ? { platformCode } : undefined
+  getPublishStats(platformCode = '', range: PublishStatsRange = '7d') {
+    const params = { range, ...(platformCode ? { platformCode } : {}) }
     return http.get<{ code: number; message: string; data: PublishStats }>('/merchant/dashboard/publish-stats', { params })
   },
   listKeywords() {

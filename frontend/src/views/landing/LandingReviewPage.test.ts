@@ -168,6 +168,32 @@ describe('LandingReviewPage', () => {
     expect(wrapper.get('.landing-back-link').text()).toContain('重新选择平台')
   })
 
+  it('clears a server-rejected session and returns to platform selection', async () => {
+    vi.mocked(publicApi.switchReview).mockRejectedValueOnce({
+      response: { data: { message: '会话已失效，请刷新页面后重试' } }
+    })
+
+    const { router } = await mountPage()
+
+    expect(router.currentRoute.value.fullPath).toBe('/landing/store-token')
+    expect(sessionStorage.getItem('ppk-landing-session:store-token')).toBeNull()
+  })
+
+  it('returns to platform selection when the open review page crosses the local session limit', async () => {
+    const { router, wrapper } = await mountPage()
+    const stored = JSON.parse(sessionStorage.getItem('ppk-landing-session:store-token') || '{}')
+    sessionStorage.setItem('ppk-landing-session:store-token', JSON.stringify({
+      ...stored,
+      createdAt: Date.now() - 23 * 60 * 60 * 1000
+    }))
+
+    await wrapper.get('[data-testid="primary-platform-action"]').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.fullPath).toBe('/landing/store-token')
+    expect(copyToClipboard).not.toHaveBeenCalled()
+  })
+
   it('opens the platform without waiting for analytics to finish', async () => {
     vi.mocked(publicApi.createEvent).mockImplementation(() => new Promise(() => {}) as never)
     const { wrapper } = await mountPage()

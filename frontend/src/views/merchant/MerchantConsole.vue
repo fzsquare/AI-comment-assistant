@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { merchantApi } from '../../api/merchant'
-import type { DeviceBreakdownItem, GenerationPreferences, PublishStats, PublishTrendPoint } from '../../api/merchant'
+import type { GenerationPreferences, PublishStats, PublishStatsRange } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
-import { edgeAwareTooltipStyle } from '../../utils/chartTooltip'
+import MerchantEffectDashboard from './MerchantEffectDashboard.vue'
 
 const auth = useAuthStore()
 const storeForm = reactive({
@@ -27,10 +27,10 @@ const links = ref<any[]>([])
 const reviews = ref<any[]>([])
 const dashboard = ref<PublishStats | null>(null)
 const analyticsPlatformCode = ref('')
-const activeTrend = ref<'week' | 'month'>('week')
-const hoveredTrendIndex = ref<number | null>(null)
-const trendChartSvg = ref<SVGSVGElement | null>(null)
-const trendChartSize = reactive({ width: 600, height: 240 })
+const analyticsRange = ref<PublishStatsRange>('7d')
+const dashboardLoading = ref(false)
+const dashboardError = ref('')
+let dashboardRequestId = 0
 const optimizationOpen = ref(false)
 const customFocusKeyword = ref('')
 const preferenceSaving = ref(false)
@@ -91,7 +91,6 @@ const preferenceSummary = computed(() => {
   const refs = cleanReferenceReviews().length
   return `重点：${focus}；方向：${selectedDiversityLabels.value}；语气：${selectedStyleLabels.value}；参考评论 ${refs} 条`
 })
-const storeInitial = computed(() => (storeForm.storeName || '店').trim().slice(0, 1))
 const activePlatformLinks = computed(() =>
   [...links.value]
     .filter((item) => item.status === 1)
@@ -104,90 +103,6 @@ const analyticsPlatformOptions = computed(() => [
     platformName: item.platformName || item.platformCode || '未命名平台'
   }))
 ])
-const selectedAnalyticsPlatformLabel = computed(() => {
-  if (dashboard.value?.platformName) return dashboard.value.platformName
-  return analyticsPlatformOptions.value.find((item) => item.platformCode === analyticsPlatformCode.value)?.platformName || '全部平台'
-})
-const trendSeries = computed(() => {
-  const source = activeTrend.value === 'week' ? dashboard.value?.weeklySeries : dashboard.value?.monthlySeries
-  return (source || []).map((item) => ({
-    label: activeTrend.value === 'week' ? `${shortDate(item.weekStart)}-${shortDate(item.weekEnd)}` : item.month || '',
-    axisLabel: activeTrend.value === 'week' ? shortDate(item.weekStart) : shortMonth(item.month),
-    count: item.count || 0
-  }))
-})
-const trendHasData = computed(() => trendSeries.value.some((item) => item.count > 0))
-const trendChartMetrics = computed(() => buildTrendChartMetrics(trendChartSize.width, trendChartSize.height, trendSeries.value.length))
-const trendChartViewBox = computed(() => `0 0 ${trendChartMetrics.value.width} ${trendChartMetrics.value.height}`)
-const chartScale = computed(() => buildChartScale(trendSeries.value, trendChartMetrics.value))
-const chartPoints = computed(() => buildChartPoints(trendSeries.value, chartScale.value.max, trendChartMetrics.value))
-const chartPolyline = computed(() => chartPoints.value.map((p) => `${p.x},${p.y}`).join(' '))
-const chartAreaPolygon = computed(() => {
-  if (!chartPoints.value.length) return ''
-  const metrics = trendChartMetrics.value
-  return `${chartPolyline.value} ${metrics.plotRight},${metrics.plotBottom} ${metrics.plotLeft},${metrics.plotBottom}`
-})
-const chartXLabels = computed(() => {
-  return chartPoints.value
-})
-const chartXLabelsDense = computed(() => chartXLabels.value.length > 6)
-const activeChartPoint = computed(() => {
-  if (hoveredTrendIndex.value === null) return null
-  return chartPoints.value[hoveredTrendIndex.value] || null
-})
-const chartTooltipStyle = computed(() => {
-  const point = activeChartPoint.value
-  if (!point) return {}
-  return edgeAwareTooltipStyle(point, trendChartMetrics.value)
-})
-const chartAria = computed(() => {
-  const mode = activeTrend.value === 'week' ? '按周' : '按月'
-  const total = trendSeries.value.reduce((sum, item) => sum + item.count, 0)
-  return `${selectedAnalyticsPlatformLabel.value}${mode}引导发布趋势，共 ${trendSeries.value.length} 个数据点，合计 ${total} 次`
-})
-const dashboardStatusText = computed(() => {
-  if (!dashboard.value) return '数据加载中'
-  if (!dashboard.value.platformLinksConfigured) return '先配置平台链接，顾客才能去发布'
-  if (dashboard.value.totalPublishClicks === 0) return '平台链接已启用，等待顾客点击去发布'
-  return `累计引导顾客去发布 ${formatNumber(dashboard.value.totalPublishClicks)} 次`
-})
-const updatedText = computed(() => {
-  if (!dashboard.value?.updatedAt) return ''
-  const d = new Date(dashboard.value.updatedAt)
-  if (Number.isNaN(d.getTime())) return ''
-  return `数据更新至 ${d.toLocaleString('zh-CN', { hour12: false })}`
-})
-const deviceItems = computed(() => dashboard.value?.deviceStats?.items || [])
-const deviceHasData = computed(() => deviceItems.value.length > 0)
-const topDevice = computed<DeviceBreakdownItem | null>(() => {
-  return deviceItems.value.reduce<DeviceBreakdownItem | null>((best, item) => {
-    if (!best || item.count > best.count) return item
-    return best
-  }, null)
-})
-const visitStatusText = computed(() => {
-  if (!dashboard.value) return '数据加载中'
-  if (dashboard.value.totalCustomerVisits === 0) return '等待顾客通过 NFC 或交付 URL 访问'
-  if (!topDevice.value) return `累计客户访问 ${formatNumber(dashboard.value.totalCustomerVisits)} 次`
-  return `${selectedAnalyticsPlatformLabel.value}：${topDevice.value.label}访问最多，占 ${formatPercent(topDevice.value.percent)}`
-})
-const deviceChartAria = computed(() => {
-  if (!deviceHasData.value) return '暂无顾客访问设备数据'
-  return `顾客访问设备占比：${deviceItems.value.map((item) => `${item.label}${formatPercent(item.percent)}`).join('，')}`
-})
-const crawlAccumulatingText = computed(() => dashboard.value?.crawlDataMessage || '数据积累中')
-const weeklyShareText = computed(() => {
-  if (!dashboard.value?.weeklyGuidedShareReady) return crawlAccumulatingText.value
-  return formatPercent(dashboard.value.weeklyGuidedSharePercent)
-})
-const monthlyShareText = computed(() => {
-  if (!dashboard.value?.monthlyGuidedShareReady) return crawlAccumulatingText.value
-  return formatPercent(dashboard.value.monthlyGuidedSharePercent)
-})
-const shouldShowPublishConversion = computed(() => analyticsPlatformCode.value === 'meituan')
-
-let trendResizeObserver: ResizeObserver | null = null
-
 function messageFrom(err: any, fallback: string) {
   return err?.response?.data?.message || err?.message || fallback
 }
@@ -225,17 +140,21 @@ async function loadAll() {
 }
 
 async function loadDashboardStats(updateLoading = true) {
-  if (updateLoading) {
-    loading.value = true
-    error.value = ''
-  }
+  const requestId = ++dashboardRequestId
+  dashboardLoading.value = true
+  dashboardError.value = ''
   try {
-    const statsRes = await merchantApi.getPublishStats(analyticsPlatformCode.value)
+    const statsRes = await merchantApi.getPublishStats(analyticsPlatformCode.value, analyticsRange.value)
+    if (requestId !== dashboardRequestId) return
     dashboard.value = statsRes.data.data
   } catch (err: any) {
-    error.value = messageFrom(err, '看板数据加载失败')
+    if (requestId !== dashboardRequestId) return
+    dashboardError.value = messageFrom(err, '看板数据加载失败')
   } finally {
-    if (updateLoading) loading.value = false
+    if (requestId === dashboardRequestId) {
+      dashboardLoading.value = false
+      if (updateLoading) loading.value = false
+    }
   }
 }
 
@@ -253,9 +172,10 @@ async function selectAnalyticsPlatform(platformCode: string) {
   await loadDashboardStats()
 }
 
-async function onAnalyticsPlatformChange(event: Event) {
-  const target = event.target as HTMLSelectElement
-  await selectAnalyticsPlatform(target.value)
+async function selectAnalyticsRange(range: PublishStatsRange) {
+  if (analyticsRange.value === range) return
+  analyticsRange.value = range
+  await loadDashboardStats()
 }
 
 async function runAction(action: () => Promise<unknown>, success: string, reload = true) {
@@ -533,139 +453,13 @@ function numericStatusText(status: number) {
   return status === 1 ? '启用' : '禁用'
 }
 
-function formatNumber(value: number | undefined) {
-  return Number(value || 0).toLocaleString('zh-CN')
-}
-
-function formatPercent(value: number | undefined) {
-  return `${Number(value || 0).toFixed(1)}%`
-}
-
-function formatGrowthPercent(value: number | undefined) {
-  const n = Number(value || 0)
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${n.toFixed(1)}%`
-}
-
-function growthClass(value: number | undefined) {
-  const n = Number(value || 0)
-  return {
-    up: n > 0,
-    down: n < 0,
-    flat: n === 0
-  }
-}
-
-function deviceBarStyle(item: DeviceBreakdownItem) {
-  return { width: `${Math.min(Math.max(item.percent, item.count > 0 ? 4 : 0), 100)}%` }
-}
-
-function shortDate(value?: string) {
-  if (!value) return ''
-  const parts = value.split('-')
-  return parts.length === 3 ? `${parts[1]}.${parts[2]}` : value
-}
-
-function shortMonth(value?: string) {
-  if (!value) return ''
-  const parts = value.split('-')
-  return parts.length === 2 ? `${parts[0].slice(2)}.${parts[1]}` : value
-}
-
-function niceChartMax(value: number) {
-  const raw = Math.max(value * 1.15, 4)
-  const magnitude = Math.pow(10, Math.floor(Math.log10(raw)))
-  const fraction = raw / magnitude
-  const niceFraction = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10
-  return niceFraction * magnitude
-}
-
-function buildTrendChartMetrics(width: number, height: number, labelCount = 0) {
-  const safeWidth = Math.max(Math.round(width || 0), 260)
-  const safeHeight = Math.max(Math.round(height || 0), 180)
-  const denseLabels = labelCount > 6
-  const bottomReserve = denseLabels ? (safeWidth < 420 ? 86 : 72) : 42
-  const plotLeft = safeWidth < 420 ? 38 : 54
-  const plotRight = Math.max(plotLeft + 120, safeWidth - 26)
-  const plotTop = 34
-  const plotBottom = Math.max(plotTop + 80, safeHeight - bottomReserve)
-  return {
-    width: safeWidth,
-    height: safeHeight,
-    plotLeft,
-    plotRight,
-    plotTop,
-    plotBottom,
-    plotHeight: plotBottom - plotTop
-  }
-}
-
-function updateTrendChartSize() {
-  const rect = trendChartSvg.value?.getBoundingClientRect()
-  if (!rect?.width || !rect?.height) return
-  trendChartSize.width = Math.round(rect.width)
-  trendChartSize.height = Math.round(rect.height)
-}
-
-function startTrendChartObserver() {
-  updateTrendChartSize()
-  if (!trendChartSvg.value || typeof ResizeObserver === 'undefined') return
-  trendResizeObserver = new ResizeObserver(updateTrendChartSize)
-  trendResizeObserver.observe(trendChartSvg.value)
-}
-
-function buildChartScale(series: { count: number }[], metrics: ReturnType<typeof buildTrendChartMetrics>) {
-  const max = niceChartMax(Math.max(...series.map((item) => item.count), 1))
-  const steps = 4
-  const ticks = Array.from({ length: steps + 1 }, (_, index) => {
-    const value = Math.round((max * (steps - index)) / steps)
-    const y = metrics.plotTop + (index * metrics.plotHeight) / steps
-    return { value, y: Number(y.toFixed(2)) }
-  })
-  return { max, ticks }
-}
-
-function buildChartPoints(series: { label: string; axisLabel?: string; count: number }[], maxValue: number, metrics: ReturnType<typeof buildTrendChartMetrics>) {
-  if (!series.length) return []
-  return series.map((item, index) => {
-    const x = series.length === 1 ? (metrics.plotLeft + metrics.plotRight) / 2 : metrics.plotLeft + (index * (metrics.plotRight - metrics.plotLeft)) / (series.length - 1)
-    const y = metrics.plotBottom - (item.count / Math.max(maxValue, 1)) * metrics.plotHeight
-    return { ...item, x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) }
-  })
-}
-
-function chartAxisAnchor(x: number) {
-  const metrics = trendChartMetrics.value
-  if (x <= metrics.plotLeft + 1) return 'start'
-  if (x >= metrics.plotRight - 1) return 'end'
-  return 'middle'
-}
-
-function chartXAxisAnchor(x: number) {
-  if (!chartXLabelsDense.value) return chartAxisAnchor(x)
-  const metrics = trendChartMetrics.value
-  if (x <= metrics.plotLeft + 1) return 'start'
-  return 'end'
-}
-
-function chartXAxisTransform(x: number) {
-  if (!chartXLabelsDense.value) return undefined
-  return `rotate(-36 ${x} ${trendChartMetrics.value.height - 18})`
-}
-
 function logout() {
   auth.clear()
   location.href = import.meta.env.BASE_URL + 'merchant/login'
 }
 
 onMounted(async () => {
-  await nextTick()
-  startTrendChartObserver()
   await loadAll()
-})
-
-onBeforeUnmount(() => {
-  trendResizeObserver?.disconnect()
 })
 </script>
 
@@ -681,240 +475,18 @@ onBeforeUnmount(() => {
     <p v-if="error" class="alert">{{ error }}</p>
     <p v-else-if="notice" class="notice">{{ notice }}</p>
 
-    <section class="value-shell" aria-labelledby="publish-title">
-      <div class="store-strip">
-        <div class="store-mark" aria-hidden="true">{{ storeInitial }}</div>
-        <div class="store-copy">
-          <p class="eyebrow">{{ storeForm.industryType || '商家' }}</p>
-          <h2 id="publish-title">{{ storeForm.storeName || '商家价值看板' }}</h2>
-        </div>
-        <div class="analytics-meta">
-          <p class="updated">{{ updatedText }}</p>
-        </div>
-      </div>
+    <MerchantEffectDashboard
+      :stats="dashboard"
+      :loading="dashboardLoading"
+      :error="dashboardError"
+      :store-name="storeForm.storeName"
+      :platform-options="analyticsPlatformOptions"
+      @range-change="selectAnalyticsRange"
+      @platform-change="selectAnalyticsPlatform"
+      @retry="loadDashboardStats"
+    />
 
-      <div class="platform-filter" aria-label="数据平台筛选">
-        <div>
-          <span>数据平台</span>
-          <strong>{{ selectedAnalyticsPlatformLabel }}</strong>
-        </div>
-        <div class="platform-select-wrap">
-          <label for="analytics-platform">选择平台</label>
-          <select id="analytics-platform" :value="analyticsPlatformCode" :disabled="loading" @change="onAnalyticsPlatformChange">
-            <option
-              v-for="item in analyticsPlatformOptions"
-              :key="item.platformCode || 'all'"
-              :value="item.platformCode"
-            >
-              {{ item.platformName }}
-            </option>
-          </select>
-        </div>
-      </div>
-
-      <div class="metric-zone" :aria-busy="loading && !dashboard">
-        <div>
-          <p class="metric-label">{{ selectedAnalyticsPlatformLabel }} · 累计客户访问</p>
-          <p class="hero-number">{{ formatNumber(dashboard?.totalCustomerVisits) }}</p>
-          <p class="metric-status">{{ visitStatusText }}</p>
-        </div>
-        <div class="secondary-metrics">
-          <div>
-            <span>本周访问</span>
-            <strong>{{ formatNumber(dashboard?.currentWeekCustomerVisits) }}</strong>
-            <small :class="growthClass(dashboard?.visitWeekGrowthPercent)">周 {{ formatGrowthPercent(dashboard?.visitWeekGrowthPercent) }}</small>
-          </div>
-          <div>
-            <span>本月访问</span>
-            <strong>{{ formatNumber(dashboard?.currentMonthCustomerVisits) }}</strong>
-            <small :class="growthClass(dashboard?.visitMonthGrowthPercent)">月 {{ formatGrowthPercent(dashboard?.visitMonthGrowthPercent) }}</small>
-          </div>
-          <div>
-            <span>引导发布</span>
-            <strong>{{ formatNumber(dashboard?.totalPublishClicks) }}</strong>
-            <small class="growth-pair">
-              <span :class="growthClass(dashboard?.publishWeekGrowthPercent)">周 {{ formatGrowthPercent(dashboard?.publishWeekGrowthPercent) }}</span>
-              <span aria-hidden="true">·</span>
-              <span :class="growthClass(dashboard?.publishMonthGrowthPercent)">月 {{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</span>
-            </small>
-          </div>
-          <div>
-            <span>活跃平台</span>
-            <strong>{{ formatNumber(dashboard?.activePlatformLinkCount) }}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div class="trend-section">
-        <div class="trend-head">
-          <div>
-            <h3>发布趋势</h3>
-            <p class="muted">
-              <span class="platform-chip">{{ selectedAnalyticsPlatformLabel }}</span>
-              {{ activeTrend === 'week' ? '最近 12 周' : '最近 12 个月' }}
-            </p>
-          </div>
-          <div class="trend-tabs" role="tablist" aria-label="趋势维度">
-            <button type="button" :class="{ active: activeTrend === 'week' }" :aria-pressed="activeTrend === 'week'" @click="activeTrend = 'week'">按周</button>
-            <button type="button" :class="{ active: activeTrend === 'month' }" :aria-pressed="activeTrend === 'month'" @click="activeTrend = 'month'">按月</button>
-          </div>
-        </div>
-
-        <div class="chart-wrap" @pointerleave="hoveredTrendIndex = null">
-          <svg ref="trendChartSvg" class="line-chart-svg" :viewBox="trendChartViewBox" role="img" :aria-label="chartAria">
-            <defs>
-              <linearGradient id="merchantTrendArea" x1="0%" y1="0%" x2="0%" y2="100%">
-                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.24" />
-                <stop offset="78%" stop-color="#3b82f6" stop-opacity="0.04" />
-                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
-              </linearGradient>
-            </defs>
-
-            <g class="chart-grid">
-              <g v-for="tick in chartScale.ticks" :key="tick.value">
-                <line class="chart-grid-line" :x1="trendChartMetrics.plotLeft" :x2="trendChartMetrics.plotRight" :y1="tick.y" :y2="tick.y" />
-                <line class="chart-y-tick" :x1="trendChartMetrics.plotLeft - 6" :x2="trendChartMetrics.plotLeft" :y1="tick.y" :y2="tick.y" />
-                <text class="chart-axis-text chart-y-axis-text" :x="trendChartMetrics.plotLeft - 12" :y="tick.y + 4" text-anchor="end">{{ formatNumber(tick.value) }}</text>
-              </g>
-            </g>
-
-            <polygon v-if="chartAreaPolygon" class="chart-area" :points="chartAreaPolygon" />
-            <polyline v-if="chartPoints.length" :points="chartPolyline" class="trend-line" fill="none" />
-
-            <g
-              v-for="(point, index) in chartPoints"
-              :key="point.label"
-              class="chart-point-group"
-              tabindex="0"
-              focusable="true"
-              @pointerenter="hoveredTrendIndex = index"
-              @focus="hoveredTrendIndex = index"
-              @blur="hoveredTrendIndex = null"
-            >
-              <line
-                v-if="hoveredTrendIndex === index"
-                class="chart-hover-line"
-                :x1="point.x"
-                :x2="point.x"
-                :y1="trendChartMetrics.plotTop"
-                :y2="trendChartMetrics.plotBottom"
-              />
-              <circle :cx="point.x" :cy="point.y" :r="hoveredTrendIndex === index ? 6 : 4.6" class="trend-dot" />
-            </g>
-
-            <g class="chart-x-axis" aria-hidden="true">
-              <line
-                v-for="point in chartXLabels"
-                :key="`x-tick-${point.label}`"
-                class="chart-x-tick"
-                :x1="point.x"
-                :x2="point.x"
-                :y1="trendChartMetrics.plotBottom"
-                :y2="trendChartMetrics.plotBottom + 5"
-              />
-              <text
-                v-for="point in chartXLabels"
-                :key="`x-label-${point.label}`"
-                :class="['chart-axis-text', 'chart-x-axis-text', { dense: chartXLabelsDense }]"
-                :x="point.x"
-                :y="trendChartMetrics.height - 18"
-                :text-anchor="chartXAxisAnchor(point.x)"
-                :transform="chartXAxisTransform(point.x)"
-              >
-                {{ point.axisLabel || point.label }}
-              </text>
-            </g>
-          </svg>
-          <div v-if="activeChartPoint" class="chart-tooltip visible" :style="chartTooltipStyle">
-            <strong>{{ activeChartPoint.label }}</strong>
-            <span>{{ formatNumber(activeChartPoint.count) }} 次引导发布</span>
-          </div>
-          <p v-if="!trendHasData" class="empty-note">
-            {{ dashboard?.platformLinksConfigured ? '有顾客点击去发布后，这里会出现趋势' : '先新增平台链接，顾客才能去发布' }}
-          </p>
-          <table class="sr-only">
-            <caption>{{ activeTrend === 'week' ? '按周引导发布数据' : '按月引导发布数据' }}</caption>
-            <tbody>
-              <tr v-for="item in trendSeries" :key="item.label">
-                <th>{{ item.label }}</th>
-                <td>{{ item.count }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="dashboard-stack">
-        <section v-if="shouldShowPublishConversion" class="publish-summary" aria-labelledby="publish-summary-title">
-          <div class="insight-head">
-            <div>
-              <h3 id="publish-summary-title">发布转化</h3>
-              <p class="muted"><span class="platform-chip">{{ selectedAnalyticsPlatformLabel }}</span> {{ dashboardStatusText }}</p>
-            </div>
-          </div>
-          <dl class="compact-metrics">
-            <div>
-              <dt>本周发布</dt>
-              <dd>{{ formatNumber(dashboard?.currentWeekPublishClicks) }}</dd>
-              <small :class="growthClass(dashboard?.publishWeekGrowthPercent)">较上周 {{ formatGrowthPercent(dashboard?.publishWeekGrowthPercent) }}</small>
-            </div>
-            <div>
-              <dt>本周占比</dt>
-              <dd>{{ weeklyShareText }}</dd>
-              <small>引导发布在周评论中的占比</small>
-            </div>
-            <div>
-              <dt>本月发布</dt>
-              <dd>{{ formatNumber(dashboard?.currentMonthPublishClicks) }}</dd>
-              <small :class="growthClass(dashboard?.publishMonthGrowthPercent)">较上月 {{ formatGrowthPercent(dashboard?.publishMonthGrowthPercent) }}</small>
-            </div>
-            <div>
-              <dt>本月占比</dt>
-              <dd>{{ monthlyShareText }}</dd>
-              <small>引导发布在月评论中的占比</small>
-            </div>
-          </dl>
-        </section>
-
-        <details class="device-panel device-collapsible" aria-labelledby="device-title">
-          <summary class="device-summary">
-            <span>
-              <h3 id="device-title">访问设备占比</h3>
-              <p class="muted"><span class="platform-chip">{{ selectedAnalyticsPlatformLabel }}</span> 设备访问分布</p>
-            </span>
-            <strong class="device-total">{{ formatNumber(dashboard?.deviceStats?.totalCount) }}</strong>
-            <span class="device-toggle" aria-hidden="true">
-              <span class="when-closed">展开</span>
-              <span class="when-open">收起</span>
-            </span>
-          </summary>
-          <div class="device-content">
-            <div v-if="deviceHasData" class="device-bars" role="img" :aria-label="deviceChartAria">
-              <div v-for="item in deviceItems" :key="item.code" class="device-row">
-                <div class="device-row-head">
-                  <span>{{ item.label }}</span>
-                  <b>{{ formatNumber(item.count) }} · {{ formatPercent(item.percent) }}</b>
-                </div>
-                <div class="device-track" aria-hidden="true">
-                  <span :style="deviceBarStyle(item)"></span>
-                </div>
-              </div>
-            </div>
-            <p v-else class="empty-note">有顾客访问交付 URL 后，这里会出现设备占比。</p>
-            <table class="sr-only">
-              <caption>访问设备占比数据</caption>
-              <tbody>
-                <tr v-for="item in deviceItems" :key="item.code">
-                  <th>{{ item.label }}</th>
-                  <td>{{ item.count }}</td>
-                  <td>{{ formatPercent(item.percent) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </details>
-      </div>
-
+    <section class="value-shell settings-shell" aria-label="评价内容优化">
       <div class="optimization-panel">
         <div>
           <h3>优化下一批评论</h3>
@@ -1008,7 +580,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div class="fold-grid">
-      <details class="card fold-card">
+      <details class="card fold-card" data-effect-target="platform-links">
         <summary>
           <span>
             <strong>跳转任务</strong>
@@ -1054,6 +626,20 @@ onBeforeUnmount(() => {
         </div>
       </details>
 
+      <details class="card fold-card" data-effect-target="nfc-guidance">
+        <summary>
+          <span>
+            <strong>NFC 使用建议</strong>
+            <small>检查卡片摆放和店员引导是否容易被顾客接受</small>
+          </span>
+          <span class="fold-hint">展开</span>
+        </summary>
+        <div class="fold-body guidance-copy">
+          <p>把卡片放在顾客核销后自然能看到的位置，由店员说明“贴一下即可选择符合真实体验的评价，是否发布由你决定”。</p>
+          <p>避免要求顾客交出手机，也不要把平台点击表述为已经发布成功。</p>
+        </div>
+      </details>
+
       <details class="card fold-card">
         <summary>
           <span>
@@ -1088,7 +674,7 @@ onBeforeUnmount(() => {
         </div>
       </details>
 
-      <details class="card fold-card">
+      <details class="card fold-card" data-effect-target="reviews">
         <summary>
           <span>
             <strong>评价管理</strong>

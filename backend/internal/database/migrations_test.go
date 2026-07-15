@@ -67,3 +67,35 @@ func TestPlatformReviewFewShotSchemaExists(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishStatsCompositeIndexExistsInSchemaAndGuardedMigration(t *testing.T) {
+	schema, err := os.ReadFile("../../../database/schema.sql")
+	if err != nil {
+		t.Fatalf("read schema: %v", err)
+	}
+	migration, err := os.ReadFile("../../../database/migrations/0007_publish_stats_index.sql")
+	if err != nil {
+		t.Fatalf("read publish stats migration: %v", err)
+	}
+
+	const indexName = "idx_review_logs_store_action_created_platform_session"
+	const columns = "(store_id, action_type, created_at, platform_code, session_id)"
+	const platformIndexName = "idx_review_logs_store_platform_action_created_session"
+	const platformColumns = "(store_id, platform_code, action_type, created_at, session_id)"
+	for name, sql := range map[string]string{"schema": string(schema), "migration": string(migration)} {
+		if !strings.Contains(sql, indexName) || !strings.Contains(sql, columns) || !strings.Contains(sql, platformIndexName) || !strings.Contains(sql, platformColumns) {
+			t.Fatalf("%s missing publish stats composite index: %s", name, sql)
+		}
+	}
+	if !strings.Contains(string(migration), "information_schema.statistics") {
+		t.Fatalf("migration must guard the index for existing databases: %s", migration)
+	}
+	for name, sql := range map[string]string{"schema": string(schema), "migration": string(migration)} {
+		if !strings.Contains(sql, "dispatched_session_id") {
+			t.Fatalf("%s must persist which signed session received a review", name)
+		}
+	}
+	if !strings.Contains(string(migration), "information_schema.columns") {
+		t.Fatalf("migration must guard dispatched_session_id for existing databases: %s", migration)
+	}
+}

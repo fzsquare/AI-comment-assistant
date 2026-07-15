@@ -357,8 +357,9 @@ function deleteMerchantById(id: number) {
   return { deleted: true }
 }
 
-const platformStatSeeds: Record<string, { weekly: number[]; monthly: number[]; weeklyVisits: number[]; monthlyVisits: number[]; weeklyShare: number; monthlyShare: number }> = {
+const platformStatSeeds: Record<string, { selectionWeight: number; weekly: number[]; monthly: number[]; weeklyVisits: number[]; monthlyVisits: number[]; weeklyShare: number; monthlyShare: number }> = {
   meituan: {
+    selectionWeight: 32,
     weekly: [3, 5, 0, 8, 12, 9, 14, 18, 15, 21, 17, 24],
     monthly: [22, 28, 31, 35, 42, 40, 46, 51, 48, 56, 61, 66],
     weeklyVisits: [19, 24, 18, 35, 45, 40, 52, 68, 59, 77, 83, 96],
@@ -367,6 +368,7 @@ const platformStatSeeds: Record<string, { weekly: number[]; monthly: number[]; w
     monthlyShare: 31.4
   },
   dianping: {
+    selectionWeight: 24,
     weekly: [2, 3, 4, 6, 7, 8, 9, 13, 12, 16, 18, 21],
     monthly: [14, 17, 19, 22, 26, 29, 33, 34, 39, 43, 48, 52],
     weeklyVisits: [14, 16, 18, 21, 24, 31, 35, 42, 44, 51, 57, 63],
@@ -375,6 +377,7 @@ const platformStatSeeds: Record<string, { weekly: number[]; monthly: number[]; w
     monthlyShare: 28.8
   },
   xiaohongshu: {
+    selectionWeight: 15,
     weekly: [1, 2, 3, 5, 6, 8, 11, 12, 14, 13, 15, 19],
     monthly: [9, 12, 15, 19, 22, 26, 30, 35, 37, 42, 44, 49],
     weeklyVisits: [10, 12, 15, 18, 22, 26, 34, 39, 43, 41, 48, 55],
@@ -383,6 +386,7 @@ const platformStatSeeds: Record<string, { weekly: number[]; monthly: number[]; w
     monthlyShare: 33.1
   },
   douyin: {
+    selectionWeight: 11,
     weekly: [1, 1, 2, 2, 5, 4, 6, 9, 8, 11, 10, 8],
     monthly: [7, 9, 13, 16, 18, 23, 25, 29, 31, 36, 39, 34],
     weeklyVisits: [8, 9, 12, 13, 18, 17, 23, 29, 31, 35, 37, 34],
@@ -397,8 +401,27 @@ function sumSeries(series: number[][]) {
   return Array.from({ length }, (_, index) => series.reduce((sum, items) => sum + (items[index] || 0), 0))
 }
 
+function allocatePlatformSelections(pageViews: number) {
+  const entries = Object.entries(platformStatSeeds)
+  const totalWeight = entries.reduce((sum, [, seed]) => sum + seed.selectionWeight, 0)
+  const selectionTotal = Math.round(pageViews * 0.82)
+  const allocations = entries.map(([platformCode, seed]) => {
+    const exact = selectionTotal * seed.selectionWeight / totalWeight
+    return { platformCode, count: Math.floor(exact), remainder: exact - Math.floor(exact) }
+  })
+  let unassigned = selectionTotal - allocations.reduce((sum, item) => sum + item.count, 0)
+  for (const item of [...allocations].sort((a, b) => b.remainder - a.remainder || a.platformCode.localeCompare(b.platformCode))) {
+    if (unassigned <= 0) break
+    item.count += 1
+    unassigned -= 1
+  }
+  return Object.fromEntries(allocations.map((item) => [item.platformCode, item.count]))
+}
+
 function mockPublishStats(params: Record<string, unknown> = {}) {
   const requestedPlatform = String(params.platformCode || '').trim()
+  const requestedRange = params.range === '30d' ? '30d' : '7d'
+  const rangeDays = requestedRange === '30d' ? 30 : 7
   const selectedSeed = requestedPlatform ? platformStatSeeds[requestedPlatform] : null
   const activeSeeds = Object.values(platformStatSeeds)
   const weeklyCounts = selectedSeed?.weekly || sumSeries(activeSeeds.map((item) => item.weekly))
@@ -408,6 +431,35 @@ function mockPublishStats(params: Record<string, unknown> = {}) {
   const weeklyShare = selectedSeed?.weeklyShare || 35.8
   const monthlyShare = selectedSeed?.monthlyShare || 29.7
   const today = new Date()
+  const dailySeries = Array.from({ length: rangeDays }, (_, index) => {
+    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() - (rangeDays - 1 - index))
+    const pageViews = Math.round(8 + ((index * 7) % 9))
+    const selectionsByPlatform = allocatePlatformSelections(pageViews)
+    const platformSelections = selectedSeed ? selectionsByPlatform[requestedPlatform] || 0 : Object.values(selectionsByPlatform).reduce((sum, count) => sum + count, 0)
+    const reviewCopies = Math.round(platformSelections * 0.74)
+    const platformLinkClicks = Math.round(reviewCopies * 0.79)
+    return {
+      date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`,
+      pageViews,
+      platformSelections,
+      reviewCopies,
+      platformLinkClicks
+    }
+  })
+  const funnelCounts = dailySeries.reduce((totals, point) => ({
+    pageViews: totals.pageViews + point.pageViews,
+    platformSelections: totals.platformSelections + point.platformSelections,
+    reviewCopies: totals.reviewCopies + point.reviewCopies,
+    platformLinkClicks: totals.platformLinkClicks + point.platformLinkClicks
+  }), { pageViews: 0, platformSelections: 0, reviewCopies: 0, platformLinkClicks: 0 })
+  const funnel = [
+    { code: 'page_view', label: '贴卡访问', count: funnelCounts.pageViews, conversionRate: 0, conversionAvailable: false },
+    { code: 'platform_select', label: selectedSeed ? `选择${platformName(requestedPlatform)}` : '选择平台', count: funnelCounts.platformSelections, conversionRate: Number((funnelCounts.platformSelections / funnelCounts.pageViews * 100).toFixed(1)), conversionAvailable: true, conversionLabel: selectedSeed ? '全部访问中选择该平台' : '上一步转化率' },
+    { code: 'review_copy', label: '复制评价', count: funnelCounts.reviewCopies, conversionRate: Number((funnelCounts.reviewCopies / funnelCounts.platformSelections * 100).toFixed(1)), conversionAvailable: true },
+    { code: 'platform_link_click', label: '平台点击', count: funnelCounts.platformLinkClicks, conversionRate: Number((funnelCounts.platformLinkClicks / funnelCounts.reviewCopies * 100).toFixed(1)), conversionAvailable: true }
+  ]
+  const uniqueSessions = selectedSeed ? funnelCounts.platformSelections : funnelCounts.pageViews
+  const dataState = uniqueSessions === 0 ? 'empty' : uniqueSessions < 20 ? 'accumulating' : 'ready'
   const weeklySeries = weeklyCounts.map((count, index) => {
     const start = new Date(today)
     start.setDate(today.getDate() - (weeklyCounts.length - 1 - index) * 7 - today.getDay() + 1)
@@ -420,6 +472,28 @@ function mockPublishStats(params: Record<string, unknown> = {}) {
     return { month: month.toISOString().slice(0, 7), count }
   })
   return {
+    range: requestedRange,
+    rangeStart: dailySeries[0].date,
+    rangeEnd: dailySeries[dailySeries.length - 1].date,
+    dataState,
+    uniqueSessions,
+    funnel,
+    dailySeries,
+    recommendation: dataState === 'accumulating'
+      ? {
+          code: 'accumulating',
+          title: '数据积累中',
+          message: '当前唯一会话少于 20 个，先继续积累真实使用数据，再判断优化方向。',
+          actionLabel: '查看原始数量',
+          actionTarget: 'funnel'
+        }
+      : {
+          code: 'funnel_drop',
+          title: '优先改善“复制评价”',
+          message: '选择平台后到复制评价的流失最多，先检查评价内容是否足够贴近真实体验。',
+          actionLabel: '查看漏斗',
+          actionTarget: 'funnel'
+        },
     platformCode: selectedSeed ? requestedPlatform : '',
     platformName: selectedSeed ? platformName(requestedPlatform) : '全部平台',
     totalPublishClicks: weeklyCounts.reduce((sum, count) => sum + count, 0),
