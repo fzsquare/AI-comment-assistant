@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import type { PublishDailyPoint, PublishStats, PublishStatsRange } from '../../api/merchant'
+import type { PublishDailyPoint, PublishFunnelStage, PublishStats, PublishStatsRange } from '../../api/merchant'
 
 type PlatformOption = { platformCode: string; platformName: string }
 
@@ -24,10 +24,10 @@ const isReady = computed(() => props.stats?.dataState === 'ready')
 const isPlatformFiltered = computed(() => Boolean(props.stats?.platformCode))
 const stageByCode = computed(() => new Map((props.stats?.funnel || []).map((stage) => [stage.code, stage])))
 const metricItems = computed(() => [
-  { code: 'page_view', label: '贴卡访问', value: stageByCode.value.get('page_view')?.count || 0, note: isPlatformFiltered.value ? '全店进入评价流程的唯一会话' : '进入评价流程的唯一会话' },
-  { code: 'platform_select', label: '选择平台', value: stageByCode.value.get('platform_select')?.count || 0, note: '选择了目标评价平台' },
-  { code: 'review_copy', label: '复制评价', value: stageByCode.value.get('review_copy')?.count || 0, note: '已复制符合体验的评价' },
-  { code: 'platform_link_click', label: '平台点击', value: stageByCode.value.get('platform_link_click')?.count || 0, note: '已点击打开平台，非确认发布' }
+  { code: 'page_view', label: '贴卡访问', value: stageByCode.value.get('page_view')?.count || 0 },
+  { code: 'platform_select', label: '选择平台', value: stageByCode.value.get('platform_select')?.count || 0 },
+  { code: 'review_copy', label: '复制评价', value: stageByCode.value.get('review_copy')?.count || 0 },
+  { code: 'platform_link_click', label: '打开平台', value: stageByCode.value.get('platform_link_click')?.count || 0 }
 ])
 const maxFunnelCount = computed(() => Math.max(...(props.stats?.funnel || []).map((stage) => stage.count), 1))
 const chartSvg = ref<SVGSVGElement | null>(null)
@@ -72,9 +72,8 @@ const stateCopy = computed(() => {
   if (!props.stats) return ''
   if (props.stats.dataState === 'empty' && props.stats.platformCode) return `还没有顾客选择${props.stats.platformName}，贴卡访问仍按全店入口展示。`
   if (props.stats.dataState === 'empty') return '还没有顾客贴卡访问，先从 NFC 摆放和店员引导开始。'
-  if (props.stats.dataState === 'accumulating') return '数据积累中：先看真实数量，暂不展示趋势、转化率或掉点结论。'
-  if (props.stats.platformCode) return `${props.stats.rangeStart} 至 ${props.stats.rangeEnd}，贴卡访问为全店入口，后续指标按${props.stats.platformName}筛选。`
-  return `${props.stats.rangeStart} 至 ${props.stats.rangeEnd}，所有数字、漏斗和趋势使用同一统计口径。`
+  if (props.stats.dataState === 'accumulating') return '数据积累中，继续引导顾客贴卡即可。'
+  return ''
 })
 
 let chartResizeObserver: ResizeObserver | null = null
@@ -106,6 +105,20 @@ function funnelWidth(count: number) {
   return `${Math.max(count > 0 ? 8 : 0, (count / maxFunnelCount.value) * 100)}%`
 }
 
+function funnelStageLabel(stage: PublishFunnelStage) {
+  return stage.code === 'platform_link_click' ? '打开平台' : stage.label
+}
+
+function conversionText(stage: PublishFunnelStage) {
+  const action: Record<PublishFunnelStage['code'], string> = {
+    page_view: '下一步',
+    platform_select: '选择平台',
+    review_copy: '复制评价',
+    platform_link_click: '打开平台'
+  }
+  return `${stage.conversionRate.toFixed(1)}% ${action[stage.code]}`
+}
+
 function onPlatformChange(event: Event) {
   emit('platform-change', (event.target as HTMLSelectElement).value)
 }
@@ -133,16 +146,15 @@ function focusRecommendationTarget() {
   <section class="effect-dashboard" aria-labelledby="effect-dashboard-title">
     <header class="effect-header">
       <div>
-        <p class="effect-eyebrow">{{ storeName || '商家' }} · 真实使用效果</p>
+        <p class="effect-eyebrow">{{ storeName || '商家' }}</p>
         <h2 id="effect-dashboard-title">顾客评价转化</h2>
-        <p v-if="stats" class="effect-source">统计时区 {{ stats.timezone }} · 更新至 {{ new Date(stats.updatedAt).toLocaleString('zh-CN', { hour12: false }) }}</p>
       </div>
       <div class="effect-filters" aria-label="效果数据筛选">
         <div class="range-switch" role="group" aria-label="时间范围">
           <button type="button" data-range="7d" :aria-pressed="(stats?.range || '7d') === '7d'" @click="emit('range-change', '7d')">近 7 天</button>
           <button type="button" data-range="30d" :aria-pressed="stats?.range === '30d'" @click="emit('range-change', '30d')">近 30 天</button>
         </div>
-        <label for="effect-platform">数据平台</label>
+        <label for="effect-platform">平台</label>
         <select id="effect-platform" :value="stats?.platformCode || ''" :disabled="loading" @change="onPlatformChange">
           <option v-for="item in platformOptions" :key="item.platformCode || 'all'" :value="item.platformCode">{{ item.platformName }}</option>
         </select>
@@ -166,13 +178,12 @@ function focusRecommendationTarget() {
         <p>{{ error }}</p>
         <button type="button" data-testid="retry-dashboard" @click="emit('retry')">重新加载</button>
       </div>
-      <p class="effect-state" data-testid="data-state" :class="`state-${stats.dataState}`">{{ stateCopy }}</p>
+      <p v-if="stateCopy" class="effect-state" data-testid="data-state" :class="`state-${stats.dataState}`">{{ stateCopy }}</p>
 
       <div class="effect-metrics" aria-label="评价流程关键数字">
         <article v-for="item in metricItems" :key="item.code" :data-metric="item.code">
           <span>{{ item.label }}</span>
           <strong>{{ formatNumber(item.value) }}</strong>
-          <small>{{ item.note }}</small>
         </article>
       </div>
 
@@ -181,9 +192,9 @@ function focusRecommendationTarget() {
           <div class="panel-heading">
             <div>
               <h3 id="daily-trend-title">每日趋势</h3>
-              <p>{{ isPlatformFiltered ? '全店访问与所选平台后续行为的变化' : '访问、复制与平台点击的同口径变化' }}</p>
+              <p v-if="isPlatformFiltered">访问为全店，其他为{{ stats.platformName }}</p>
             </div>
-            <div class="trend-legend" aria-hidden="true"><span class="visit">访问</span><span class="copy">复制</span><span class="click">平台点击</span></div>
+            <div class="trend-legend" aria-hidden="true"><span class="visit">访问</span><span class="copy">复制</span><span class="click">打开平台</span></div>
           </div>
           <svg ref="chartSvg" data-testid="daily-trend" class="daily-chart" :viewBox="`0 0 ${chartWidth} ${chartHeight}`" role="img" :aria-label="chartAriaLabel">
             <g aria-hidden="true">
@@ -199,21 +210,20 @@ function focusRecommendationTarget() {
           </svg>
           <table class="sr-only">
             <caption>{{ chartAriaLabel }}</caption>
-            <thead><tr><th>日期</th><th>访问</th><th>复制</th><th>平台点击</th></tr></thead>
+            <thead><tr><th>日期</th><th>访问</th><th>复制</th><th>打开平台</th></tr></thead>
             <tbody><tr v-for="point in stats.dailySeries" :key="point.date"><th>{{ point.date }}</th><td>{{ point.pageViews }}</td><td>{{ point.reviewCopies }}</td><td>{{ point.platformLinkClicks }}</td></tr></tbody>
           </table>
         </section>
 
         <section class="funnel-panel" data-effect-target="funnel" aria-labelledby="funnel-title">
           <div class="panel-heading">
-            <div><h3 id="funnel-title">四段漏斗</h3><p>每一步按唯一会话计算</p></div>
+            <div><h3 id="funnel-title">顾客转化</h3></div>
           </div>
           <ol class="funnel-list">
             <li v-for="(stage, index) in stats.funnel" :key="stage.code" data-funnel-stage>
-              <div class="funnel-copy"><span><b>{{ index + 1 }}</b>{{ stage.label }}</span><strong>{{ formatNumber(stage.count) }}</strong></div>
+              <div class="funnel-copy"><span><b>{{ index + 1 }}</b>{{ funnelStageLabel(stage) }}</span><strong>{{ formatNumber(stage.count) }}</strong></div>
               <div class="funnel-track" aria-hidden="true"><span :style="{ width: funnelWidth(stage.count) }"></span></div>
-              <p v-if="isReady && stage.conversionAvailable" data-conversion-rate>{{ stage.conversionLabel || '上一步转化率' }} {{ stage.conversionRate.toFixed(1) }}%</p>
-              <p v-else-if="index === 0">流程起点</p>
+              <p v-if="isReady && stage.conversionAvailable" data-conversion-rate>{{ conversionText(stage) }}</p>
             </li>
           </ol>
         </section>
@@ -235,8 +245,7 @@ function focusRecommendationTarget() {
 .effect-dashboard { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; padding: 20px; }
 .effect-header { align-items: end; display: flex; gap: 20px; justify-content: space-between; }
 .effect-header h2 { font-size: 28px; margin: 2px 0 0; }
-.effect-eyebrow, .effect-source { color: var(--muted); font-size: 14px; margin: 0; }
-.effect-source { margin-top: 5px; }
+.effect-eyebrow { color: var(--muted); font-size: 14px; margin: 0; }
 .effect-filters { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 .effect-filters label { color: var(--muted); font-size: 14px; font-weight: 700; }
 .effect-filters select { min-height: 44px; min-width: 140px; }
@@ -248,7 +257,7 @@ function focusRecommendationTarget() {
 .effect-state.state-empty { background: #f8fafc; border-color: #cbd5e1; }
 .effect-metrics { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .effect-metrics article { border-top: 2px solid #cbd5e1; padding: 12px 4px 10px; }
-.effect-metrics span, .effect-metrics small { color: var(--muted); display: block; font-size: 14px; }
+.effect-metrics span { color: var(--muted); display: block; font-size: 14px; }
 .effect-metrics strong { display: block; font-size: 32px; line-height: 1.1; margin: 5px 0; }
 .effect-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); margin-top: 14px; }
 .trend-panel, .funnel-panel { border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
