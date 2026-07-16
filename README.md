@@ -482,6 +482,14 @@ scripts/deploy.sh restart
 scripts/deploy.sh stop
 ```
 
+已有生产部署升级时直接运行：
+
+```bash
+scripts/deploy.sh upgrade
+```
+
+`upgrade` 会强制使用旧库安全配置（`INIT_DB=false`、`LOAD_SEED=false`、`MIGRATE_DB=true`），迁移前自动备份 MySQL 到 `.deploy/backups/`，然后构建、重启并执行冒烟检查。原有 `.deploy/runtime.env`、上传目录、管理员账号和密码都会保留。只有首次处理含历史评价日志且尚未应用 `0007_publish_stats_index.sql` 的旧库时，仍需在完成时区审计后设置 `HISTORICAL_DATETIME_TIMEZONE_AUDITED=true`；脚本不会替用户伪造该确认。
+
 如果本机 MySQL 已创建并导入 schema，只需要在 `.env.deploy` 中设置 `MYSQL_DSN`。如果希望脚本尝试初始化 MySQL，可设置：
 
 ```bash

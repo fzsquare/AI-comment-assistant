@@ -8,6 +8,7 @@ LOG_DIR="$STATE_DIR/logs"
 PID_DIR="$STATE_DIR/pids"
 BIN_DIR="$STATE_DIR/bin"
 RUNTIME_ENV="$STATE_DIR/runtime.env"
+BACKUP_DIR="$STATE_DIR/backups"
 
 COMMAND="${1:-start}"
 
@@ -27,6 +28,7 @@ Usage: scripts/deploy.sh [command]
 Commands:
   start     Install dependencies, build, and start all services (default)
   restart   Same as start
+  upgrade   Back up and safely upgrade an existing deployment
   stop      Stop services started by this script
   status    Show service status
   logs      Tail logs for all services
@@ -44,6 +46,7 @@ Useful env:
   MIGRATE_DB=false            Skip DB migrations only when applied manually
   HISTORICAL_DATETIME_TIMEZONE_AUDITED=true
                               Confirm old DATETIME timezone before migration 0007
+  AUTO_BACKUP_DB=false        Skip the automatic DB backup in upgrade mode
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
   REVIEW_CRAWL_SERVICE_URL=   Optional backend-only real review crawl service URL
   SMOKE_TEST=true             Check frontend gateway and management APIs after start
@@ -136,7 +139,19 @@ configure_defaults() {
   DB_APP_PASSWORD="${DB_APP_PASSWORD:-}"
   MYSQL_ROOT_USER="${MYSQL_ROOT_USER:-root}"
   MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
-  MIGRATE_DB="${MIGRATE_DB:-true}"
+  if [[ "$COMMAND" == "upgrade" ]]; then
+    # Upgrade owns these values so an old .env.deploy cannot accidentally
+    # initialize the database or import demo users and stores.
+    INIT_DB="false"
+    LOAD_SEED="false"
+    MIGRATE_DB="true"
+    AUTO_BACKUP_DB="${AUTO_BACKUP_DB:-true}"
+  else
+    INIT_DB="${INIT_DB:-false}"
+    LOAD_SEED="${LOAD_SEED:-false}"
+    MIGRATE_DB="${MIGRATE_DB:-true}"
+    AUTO_BACKUP_DB="${AUTO_BACKUP_DB:-false}"
+  fi
   HISTORICAL_DATETIME_TIMEZONE_AUDITED="${HISTORICAL_DATETIME_TIMEZONE_AUDITED:-false}"
 
   case "${MYSQL_DSN:-}" in
@@ -240,6 +255,42 @@ mysql_cmd() {
   else
     mysql "${args[@]}" "$@"
   fi
+}
+
+backup_database() {
+  [[ "$COMMAND" == "upgrade" ]] || return
+  if ! truthy "$AUTO_BACKUP_DB"; then
+    log "AUTO_BACKUP_DB=false; pre-upgrade database backup skipped"
+    return
+  fi
+
+  require_command mysqldump
+  mkdir -p "$BACKUP_DIR"
+
+  local timestamp backup_file
+  local args=(
+    --protocol=tcp
+    -h "$MYSQL_HOST"
+    -P "$MYSQL_PORT"
+    -u "$MYSQL_ROOT_USER"
+    --single-transaction
+    --quick
+    --routines
+    --triggers
+    --default-character-set=utf8mb4
+  )
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup_file="$BACKUP_DIR/${DB_NAME}-${timestamp}.sql"
+
+  log "backing up database $DB_NAME before upgrade"
+  if [[ -n "$MYSQL_ROOT_PASSWORD" ]]; then
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump "${args[@]}" --result-file="$backup_file" "$DB_NAME"
+  else
+    mysqldump "${args[@]}" --result-file="$backup_file" "$DB_NAME"
+  fi
+  [[ -s "$backup_file" ]] || die "database backup is empty: $backup_file"
+  chmod 600 "$backup_file"
+  log "database backup saved to $backup_file"
 }
 
 validate_mysql_identifier() {
@@ -460,6 +511,8 @@ prepare_database() {
   require_command mysql
   validate_mysql_identifier DB_NAME "$DB_NAME"
 
+  backup_database
+
   if [[ "$do_init" == "true" ]]; then
     [[ -n "$DB_APP_PASSWORD" ]] || die "INIT_DB=true requires DB_APP_PASSWORD"
     [[ "$DB_APP_PASSWORD" != *"'"* ]] || die "DB_APP_PASSWORD must not contain a single quote when INIT_DB=true"
@@ -539,7 +592,9 @@ import sys
 dist = Path(sys.argv[1])
 assets = dist / "assets"
 needles = [
-    "商家运营控制台",
+    "评价助手",
+    "运营总览",
+    "商家与门店",
     "商家 ID 配置",
     "保存商家 ID",
     "服务器落地链接 / NFC 写入链接",
@@ -818,7 +873,7 @@ esac
 load_env_files
 
 case "$COMMAND" in
-  start|restart)
+  start|restart|upgrade)
     require_base_commands
     configure_defaults
     validate_config
