@@ -284,5 +284,9 @@ function focusRecommendationTarget() {
 @media (max-width: 820px) {
   .effect-dashboard { padding: 16px; }.effect-header { align-items: stretch; flex-direction: column; }.effect-filters { align-items: stretch; display: grid; grid-template-columns: 1fr 1fr; }.range-switch { grid-column: 1 / -1; }.range-switch button { flex: 1; }.effect-metrics { grid-template-columns: 1fr 1fr; }.effect-grid { display: flex; flex-direction: column; }.funnel-panel { order: 1; }.trend-panel { order: 2; }.recommendation { align-items: stretch; flex-direction: column; }.effect-loading { grid-template-columns: 1fr 1fr; }
 }
+@media (max-width: 600px) {
+  .effect-dashboard { background: transparent; border: 0; border-radius: 0; padding: 0; }
+  .trend-panel, .funnel-panel { background: var(--surface); }
+}
 @media (max-width: 420px) { .effect-metrics { grid-template-columns: 1fr; }.effect-header h2 { font-size: 24px; }.effect-metrics strong { font-size: 28px; } }
 </style>
