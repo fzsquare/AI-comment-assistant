@@ -804,7 +804,7 @@ onMounted(async () => {
 .eyebrow,
 .updated {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   margin: 0;
 }
 .analytics-meta {
@@ -827,7 +827,7 @@ onMounted(async () => {
 .platform-filter span {
   color: var(--muted);
   display: block;
-  font-size: 13px;
+  font-size: 14px;
 }
 .platform-filter strong {
   color: var(--text);
@@ -843,7 +843,7 @@ onMounted(async () => {
 }
 .platform-select-wrap label {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 .platform-select-wrap select {
@@ -853,7 +853,7 @@ onMounted(async () => {
   color: var(--text);
   font: inherit;
   font-weight: 800;
-  min-height: 40px;
+  min-height: 44px;
   min-width: 150px;
   padding: 8px 12px;
 }
@@ -866,7 +866,7 @@ onMounted(async () => {
   border-radius: 999px;
   color: var(--primary-strong);
   display: inline-flex;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 800;
   line-height: 1;
   margin-right: 6px;
@@ -912,7 +912,7 @@ onMounted(async () => {
 .secondary-metrics span {
   color: var(--muted);
   display: block;
-  font-size: 13px;
+  font-size: 14px;
 }
 .secondary-metrics strong {
   display: block;
@@ -924,7 +924,7 @@ onMounted(async () => {
 .compact-metrics small {
   color: var(--muted);
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   line-height: 1.35;
   margin-top: 5px;
@@ -1032,7 +1032,7 @@ onMounted(async () => {
 }
 .device-toggle {
   color: var(--primary-strong);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 800;
   min-width: 36px;
   text-align: right;
@@ -1062,7 +1062,7 @@ onMounted(async () => {
 }
 .device-row-head b {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 .device-track {
@@ -1091,7 +1091,7 @@ onMounted(async () => {
 }
 .compact-metrics dt {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   margin: 0;
 }
 .compact-metrics dd {
@@ -1162,7 +1162,7 @@ onMounted(async () => {
 }
 .chart-axis-text {
   fill: #64748b;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 .chart-y-axis-text {
@@ -1239,7 +1239,7 @@ onMounted(async () => {
   color: var(--text);
   display: grid;
   gap: 2px;
-  font-size: 12px;
+  font-size: 14px;
   max-width: min(220px, calc(100% - 24px));
   opacity: 0;
   padding: 8px 10px;
@@ -1254,7 +1254,7 @@ onMounted(async () => {
   opacity: 1;
 }
 .chart-tooltip strong {
-  font-size: 12px;
+  font-size: 14px;
 }
 .chart-tooltip span {
   color: var(--muted);
@@ -1305,7 +1305,8 @@ onMounted(async () => {
   border: 1px solid var(--border);
   border-radius: 8px;
   color: #334155;
-  min-height: 40px;
+  font-size: 14px;
+  min-height: 44px;
   padding: 8px 12px;
 }
 .select-chip.selected {
@@ -1328,7 +1329,7 @@ onMounted(async () => {
 }
 .dimension-chip small {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
   line-height: 1.35;
 }
@@ -1354,11 +1355,11 @@ onMounted(async () => {
 }
 .privacy-note {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
   margin: 8px 0 0;
 }
 .small-btn {
-  min-height: 38px;
+  min-height: 44px;
   padding: 7px 12px;
 }
 .form-actions {
@@ -1434,13 +1435,13 @@ onMounted(async () => {
 .fold-card summary small {
   color: var(--muted);
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   margin-top: 2px;
 }
 .fold-hint {
   color: var(--primary-strong);
   flex: 0 0 auto;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
 }
 .fold-card[open] .fold-hint {
@@ -1449,7 +1450,7 @@ onMounted(async () => {
 }
 .fold-card[open] .fold-hint::before {
   content: "收起";
-  font-size: 13px;
+  font-size: 14px;
 }
 .fold-body {
   border-top: 1px solid var(--border);
@@ -1479,9 +1480,9 @@ onMounted(async () => {
   border-radius: 8px;
   color: #1d4ed8;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 14px;
 }
 .suggest-chip:hover {
