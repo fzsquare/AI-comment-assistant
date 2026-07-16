@@ -30,6 +30,20 @@ function loginPathForCurrentEntry(currentPath: string) {
   return ''
 }
 
+function loginURLForCurrentEntry() {
+  const loginPath = loginPathForCurrentEntry(window.location.pathname)
+  if (!loginPath) return ''
+  const normalizedBase = APP_BASE.replace(/\/+$/, '')
+  const routePath = normalizedBase && window.location.pathname.startsWith(normalizedBase)
+    ? window.location.pathname.slice(normalizedBase.length) || '/'
+    : window.location.pathname
+  const params = new URLSearchParams({
+    reason: 'session_expired',
+    redirect: `${routePath}${window.location.search}${window.location.hash}`
+  })
+  return `${loginPath}?${params.toString()}`
+}
+
 const http = axios.create({
   baseURL: apiBaseURL,
   timeout: 10000,
@@ -59,9 +73,9 @@ http.interceptors.response.use(
       localStorage.removeItem(ROLE_KEY)
 
       const currentPath = window.location.pathname
-      const loginPath = loginPathForCurrentEntry(currentPath)
-      if (loginPath && !currentPath.endsWith('/login')) {
-        window.location.assign(loginPath)
+      const loginURL = loginURLForCurrentEntry()
+      if (loginURL && !currentPath.endsWith('/login')) {
+        window.location.assign(loginURL)
       }
     }
     return Promise.reject(error)

@@ -5,6 +5,7 @@ import LandingReviewPage from '../views/landing/LandingReviewPage.vue'
 import Portal from '../views/Portal.vue'
 import SchemeTestPage from '../views/SchemeTestPage.vue'
 import type { Role } from '../stores/auth'
+import { isTokenExpired, safeAdminRedirect } from '../utils/authSession'
 
 // 商家/管理后台按需加载，消费者落地页不下载这些重代码（CRUD 表格/表单）
 const MerchantLogin = () => import('../views/merchant/MerchantLogin.vue')
@@ -58,7 +59,8 @@ router.beforeEach((to) => {
 
   if (to.path === '/merchant/login' || to.path === '/admin/login') {
     const loginRole: Role = to.path === '/admin/login' ? 'admin' : 'merchant'
-    if (token && role === loginRole) {
+    if (token && role === loginRole && !isTokenExpired(token)) {
+      if (loginRole === 'admin') return safeAdminRedirect(to.query.redirect)
       return homePath(loginRole)
     }
     if (token) {
@@ -71,9 +73,13 @@ router.beforeEach((to) => {
     return true
   }
 
-  if (!token) {
+  const expired = !!token && isTokenExpired(token)
+  if (!token || expired) {
     clearAuth()
-    return { path: loginPath(requiredRole), query: { redirect: to.fullPath } }
+    return {
+      path: loginPath(requiredRole),
+      query: { redirect: to.fullPath, ...(expired ? { reason: 'session_expired' } : {}) }
+    }
   }
 
   if (requiredRole && role !== requiredRole) {
