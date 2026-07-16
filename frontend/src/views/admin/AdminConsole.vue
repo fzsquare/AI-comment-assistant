@@ -57,21 +57,43 @@ const detailTabs = [
   { key: 'config', label: '配置资料' }
 ] as const
 type AdminConsoleSection = 'overview' | 'platform-reviews' | 'stores' | 'store-detail' | 'operations' | 'settings'
-const navItems = [
-  { label: '运营总览', section: 'overview' },
-  { label: '平台评论库', section: 'platform-reviews' },
-  { label: '商家列表', section: 'stores' },
-  { label: '商家详情', section: 'store-detail' },
-  { label: '运营建议', section: 'operations' },
-  { label: '后台配置', section: 'settings' }
-] as const satisfies ReadonlyArray<{ label: string; section: AdminConsoleSection }>
-const adminSectionSet = new Set<AdminConsoleSection>(navItems.map((item) => item.section))
+const navGroups = [
+  {
+    label: '运营',
+    items: [{ label: '运营总览', description: '指标与待办', section: 'overview' as const }]
+  },
+  {
+    label: '客户与门店',
+    items: [{ label: '商家与门店', description: '账号、门店与状态', section: 'stores' as const }]
+  },
+  {
+    label: '内容',
+    items: [{ label: '平台评论库', description: '真实评论样本', section: 'platform-reviews' as const }]
+  },
+  {
+    label: '系统',
+    items: [{ label: '系统配置', description: '类型、账号与任务', section: 'settings' as const }]
+  }
+] as const
+const routableSections: AdminConsoleSection[] = ['overview', 'platform-reviews', 'stores', 'store-detail', 'operations', 'settings']
+const adminSectionSet = new Set<AdminConsoleSection>(routableSections)
 const activeAdminSection = computed<AdminConsoleSection>(() => {
   const section = String(route.params.section || 'overview') as AdminConsoleSection
   return adminSectionSet.has(section) ? section : 'overview'
 })
 const detailSectionTitle = computed(() => activeAdminSection.value === 'operations' ? '运营建议' : '商家详情')
 const detailSectionSubtitle = computed(() => activeAdminSection.value === 'operations' ? '围绕当前选中商家处理使用风险和转化建议。' : '当前选中商家的链接、采集和转化资料。')
+const sectionPresentation = computed(() => {
+  const presentations: Record<AdminConsoleSection, { eyebrow: string; title: string; description: string }> = {
+    overview: { eyebrow: '运营', title: '运营总览', description: '先处理异常，再看商家使用和转化表现。' },
+    stores: { eyebrow: '客户与门店', title: '商家与门店', description: '管理商家账号、门店状态、平台入口和 NFC 链路。' },
+    'store-detail': { eyebrow: '客户与门店', title: selectedStore.value?.storeName || '商家详情', description: '查看当前门店的配置、使用和转化数据。' },
+    operations: { eyebrow: '客户与门店', title: selectedStore.value ? `${selectedStore.value.storeName} · 运营建议` : '运营建议', description: '根据当前门店状态处理影响使用和转化的问题。' },
+    'platform-reviews': { eyebrow: '内容', title: '平台评论库', description: '管理用于生成参考的真实评论样本。' },
+    settings: { eyebrow: '系统', title: '系统配置', description: '维护类型、商家账号和后台任务。' }
+  }
+  return presentations[activeAdminSection.value]
+})
 
 // 自定义类型只能挂在 9 个预置行业之一之下（生成/隔离基准）
 const presetTypes = computed(() => storeTypes.value.filter((t) => t.isPreset))
@@ -540,8 +562,13 @@ function syncStoreIdConfig(item: AdminStore | null) {
   selectedStoreIdConfig.enabled = !!item?.reviewCrawl?.enabled
 }
 
-function adminSectionRoute(section: AdminConsoleSection) {
-  return { name: 'admin-console-section', params: { section } }
+function adminSectionRoute(section: AdminConsoleSection, storeId?: number | null) {
+  const contextualStoreId = storeId || ((section === 'store-detail' || section === 'operations') ? selectedStoreId.value : null)
+  return {
+    name: 'admin-console-section',
+    params: { section },
+    ...(contextualStoreId ? { query: { storeId: String(contextualStoreId) } } : {})
+  }
 }
 
 async function goAdminSection(section: AdminConsoleSection) {
@@ -623,7 +650,10 @@ async function loadAll() {
     stats.value = statsRes.data.data
     if (!newStore.typeId) newStore.typeId = storeTypes.value[0]?.id || 0
     if (!newType.industryCode) newType.industryCode = presetTypes.value[0]?.code || ''
-    if (stores.value.length && !stores.value.some((item) => item.id === selectedStoreId.value)) {
+    const requestedStoreId = Number(route.query.storeId || 0)
+    if (requestedStoreId > 0 && stores.value.some((item) => item.id === requestedStoreId)) {
+      selectedStoreId.value = requestedStoreId
+    } else if (stores.value.length && !stores.value.some((item) => item.id === selectedStoreId.value)) {
       selectedStoreId.value = stores.value[0].id
     }
     if (!stores.value.length) {
@@ -846,7 +876,7 @@ async function regenerateStoreReviews(item: AdminStore) {
 async function loadReviewCrawl(item: AdminStore) {
   selectedStoreId.value = item.id
   syncStoreIdConfig(item)
-  await goAdminSection('store-detail')
+  await router.push(adminSectionRoute('store-detail', item.id))
   crawlLoading.value = true
   error.value = ''
   try {
@@ -868,7 +898,9 @@ function selectStore(item: AdminStore) {
   selectedStoreId.value = item.id
   syncStoreIdConfig(item)
   if (activeAdminSection.value !== 'store-detail' && activeAdminSection.value !== 'operations') {
-    void goAdminSection('store-detail')
+    void router.push(adminSectionRoute('store-detail', item.id))
+  } else if (String(route.query.storeId || '') !== String(item.id)) {
+    void router.replace(adminSectionRoute(activeAdminSection.value, item.id))
   }
 }
 
@@ -937,9 +969,9 @@ function numericStatusText(status: number) {
   return status === 1 ? '已激活' : '未激活'
 }
 
-function logout() {
+async function logout() {
   auth.clear()
-  location.href = import.meta.env.BASE_URL + 'admin/login'
+  await router.replace({ path: '/admin/login', query: { reason: 'logged_out' } })
 }
 
 onMounted(async () => {
@@ -955,40 +987,62 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="admin-console">
-    <aside class="ops-sidebar" aria-label="商家运营导航">
+    <aside class="ops-sidebar" aria-label="管理员主导航">
       <div class="brand-block">
-        <strong>商家运营控制台</strong>
-        <span>NFC 评价助手 · 管理员</span>
+        <span class="brand-mark" aria-hidden="true">评</span>
+        <span class="brand-copy">
+          <strong>评价助手</strong>
+          <span>管理员控制台</span>
+        </span>
       </div>
       <nav class="side-nav">
-        <RouterLink
-          v-for="item in navItems"
-          :key="item.section"
-          :to="adminSectionRoute(item.section)"
-          :class="{ active: activeAdminSection === item.section }"
-        >
-          <i aria-hidden="true"></i>
-          <span>{{ item.label }}</span>
-        </RouterLink>
+        <section v-for="group in navGroups" :key="group.label" class="side-nav-group">
+          <p>{{ group.label }}</p>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.section"
+            :to="adminSectionRoute(item.section)"
+            :class="{ active: activeAdminSection === item.section }"
+          >
+            <span>
+              <b>{{ item.label }}</b>
+              <small>{{ item.description }}</small>
+            </span>
+          </RouterLink>
+        </section>
+        <section v-if="selectedStore" class="side-nav-group contextual-nav">
+          <p>当前门店</p>
+          <RouterLink
+            :to="adminSectionRoute('store-detail', selectedStore.id)"
+            :class="{ active: activeAdminSection === 'store-detail' || activeAdminSection === 'operations' }"
+          >
+            <span>
+              <b>{{ selectedStore.storeName }}</b>
+              <small>详情与运营建议</small>
+            </span>
+          </RouterLink>
+        </section>
       </nav>
       <div class="side-summary">
-        <span>核心状态</span>
+        <span>门店状态</span>
         <strong>{{ formatNumber(activeStores.length) }} / {{ formatNumber(stats.storeCount) }}</strong>
-        <small>已激活商家</small>
+        <small>已激活 / 全部门店</small>
+        <span :class="['side-pending', pendingWorkCount > 0 ? 'has-work' : '']">待处理 {{ formatNumber(pendingWorkCount) }}</span>
       </div>
     </aside>
 
     <main class="ops-main">
       <header class="ops-topbar">
         <div>
-          <p class="eyebrow">Admin Workspace</p>
-          <h1>商家运营控制台</h1>
-          <p class="muted">激活状态、官方链接配置和 NFC 路由可用性独立管理。</p>
+          <p class="eyebrow">{{ sectionPresentation.eyebrow }}</p>
+          <h1>{{ sectionPresentation.title }}</h1>
+          <p class="muted">{{ sectionPresentation.description }}</p>
         </div>
         <div class="topbar-actions">
-          <button class="secondary" :disabled="loading" @click="loadAll">刷新</button>
-          <button type="button" @click="openCreateStore">新建商家</button>
-          <button class="secondary" @click="logout">退出登录</button>
+          <span class="admin-identity"><b>管理员</b><small>已安全登录</small></span>
+          <button class="secondary" :disabled="loading" @click="loadAll">{{ loading ? '刷新中…' : '刷新数据' }}</button>
+          <button type="button" @click="openCreateStore">新建商家与门店</button>
+          <button class="text-action" @click="logout">退出</button>
         </div>
       </header>
 
@@ -998,7 +1052,7 @@ onBeforeUnmount(() => {
       <section v-if="activeAdminSection === 'overview'" id="ops-overview" class="screen-card overview-screen" aria-labelledby="overview-title">
         <div class="screen-head">
           <div>
-            <h2 id="overview-title">商家运营总览</h2>
+            <h2 id="overview-title">关键指标</h2>
             <p class="muted">{{ updatedText || '等待数据更新' }}</p>
             <p class="data-source">来源：{{ analyticsSourceText }}</p>
           </div>
@@ -1009,29 +1063,29 @@ onBeforeUnmount(() => {
 
         <div class="kpi-grid" aria-label="总览指标">
           <div class="kpi">
-            <span>总商家</span>
-            <strong>{{ formatNumber(stats.storeCount) }}</strong>
+            <span>商家账号</span>
+            <strong>{{ formatNumber(stats.merchantCount) }}</strong>
             <small>本周新增 {{ formatNumber(stats.currentWeekNewMerchants) }}</small>
           </div>
           <div class="kpi">
-            <span>已激活</span>
-            <strong>{{ formatNumber(activeStores.length) }}</strong>
-            <small>未激活 {{ formatNumber(inactiveStoreCount) }}</small>
+            <span>门店</span>
+            <strong>{{ formatNumber(stats.storeCount) }}</strong>
+            <small>已激活 {{ formatNumber(activeStores.length) }}</small>
           </div>
           <div class="kpi">
-            <span>官方链接已配置</span>
-            <strong>{{ formatNumber(officialConfiguredCount) }}</strong>
-            <small>未配置 {{ formatNumber(officialMissingCount) }}</small>
+            <span>待处理事项</span>
+            <strong>{{ formatNumber(pendingWorkCount) }}</strong>
+            <small>影响使用和转化</small>
           </div>
           <div class="kpi">
-            <span>NFC 路由可用</span>
-            <strong>{{ formatNumber(nfcRouteUsableCount) }}</strong>
-            <small>异常 {{ formatNumber(nfcRouteErrorCount) }}</small>
-          </div>
-          <div class="kpi">
-            <span>NFC 访问</span>
+            <span>顾客访问</span>
             <strong>{{ formatNumber(stats.totalCustomerVisits) }}</strong>
             <small>本月 {{ formatNumber(stats.currentMonthCustomerVisits) }}</small>
+          </div>
+          <div class="kpi">
+            <span>打开平台</span>
+            <strong>{{ formatNumber(stats.totalPublishClicks) }}</strong>
+            <small>本月 {{ formatNumber(stats.currentMonthPublishClicks) }}</small>
           </div>
           <div class="kpi">
             <span>平均发布转化率</span>
@@ -1258,8 +1312,8 @@ onBeforeUnmount(() => {
       <section v-if="activeAdminSection === 'stores'" id="merchant-ledger" class="screen-card ledger-screen" aria-labelledby="ledger-title">
         <div class="screen-head ledger-head">
           <div>
-            <h2 id="ledger-title">商家管理列表</h2>
-            <p class="muted">共 {{ formatNumber(filteredStores.length) }} 条，当前选中 {{ selectedStore?.storeName || '-' }}</p>
+            <h2 id="ledger-title">商家与门店</h2>
+            <p class="muted">{{ formatNumber(stats.merchantCount) }} 个商家账号，{{ formatNumber(filteredStores.length) }} 家匹配门店</p>
           </div>
           <div class="ledger-tools">
             <input v-model="storeSearch" type="search" placeholder="搜索商家、账号、门店、商家 ID、官方链接" />
@@ -1801,7 +1855,7 @@ onBeforeUnmount(() => {
   background: #0f172a;
   color: #e5edf8;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 100vh;
   padding: 22px 18px;
   position: sticky;
@@ -1809,16 +1863,33 @@ onBeforeUnmount(() => {
 }
 
 .brand-block {
+  align-items: center;
   border-bottom: 1px solid rgba(226, 232, 240, 0.16);
+  display: flex;
+  gap: 11px;
   padding-bottom: 20px;
 }
 
 .brand-block strong,
-.brand-block span,
+.brand-copy,
 .side-summary span,
 .side-summary small,
 .subtext {
   display: block;
+}
+
+.brand-mark {
+  align-items: center;
+  background: #2563eb;
+  border-radius: 7px;
+  color: #fff;
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 15px;
+  font-weight: 900;
+  height: 34px;
+  justify-content: center;
+  width: 34px;
 }
 
 .brand-block strong {
@@ -1826,7 +1897,7 @@ onBeforeUnmount(() => {
   font-size: 18px;
 }
 
-.brand-block span,
+.brand-copy > span,
 .side-summary span,
 .side-summary small {
   color: #94a3b8;
@@ -1836,21 +1907,49 @@ onBeforeUnmount(() => {
 
 .side-nav {
   display: grid;
-  gap: 6px;
+  gap: 18px;
   align-content: start;
+  overflow-y: auto;
   padding: 22px 0;
+}
+
+.side-nav-group {
+  display: grid;
+  gap: 5px;
+}
+
+.side-nav-group > p {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  margin: 0 10px 3px;
 }
 
 .side-nav a {
   align-items: center;
   border-radius: 8px;
   color: #cbd5e1;
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 10px 1fr;
-  min-height: 38px;
+  display: block;
+  min-height: 48px;
   padding: 8px 10px;
   text-decoration: none;
+}
+
+.side-nav a b,
+.side-nav a small {
+  display: block;
+}
+
+.side-nav a b {
+  color: inherit;
+  font-size: 14px;
+}
+
+.side-nav a small {
+  color: #94a3b8;
+  font-size: 11px;
+  margin-top: 2px;
 }
 
 .side-nav a.active,
@@ -1860,11 +1959,14 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 
-.side-nav i {
-  background: currentColor;
-  border-radius: 999px;
-  height: 7px;
-  width: 7px;
+.side-nav a.active small,
+.side-nav a.router-link-active small {
+  color: #bfdbfe;
+}
+
+.contextual-nav {
+  border-top: 1px solid rgba(226, 232, 240, 0.12);
+  padding-top: 16px;
 }
 
 .side-summary {
@@ -1879,6 +1981,17 @@ onBeforeUnmount(() => {
   font-size: 28px;
   line-height: 1;
   margin-top: 8px;
+}
+
+.side-summary .side-pending {
+  border-top: 1px solid rgba(226, 232, 240, 0.12);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.side-summary .side-pending.has-work {
+  color: #fbbf24;
+  font-weight: 800;
 }
 
 .ops-main {
@@ -1914,9 +2027,39 @@ onBeforeUnmount(() => {
 }
 
 .topbar-actions {
+  align-items: center;
   display: flex;
   flex: 0 0 auto;
   gap: 8px;
+}
+
+.admin-identity {
+  border-right: 1px solid var(--border);
+  display: grid;
+  line-height: 1.2;
+  margin-right: 2px;
+  padding-right: 12px;
+  text-align: right;
+}
+
+.admin-identity b {
+  font-size: 13px;
+}
+
+.admin-identity small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.text-action {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.text-action:hover {
+  background: var(--surface-subtle);
+  color: var(--text);
 }
 
 .topbar-actions button,
@@ -3156,19 +3299,27 @@ onBeforeUnmount(() => {
   }
 
   .side-nav {
-    grid-template-columns: repeat(6, minmax(96px, 1fr));
+    display: flex;
+    gap: 8px;
     overflow-x: auto;
+    padding: 14px 0 4px;
+  }
+
+  .side-nav-group {
+    display: flex;
+    flex: 0 0 auto;
+  }
+
+  .side-nav-group > p,
+  .side-nav a small,
+  .contextual-nav,
+  .admin-identity {
+    display: none;
   }
 
   .side-nav a {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    min-width: 96px;
-    text-align: center;
-  }
-
-  .side-nav i {
-    display: none;
+    min-height: 42px;
+    min-width: max-content;
   }
 
   .side-summary {
