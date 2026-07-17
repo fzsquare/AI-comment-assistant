@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { merchantApi } from '../../api/merchant'
-import type { GenerationPreferences, PublishStats, PublishStatsRange } from '../../api/merchant'
+import type { GenerationPreferences, LotteryConfig, PublishStats, PublishStatsRange } from '../../api/merchant'
 import { useAuthStore } from '../../stores/auth'
 import MerchantEffectDashboard from './MerchantEffectDashboard.vue'
+import LotterySettings from './LotterySettings.vue'
 
 const auth = useAuthStore()
 const storeForm = reactive({
@@ -36,6 +37,8 @@ const customFocusKeyword = ref('')
 const preferenceSaving = ref(false)
 const generating = ref(false)
 const generationNotice = ref('')
+const lotterySaving = ref(false)
+const lotteryConfig = ref<LotteryConfig>({ enabled: false, prizes: [] })
 const preferenceForm = reactive<GenerationPreferences>({
   configured: false,
   focusKeywords: [],
@@ -111,14 +114,15 @@ async function loadAll() {
   loading.value = true
   error.value = ''
   try {
-    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, prefRes] = await Promise.all([
+    const [storeRes, keywordRes, suggestRes, imageRes, linkRes, reviewRes, prefRes, lotteryRes] = await Promise.all([
       merchantApi.getStoreDetail(),
       merchantApi.listKeywords(),
       merchantApi.getKeywordSuggestions(),
       merchantApi.listImages(),
       merchantApi.listPlatformLinks(),
       merchantApi.listReviews(),
-      merchantApi.getGenerationPreferences()
+      merchantApi.getGenerationPreferences(),
+      merchantApi.getLotteryConfig()
     ])
     Object.assign(storeForm, storeRes.data.data)
     keywords.value = keywordRes.data.data
@@ -129,6 +133,7 @@ async function loadAll() {
     syncAnalyticsPlatformSelection()
     await loadDashboardStats(false)
     applyPreferences(prefRes.data.data)
+    lotteryConfig.value = lotteryRes.data.data
     if (!reviewPlatformCode.value && links.value.length > 0) {
       reviewPlatformCode.value = links.value.find((item) => item.status === 1)?.platformCode || links.value[0].platformCode
     }
@@ -136,6 +141,20 @@ async function loadAll() {
     error.value = messageFrom(err, '商家后台数据加载失败')
   } finally {
     loading.value = false
+  }
+}
+
+async function saveLotteryConfig(config: LotteryConfig) {
+  lotterySaving.value = true
+  error.value = ''
+  try {
+    const result = await merchantApi.saveLotteryConfig(config)
+    lotteryConfig.value = result.data.data
+    notice.value = config.enabled ? '抽奖活动已开启' : '抽奖配置已保存，当前未开启'
+  } catch (err: any) {
+    error.value = messageFrom(err, '抽奖配置保存失败')
+  } finally {
+    lotterySaving.value = false
   }
 }
 
@@ -485,6 +504,8 @@ onMounted(async () => {
       @platform-change="selectAnalyticsPlatform"
       @retry="loadDashboardStats"
     />
+
+    <LotterySettings :config="lotteryConfig" :saving="lotterySaving" @save="saveLotteryConfig" />
 
     <section class="value-shell settings-shell" aria-label="评价内容优化">
       <div class="optimization-panel">

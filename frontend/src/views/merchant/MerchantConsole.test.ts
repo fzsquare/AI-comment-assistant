@@ -11,7 +11,9 @@ const merchantApi = vi.hoisted(() => ({
   listPlatformLinks: vi.fn(),
   listReviews: vi.fn(),
   getGenerationPreferences: vi.fn(),
-  getPublishStats: vi.fn()
+  getPublishStats: vi.fn(),
+  getLotteryConfig: vi.fn(),
+  saveLotteryConfig: vi.fn()
 }))
 
 vi.mock('../../api/merchant', () => ({ merchantApi }))
@@ -76,6 +78,8 @@ describe('MerchantConsole effect filters', () => {
       lengthVariance: 'wide'
     }))
     merchantApi.getPublishStats.mockImplementation((platformCode: string, range: '7d' | '30d') => response(dashboard(range, platformCode)))
+    merchantApi.getLotteryConfig.mockReturnValue(response({ enabled: false, prizes: [] }))
+    merchantApi.saveLotteryConfig.mockImplementation((payload: unknown) => response(payload))
   })
 
   it('keeps numbers, funnel and trend on the same range and platform request', async () => {

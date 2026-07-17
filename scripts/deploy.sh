@@ -258,7 +258,7 @@ mysql_cmd() {
 }
 
 backup_database() {
-  [[ "$COMMAND" == "upgrade" ]] || return
+  [[ "$COMMAND" == "upgrade" ]] || return 0
   if ! truthy "$AUTO_BACKUP_DB"; then
     log "AUTO_BACKUP_DB=false; pre-upgrade database backup skipped"
     return
@@ -463,16 +463,16 @@ require_historical_datetime_timezone_audit() {
   local has_logs_table has_logs has_migrations_table already_applied=0
 
   has_logs_table="$(mysql_cmd -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME' AND table_name = 'review_display_logs';")"
-  [[ "$has_logs_table" == "1" ]] || return
+  [[ "$has_logs_table" == "1" ]] || return 0
 
   has_logs="$(mysql_cmd "$DB_NAME" -N -B -e "SELECT EXISTS(SELECT 1 FROM review_display_logs LIMIT 1);")"
-  [[ "$has_logs" == "1" ]] || return
+  [[ "$has_logs" == "1" ]] || return 0
 
   has_migrations_table="$(mysql_cmd -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME' AND table_name = 'schema_migrations';")"
   if [[ "$has_migrations_table" == "1" ]]; then
     already_applied="$(mysql_cmd "$DB_NAME" -N -B -e "SELECT COUNT(*) FROM schema_migrations WHERE filename = '$migration';")"
   fi
-  [[ "$already_applied" == "0" ]] || return
+  [[ "$already_applied" == "0" ]] || return 0
   if ! truthy "$HISTORICAL_DATETIME_TIMEZONE_AUDITED"; then
     die "existing review_display_logs use timezone-less DATETIME values; audit the old backend host's Local timezone, migrate historical rows if needed, then set HISTORICAL_DATETIME_TIMEZONE_AUDITED=true before applying $migration"
   fi
@@ -482,7 +482,7 @@ require_historical_datetime_timezone_audit() {
 # 迁移本身用 information_schema 守卫，幂等，全新库/旧库均可安全运行。
 apply_migrations() {
   local dir="$ROOT_DIR/database/migrations"
-  [[ -d "$dir" ]] || return
+  [[ -d "$dir" ]] || return 0
   ensure_migrations_table
   local f base applied
   for f in "$dir"/*.sql; do

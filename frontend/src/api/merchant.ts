@@ -103,6 +103,21 @@ export type GenerationPreferences = {
   updatedAt?: string
 }
 
+export type LotteryPrize = {
+  id?: number
+  name: string
+  imageUrl: string
+  stock: number
+  winRate: number
+  enabled: boolean
+  sortNo?: number
+}
+
+export type LotteryConfig = {
+  enabled: boolean
+  prizes: LotteryPrize[]
+}
+
 export type ReviewGenerationAuditLog = {
   id: number
   taskId: number
@@ -156,6 +171,12 @@ export const merchantApi = {
   getPublishStats(platformCode = '', range: PublishStatsRange = '7d') {
     const params = { range, ...(platformCode ? { platformCode } : {}) }
     return http.get<{ code: number; message: string; data: PublishStats }>('/merchant/dashboard/publish-stats', { params })
+  },
+  getLotteryConfig() {
+    return http.get<{ code: number; message: string; data: LotteryConfig }>('/merchant/lottery/config')
+  },
+  saveLotteryConfig(payload: LotteryConfig) {
+    return http.put<{ code: number; message: string; data: LotteryConfig }>('/merchant/lottery/config', payload)
   },
   listKeywords() {
     return http.get('/merchant/store/keywords')

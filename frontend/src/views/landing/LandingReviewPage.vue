@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   publicApi,
   type LandingData,
   type LandingPlatformLink,
-  type LandingReview
+  type LandingReview,
+  type LotteryDrawResult
 } from '../../api/public'
 import { copyToClipboard } from '../../utils/clipboard'
 import { openPlatform } from '../../utils/deeplink'
@@ -28,6 +29,8 @@ const editedContent = ref('')
 const reviewEditor = ref<HTMLTextAreaElement | null>(null)
 const reviewActions = ref<HTMLElement | null>(null)
 const acceptedReviewIds = new Set<number>()
+const lotteryResult = ref<LotteryDrawResult | null>(null)
+const lotteryDrawing = ref(false)
 
 const token = computed(() => String(route.params.token || ''))
 const platformCode = computed(() => String(route.params.platformCode || ''))
@@ -37,6 +40,37 @@ const tagSummaryLabel = computed(() => selectedTag.value ? `已按“${selectedT
 
 function platformSelectionPath() {
   return { path: `/landing/${encodeURIComponent(token.value)}` }
+}
+
+function lotteryPendingKey() {
+  return `ppk-lottery-pending:${token.value}`
+}
+
+function markLotteryPending(sessionId: string) {
+  sessionStorage.setItem(lotteryPendingKey(), sessionId)
+}
+
+function pendingLotterySessionId() {
+  return sessionStorage.getItem(lotteryPendingKey()) || ''
+}
+
+async function drawPendingLottery() {
+  const session = readLandingSession(token.value)
+  const pendingSessionID = pendingLotterySessionId()
+  if (!session || !pendingSessionID || pendingSessionID !== session.sessionId || lotteryDrawing.value || lotteryResult.value) return
+  lotteryDrawing.value = true
+  try {
+    const { data } = await publicApi.drawLottery(token.value, { sessionId: session.sessionId })
+    if (data.data.enabled && data.data.drawn) lotteryResult.value = data.data
+    sessionStorage.removeItem(lotteryPendingKey())
+  } catch (drawError: any) {
+    if (isLandingSessionError(drawError)) {
+      discardLandingSession(token.value, session.sessionId)
+      sessionStorage.removeItem(lotteryPendingKey())
+    }
+  } finally {
+    lotteryDrawing.value = false
+  }
 }
 
 async function redirectToPlatformSelection() {
@@ -212,13 +246,19 @@ async function copyAndOpenPlatform() {
       platformCode: link.platformCode,
       editedContent: text
     })
+    markLotteryPending(session.sessionId)
     openPlatform(link.platformCode, link.openUrl || link.targetUrl, link.backupUrl || link.targetUrl)
   } finally {
     actionPending.value = false
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  window.addEventListener('focus', drawPendingLottery)
+})
+
+onBeforeUnmount(() => window.removeEventListener('focus', drawPendingLottery))
 </script>
 
 <template>
@@ -334,6 +374,25 @@ onMounted(load)
           <button type="button" :disabled="switching || actionPending" @click="switchReview">换个说法</button>
           <button type="button" :disabled="switching || actionPending || !editedContent.trim()" @click="copyReview">仅复制</button>
         </div>
+      </div>
+
+      <div v-if="lotteryResult" class="landing-lottery-mask" role="dialog" aria-modal="true" aria-labelledby="lottery-result-title" data-testid="lottery-result">
+        <section class="landing-lottery-result">
+          <p class="landing-eyebrow">到店互动抽奖</p>
+          <template v-if="lotteryResult.won">
+            <p class="landing-lottery-spark" aria-hidden="true">✦</p>
+            <h2 id="lottery-result-title">恭喜抽中</h2>
+            <img v-if="lotteryResult.prizeImageUrl" class="landing-lottery-prize-image" :src="lotteryResult.prizeImageUrl" :alt="lotteryResult.prizeName" />
+            <strong>{{ lotteryResult.prizeName }}</strong>
+            <p>请向身边店员出示本页面领取</p>
+          </template>
+          <template v-else>
+            <p class="landing-lottery-spark" aria-hidden="true">♡</p>
+            <h2 id="lottery-result-title">谢谢参与</h2>
+            <p>感谢你分享这次真实体验。</p>
+          </template>
+          <button type="button" class="landing-primary-button" @click="lotteryResult = null">我知道了</button>
+        </section>
       </div>
     </template>
   </main>

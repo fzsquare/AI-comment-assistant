@@ -125,6 +125,11 @@ let generationPreferences = {
   updatedAt: new Date().toISOString()
 }
 
+let lotteryConfig = {
+  enabled: true,
+  prizes: [{ id: 301, name: '招牌小吃一份', imageUrl: '', stock: 20, winRate: 30, sortNo: 1, enabled: true }]
+}
+
 let nfcTags = [
   { id: 1, tagCode: 'TAG-DEMO-001', storeId: 1, landingToken: 'mock-demo-001', status: 'bound', remark: '演示标签' }
 ]
@@ -702,12 +707,15 @@ const routes: Array<{ method: string; re: RegExp; handler: Handler }> = [
   { method: 'GET', re: /\/public\/landing\/[^/]+\/init$/, handler: () => landingPayload() },
   { method: 'POST', re: /\/public\/landing\/[^/]+\/switch-review$/, handler: (_m, b) => pickReview(b.platformCode, b.tag) },
   { method: 'POST', re: /\/public\/landing\/[^/]+\/events$/, handler: () => ({ saved: true }) },
+  { method: 'POST', re: /\/public\/landing\/[^/]+\/lottery-draw$/, handler: () => lotteryConfig.enabled ? ({ enabled: true, drawn: true, won: true, prizeName: lotteryConfig.prizes[0]?.name || '', prizeImageUrl: lotteryConfig.prizes[0]?.imageUrl || '' }) : ({ enabled: false, drawn: false, won: false, prizeName: '', prizeImageUrl: '' }) },
 
   // ----- 商家端 -----
   { method: 'POST', re: /\/merchant\/auth\/login$/, handler: () => ({ token: 'mock-merchant-token' }) },
   { method: 'GET', re: /\/merchant\/store\/detail$/, handler: () => store },
   { method: 'PUT', re: /\/merchant\/store\/detail$/, handler: (_m, b) => Object.assign(store, b) },
   { method: 'GET', re: /\/merchant\/dashboard\/publish-stats$/, handler: (_m, _b, params) => mockPublishStats(params) },
+  { method: 'GET', re: /\/merchant\/lottery\/config$/, handler: () => lotteryConfig },
+  { method: 'PUT', re: /\/merchant\/lottery\/config$/, handler: (_m, b) => { lotteryConfig = { enabled: Boolean(b.enabled), prizes: (b.prizes || []).map((item: any, index: number) => ({ id: item.id || nextId(), sortNo: index + 1, ...item })) }; return lotteryConfig } },
   { method: 'GET', re: /\/merchant\/store\/keyword-suggestions$/, handler: () => ({ tags: suggestTagsByIndustry(store.industryType) }) },
   { method: 'GET', re: /\/merchant\/store\/keywords$/, handler: () => keywords },
   { method: 'POST', re: /\/merchant\/store\/keywords$/, handler: (_m, b) => { const it = { id: nextId(), keyword: b.keyword, sortNo: b.sortNo || 0 }; keywords.push(it); return it } },

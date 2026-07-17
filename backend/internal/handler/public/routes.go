@@ -28,6 +28,7 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 	api.GET("/public/landing/:uuid/init", h.initLanding)
 	api.POST("/public/landing/:uuid/switch-review", h.switchReview)
 	api.POST("/public/landing/:uuid/events", h.createEvent)
+	api.POST("/public/landing/:uuid/lottery-draw", h.drawLottery)
 }
 
 func (h *Handler) initLanding(c *gin.Context) {

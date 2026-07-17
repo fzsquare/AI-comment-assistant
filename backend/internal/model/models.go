@@ -91,6 +91,40 @@ type Store struct {
 	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
+// StoreLotteryConfig controls whether a store offers an immediate, in-store gift draw.
+// It intentionally has no payment, member, coupon, or redemption fields.
+type StoreLotteryConfig struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	StoreID   uint      `gorm:"uniqueIndex;not null" json:"storeId"`
+	Enabled   bool      `gorm:"default:false;not null" json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type StoreLotteryPrize struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	StoreID   uint      `gorm:"index;not null" json:"storeId"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	ImageURL  string    `gorm:"size:500" json:"imageUrl"`
+	Stock     int       `gorm:"not null" json:"stock"`
+	WinRate   int       `gorm:"not null" json:"winRate"`
+	SortNo    int       `gorm:"default:0;not null" json:"sortNo"`
+	Enabled   bool      `gorm:"default:true;not null" json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type StoreLotteryDraw struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	StoreID       uint      `gorm:"uniqueIndex:uk_lottery_draw_store_session,priority:1;index;not null" json:"storeId"`
+	SessionID     string    `gorm:"size:128;uniqueIndex:uk_lottery_draw_store_session,priority:2;not null" json:"sessionId"`
+	PrizeID       *uint     `gorm:"index" json:"prizeId"`
+	Outcome       string    `gorm:"size:16;not null" json:"outcome"`
+	PrizeName     string    `gorm:"size:64" json:"prizeName"`
+	PrizeImageURL string    `gorm:"size:500" json:"prizeImageUrl"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
 type StoreKeyword struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	StoreID   uint      `gorm:"index;not null" json:"storeId"`

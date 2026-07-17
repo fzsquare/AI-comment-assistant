@@ -38,6 +38,14 @@ export type LandingData = {
   remainingDispatchableCount: number
 }
 
+export type LotteryDrawResult = {
+  enabled: boolean
+  drawn: boolean
+  won: boolean
+  prizeName: string
+  prizeImageUrl?: string
+}
+
 type ApiEnvelope<T> = { code: number; message: string; data: T }
 
 const landingEventRequestConfig: AxiosRequestConfig | undefined = import.meta.env.VITE_USE_MOCK === 'true'
@@ -53,5 +61,8 @@ export const publicApi = {
   },
   createEvent(token: string, payload: Record<string, unknown>) {
     return http.post<ApiEnvelope<{ saved: boolean }>>(`/public/landing/${token}/events`, payload, landingEventRequestConfig)
+  },
+  drawLottery(token: string, payload: { sessionId: string }) {
+    return http.post<ApiEnvelope<LotteryDrawResult>>(`/public/landing/${token}/lottery-draw`, payload)
   }
 }

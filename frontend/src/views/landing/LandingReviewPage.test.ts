@@ -11,7 +11,8 @@ vi.mock('../../api/public', () => ({
   publicApi: {
     initLanding: vi.fn(),
     switchReview: vi.fn(),
-    createEvent: vi.fn()
+    createEvent: vi.fn(),
+    drawLottery: vi.fn()
   }
 }))
 vi.mock('../../utils/clipboard', () => ({ copyToClipboard: vi.fn() }))
@@ -65,6 +66,7 @@ describe('LandingReviewPage', () => {
       data: { data: { review: { id: 88, content: '服务很热情，团购核销也很顺。', platformStyle: 'meituan' }, remainingDispatchableCount: 9 } }
     } as never)
     vi.mocked(publicApi.createEvent).mockResolvedValue({ data: { data: { saved: true } } } as never)
+    vi.mocked(publicApi.drawLottery).mockResolvedValue({ data: { data: { enabled: true, drawn: true, won: true, prizeName: '招牌小吃一份', prizeImageUrl: '' } } } as never)
     vi.mocked(copyToClipboard).mockResolvedValue(true)
   })
 
@@ -117,6 +119,21 @@ describe('LandingReviewPage', () => {
     expect(publicApi.createEvent).toHaveBeenCalledWith('store-token', expect.objectContaining({ actionType: 'platform_link_click' }))
     expect(wrapper.get('[role="status"]').text()).toContain('已复制，正在打开美团')
     expect(openPlatform).toHaveBeenCalledWith('meituan', 'imeituan://', 'https://example.com/meituan')
+  })
+
+  it('shows the immediate gift result only after the customer returns from the platform', async () => {
+    const { wrapper } = await mountPage()
+
+    await wrapper.get('[data-testid="primary-platform-action"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="lottery-result"]').exists()).toBe(false)
+
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+
+    expect(publicApi.drawLottery).toHaveBeenCalledWith('store-token', { sessionId: 'saved-session' })
+    expect(wrapper.get('[data-testid="lottery-result"]').text()).toContain('招牌小吃一份')
+    expect(wrapper.get('[data-testid="lottery-result"]').text()).toContain('向身边店员出示本页面领取')
   })
 
   it('shows a recoverable alert and does not open the platform when copy fails', async () => {

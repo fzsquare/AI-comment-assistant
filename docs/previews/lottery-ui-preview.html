@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>到店互动抽奖 UI 预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #1d2733; background: #eef1f4; }
+    .canvas { width: 1440px; min-height: 900px; padding: 54px 76px; margin: 0 auto; }
+    .title { margin-bottom: 30px; }
+    .title p { margin: 0 0 7px; color: #52606d; font-size: 15px; font-weight: 700; letter-spacing: .08em; }
+    .title h1 { margin: 0; font-size: 34px; letter-spacing: -.02em; }
+    .screens { display: grid; grid-template-columns: 1.15fr .85fr; gap: 38px; align-items: start; }
+    .label { margin: 0 0 10px 4px; color: #52606d; font-size: 14px; font-weight: 750; }
+    .desktop { min-height: 696px; padding: 24px; border: 1px solid #d6dce3; border-radius: 14px; background: #f8fafc; box-shadow: 0 18px 50px rgb(30 45 62 / 10%); }
+    .desktop-head { display: flex; justify-content: space-between; align-items: center; padding-bottom: 18px; border-bottom: 1px solid #d9dfe6; }
+    .desktop-head h2 { margin: 0; font-size: 24px; }
+    .desktop-head span { color: #52606d; font-size: 14px; }
+    .card { margin-top: 18px; padding: 20px; border: 1px solid #d6dce3; border-radius: 10px; background: #fff; }
+    .card-title { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+    .card-title strong { display: block; font-size: 19px; }
+    .card-title small { display: block; margin-top: 5px; color: #52606d; line-height: 1.5; }
+    .switch { display: flex; align-items: center; gap: 9px; font-weight: 750; }
+    .toggle { width: 42px; height: 24px; padding: 3px; border-radius: 99px; background: #173f73; }
+    .toggle:after { content: ""; display: block; width: 18px; height: 18px; margin-left: 18px; border-radius: 50%; background: #fff; }
+    .help { margin: 14px 0; padding: 10px 12px; color: #475569; font-size: 13px; line-height: 1.6; border: 1px solid #bfdbfe; border-radius: 7px; background: #eff6ff; }
+    .prize { padding: 14px; border: 1px solid #d6dce3; border-radius: 8px; }
+    .prize-head { display: flex; align-items: center; gap: 12px; }
+    .prize-head .status { color: #0f766e; font-size: 13px; }
+    .delete { margin-left: auto; color: #b42318; font-size: 13px; }
+    .fields { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 10px; margin-top: 12px; }
+    .field label { display: block; margin-bottom: 5px; color: #64748b; font-size: 12px; }
+    .input { height: 42px; display: flex; align-items: center; padding: 0 11px; border: 1px solid #cbd5e1; border-radius: 7px; background: #fff; font-size: 14px; }
+    .image-field { grid-column: 1 / -1; }
+    .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+    button { height: 42px; padding: 0 17px; border: 1px solid #173f73; border-radius: 7px; color: #fff; background: #173f73; font-weight: 750; }
+    button.secondary { color: #173f73; background: #fff; }
+    .phone-shell { width: 390px; height: 696px; margin: 0 auto; padding: 10px; border-radius: 36px; background: #1d2733; box-shadow: 0 18px 50px rgb(30 45 62 / 18%); }
+    .phone { position: relative; height: 100%; overflow: hidden; border-radius: 28px; background: #faf9f6; }
+    .phone-content { padding: 34px 22px; }
+    .eyebrow { margin: 0 0 5px; color: #52606d; font-size: 13px; font-weight: 750; }
+    .phone h2 { margin: 0; font-size: 26px; }
+    .review-card { margin-top: 24px; padding-top: 22px; border-top: 1px solid #d9d6cf; }
+    .review-card h3 { margin: 0 0 13px; font-size: 19px; }
+    .review-text { min-height: 180px; padding: 15px; color: #334155; font-size: 14px; line-height: 1.7; border: 1px solid #b9c1ca; border-radius: 8px; background: #fff; }
+    .bottom-button { position: absolute; left: 18px; right: 18px; bottom: 18px; height: 52px; display: grid; place-items: center; border-radius: 9px; color: #fff; background: #173f73; font-weight: 800; }
+    .mask { position: absolute; inset: 0; display: grid; place-items: end center; padding: 18px; background: rgb(20 32 45 / 52%); }
+    .result { width: 100%; padding: 28px 22px 22px; display: grid; gap: 13px; text-align: center; border-radius: 18px; background: #fffdf8; box-shadow: 0 18px 50px rgb(20 32 45 / 24%); }
+    .spark { margin: 0; color: #c78a16; font-size: 38px; line-height: 1; }
+    .result h3 { margin: 0; font-size: 24px; }
+    .result strong { color: #173f73; font-size: 27px; }
+    .result .tip { margin: 0; color: #52606d; font-size: 14px; }
+    .result .confirm { height: 50px; display: grid; place-items: center; margin-top: 4px; border-radius: 9px; color: #fff; background: #173f73; font-weight: 800; }
+    .footer { margin-top: 22px; color: #64748b; font-size: 13px; text-align: center; }
+  </style>
+</head>
+<body>
+  <main class="canvas">
+    <header class="title">
+      <p>AI COMMENT ASSISTANT · UI PREVIEW</p>
+      <h1>到店互动抽奖</h1>
+    </header>
+    <section class="screens">
+      <div>
+        <p class="label">商家管理端 · 奖品配置与活动开关</p>
+        <div class="desktop">
+          <header class="desktop-head"><div><span>巷子里的椒麻鸡</span><h2>店铺运营台</h2></div><span>商家账号</span></header>
+          <section class="card">
+            <div class="card-title">
+              <div><strong>到店互动抽奖</strong><small>已开启：顾客返回页面后即时出结果</small></div>
+              <div class="switch"><span class="toggle"></span>开启抽奖活动</div>
+            </div>
+            <p class="help">顾客完成“复制并打开店铺”后，返回本页即可抽取奖品；中奖时由店员当场赠送，无需支付、会员或后续核销。</p>
+            <article class="prize">
+              <div class="prize-head"><strong>奖品 1</strong><span class="status">✓ 已启用</span><span class="delete">删除</span></div>
+              <div class="fields">
+                <div class="field"><label>名称</label><div class="input">招牌小吃一份</div></div>
+                <div class="field"><label>库存</label><div class="input">20</div></div>
+                <div class="field"><label>中奖概率</label><div class="input">30%</div></div>
+                <div class="field image-field"><label>图片地址（选填）</label><div class="input">https://example.com/prize/snack.jpg</div></div>
+              </div>
+            </article>
+            <div class="actions"><button class="secondary">新增奖品</button><button>保存抽奖配置</button></div>
+          </section>
+        </div>
+      </div>
+      <div>
+        <p class="label">顾客端 · 返回 H5 后自动弹出结果</p>
+        <div class="phone-shell">
+          <div class="phone">
+            <div class="phone-content">
+              <p class="eyebrow">美团</p><h2>巷子里的椒麻鸡</h2>
+              <div class="review-card"><p class="eyebrow">按你的真实体验修改</p><h3>把这次体验整理成一段评价</h3><div class="review-text">椒麻鸡麻香很自然，服务员会主动加水，团购核销也很顺，整体体验不错。</div></div>
+              <div class="bottom-button">复制并打开美团</div>
+            </div>
+            <div class="mask">
+              <section class="result">
+                <p class="eyebrow">到店互动抽奖</p><p class="spark">✦</p><h3>恭喜抽中</h3><strong>招牌小吃一份</strong><p class="tip">请向身边店员出示本页面领取</p><div class="confirm">我知道了</div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <p class="footer">预览基于当前商家端与顾客端实现生成 · 2026-07-17</p>
+  </main>
+</body>
+</html>

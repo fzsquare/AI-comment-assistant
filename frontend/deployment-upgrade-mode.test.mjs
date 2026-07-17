@@ -26,3 +26,7 @@ test('upgrade mode keeps the historical DATETIME audit gate', () => {
   assert.match(deploySource, /require_historical_datetime_timezone_audit/)
   assert.match(deploySource, /HISTORICAL_DATETIME_TIMEZONE_AUDITED/)
 })
+
+test('optional deployment branches return success when there is nothing to do', () => {
+  assert.doesNotMatch(deploySource, /\|\| return\s*$/m)
+})
