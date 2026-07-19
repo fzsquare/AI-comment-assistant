@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   publicApi,
@@ -9,7 +9,6 @@ import {
   type LotteryDrawResult
 } from '../../api/public'
 import { copyToClipboard } from '../../utils/clipboard'
-import { openPlatform } from '../../utils/deeplink'
 import { discardLandingSession, isLandingSessionError, readLandingSession, trackLandingEvent } from './landingFlow'
 
 const route = useRoute()
@@ -42,31 +41,15 @@ function platformSelectionPath() {
   return { path: `/landing/${encodeURIComponent(token.value)}` }
 }
 
-function lotteryPendingKey() {
-  return `ppk-lottery-pending:${token.value}`
-}
-
-function markLotteryPending(sessionId: string) {
-  sessionStorage.setItem(lotteryPendingKey(), sessionId)
-}
-
-function pendingLotterySessionId() {
-  return sessionStorage.getItem(lotteryPendingKey()) || ''
-}
-
-async function drawPendingLottery() {
-  const session = readLandingSession(token.value)
-  const pendingSessionID = pendingLotterySessionId()
-  if (!session || !pendingSessionID || pendingSessionID !== session.sessionId || lotteryDrawing.value || lotteryResult.value) return
+async function drawLottery(sessionId: string) {
+  if (lotteryDrawing.value || lotteryResult.value) return
   lotteryDrawing.value = true
   try {
-    const { data } = await publicApi.drawLottery(token.value, { sessionId: session.sessionId })
+    const { data } = await publicApi.drawLottery(token.value, { sessionId })
     if (data.data.enabled && data.data.drawn) lotteryResult.value = data.data
-    sessionStorage.removeItem(lotteryPendingKey())
   } catch (drawError: any) {
     if (isLandingSessionError(drawError)) {
-      discardLandingSession(token.value, session.sessionId)
-      sessionStorage.removeItem(lotteryPendingKey())
+      discardLandingSession(token.value, sessionId)
     }
   } finally {
     lotteryDrawing.value = false
@@ -184,10 +167,10 @@ async function pickByTag(keyword: string) {
   }
 }
 
-function recordCopy(sessionId: string, text: string) {
-  if (!review.value || !platform.value) return
+async function recordCopy(sessionId: string, text: string) {
+  if (!review.value || !platform.value) return false
   acceptedReviewIds.add(review.value.id)
-  void trackLandingEvent(token.value, sessionId, {
+  return trackLandingEvent(token.value, sessionId, {
     reviewItemId: review.value.id,
     actionType: 'review_copy',
     platformCode: platform.value.platformCode,
@@ -211,7 +194,7 @@ async function copyReview() {
       return
     }
     actionStatus.value = `已复制，可以在${platformName.value}中粘贴并按真实体验修改。`
-    recordCopy(session.sessionId, text)
+    void recordCopy(session.sessionId, text)
   } finally {
     actionPending.value = false
   }
@@ -239,15 +222,9 @@ async function copyAndOpenPlatform() {
     }
 
     actionStatus.value = `已复制，正在打开${platformName.value}…`
-    recordCopy(session.sessionId, text)
-    void trackLandingEvent(token.value, session.sessionId, {
-      reviewItemId: review.value.id,
-      actionType: 'platform_link_click',
-      platformCode: link.platformCode,
-      editedContent: text
-    })
-    markLotteryPending(session.sessionId)
-    openPlatform(link.platformCode, link.openUrl || link.targetUrl, link.backupUrl || link.targetUrl)
+    if (await recordCopy(session.sessionId, text)) {
+      await drawLottery(session.sessionId)
+    }
   } finally {
     actionPending.value = false
   }
@@ -255,10 +232,7 @@ async function copyAndOpenPlatform() {
 
 onMounted(() => {
   void load()
-  window.addEventListener('focus', drawPendingLottery)
 })
-
-onBeforeUnmount(() => window.removeEventListener('focus', drawPendingLottery))
 </script>
 
 <template>

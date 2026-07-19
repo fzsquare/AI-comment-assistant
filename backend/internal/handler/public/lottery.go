@@ -82,13 +82,11 @@ func (h *Handler) drawLotteryForSession(store model.Store, sessionID string) (lo
 			return nil
 		}
 
-		var openedCount int64
-		if err := tx.Model(&model.ReviewDisplayLog{}).
-			Where("store_id = ? AND session_id = ? AND action_type = ?", store.ID, sessionID, "platform_link_click").
-			Count(&openedCount).Error; err != nil {
+		var copiedCount int64
+		if err := lotteryEligibilityQuery(tx, store.ID, sessionID).Count(&copiedCount).Error; err != nil {
 			return err
 		}
-		if openedCount == 0 {
+		if copiedCount == 0 {
 			return errors.New("完成复制并打开门店页面后才能抽奖")
 		}
 
@@ -130,6 +128,11 @@ func (h *Handler) drawLotteryForSession(store model.Store, sessionID string) (lo
 		return nil
 	})
 	return result, err
+}
+
+func lotteryEligibilityQuery(db *gorm.DB, storeID uint, sessionID string) *gorm.DB {
+	return db.Model(&model.ReviewDisplayLog{}).
+		Where("store_id = ? AND session_id = ? AND action_type = ?", storeID, sessionID, "review_copy")
 }
 
 func lotteryResultFromDraw(draw model.StoreLotteryDraw) lotteryDrawResponse {

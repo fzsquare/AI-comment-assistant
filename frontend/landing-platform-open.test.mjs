@@ -8,8 +8,11 @@ const routerSource = readFileSync(new URL('./src/router/index.ts', import.meta.u
 const mockSource = readFileSync(new URL('./src/api/mock.ts', import.meta.url), 'utf8')
 const deeplinkSource = readFileSync(new URL('./src/utils/deeplink.ts', import.meta.url), 'utf8')
 
-test('landing page prefers backend-resolved openUrl when opening platform links', () => {
-  assert.match(landingPageSource, /openPlatform\(link\.platformCode, link\.openUrl \|\| link\.targetUrl, link\.backupUrl \|\| link\.targetUrl\)/)
+test('landing primary action does not leave the review page', () => {
+  assert.doesNotMatch(landingPageSource, /openPlatform\(/)
+  assert.doesNotMatch(landingPageSource, /platform_link_click/)
+  assert.match(landingPageSource, /await recordCopy\(session\.sessionId, text\)/)
+  assert.match(landingPageSource, /await drawLottery\(session\.sessionId\)/)
 })
 
 test('customer flow uses independent platform and review routes', () => {

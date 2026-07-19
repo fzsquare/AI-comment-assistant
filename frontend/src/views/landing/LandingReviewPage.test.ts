@@ -109,26 +109,25 @@ describe('LandingReviewPage', () => {
     expect(wrapper.text()).toContain('是否发布由你决定')
   })
 
-  it('copies, records both funnel events, announces success, and opens the backend URL', async () => {
-    const { wrapper } = await mountPage()
+  it('copies, preserves the existing success text, stays on the review page, and draws immediately', async () => {
+    const { router, wrapper } = await mountPage()
 
     await wrapper.get('[data-testid="primary-platform-action"]').trigger('click')
     await flushPromises()
 
     expect(publicApi.createEvent).toHaveBeenCalledWith('store-token', expect.objectContaining({ actionType: 'review_copy' }))
-    expect(publicApi.createEvent).toHaveBeenCalledWith('store-token', expect.objectContaining({ actionType: 'platform_link_click' }))
+    expect(publicApi.createEvent).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="primary-platform-action"]').text()).toBe('复制并打开美团')
     expect(wrapper.get('[role="status"]').text()).toContain('已复制，正在打开美团')
-    expect(openPlatform).toHaveBeenCalledWith('meituan', 'imeituan://', 'https://example.com/meituan')
+    expect(router.currentRoute.value.fullPath).toBe('/landing/store-token/review/meituan')
+    expect(openPlatform).not.toHaveBeenCalled()
+    expect(publicApi.drawLottery).toHaveBeenCalledWith('store-token', { sessionId: 'saved-session' })
   })
 
-  it('shows the immediate gift result only after the customer returns from the platform', async () => {
+  it('shows the immediate gift result without waiting for a platform return focus event', async () => {
     const { wrapper } = await mountPage()
 
     await wrapper.get('[data-testid="primary-platform-action"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-testid="lottery-result"]').exists()).toBe(false)
-
-    window.dispatchEvent(new Event('focus'))
     await flushPromises()
 
     expect(publicApi.drawLottery).toHaveBeenCalledWith('store-token', { sessionId: 'saved-session' })
@@ -158,7 +157,7 @@ describe('LandingReviewPage', () => {
     expect(openPlatform).not.toHaveBeenCalled()
   })
 
-  it('shows a recoverable alert when the platform has no usable link', async () => {
+  it('shows the existing recoverable alert when the platform has no usable link', async () => {
     vi.mocked(publicApi.initLanding).mockResolvedValueOnce({
       data: {
         data: {
@@ -173,6 +172,7 @@ describe('LandingReviewPage', () => {
     await flushPromises()
 
     expect(wrapper.get('[role="alert"]').text()).toContain('没有可用的门店入口')
+    expect(publicApi.drawLottery).not.toHaveBeenCalled()
     expect(openPlatform).not.toHaveBeenCalled()
   })
 
@@ -211,14 +211,23 @@ describe('LandingReviewPage', () => {
     expect(copyToClipboard).not.toHaveBeenCalled()
   })
 
-  it('opens the platform without waiting for analytics to finish', async () => {
-    vi.mocked(publicApi.createEvent).mockImplementation(() => new Promise(() => {}) as never)
+  it('waits for the review copy event to be saved before drawing', async () => {
+    let resolveEvent!: (value: unknown) => void
+    vi.mocked(publicApi.createEvent).mockImplementationOnce(() => new Promise((resolve) => {
+      resolveEvent = resolve
+    }) as never)
     const { wrapper } = await mountPage()
 
     await wrapper.get('[data-testid="primary-platform-action"]').trigger('click')
     await flushPromises()
 
-    expect(openPlatform).toHaveBeenCalledTimes(1)
+    expect(publicApi.drawLottery).not.toHaveBeenCalled()
+    expect(openPlatform).not.toHaveBeenCalled()
+
+    resolveEvent({ data: { data: { saved: true } } })
+    await flushPromises()
+
+    expect(publicApi.drawLottery).toHaveBeenCalledWith('store-token', { sessionId: 'saved-session' })
   })
 
   it('switches review content without waiting for rejection analytics', async () => {
@@ -256,7 +265,8 @@ describe('LandingReviewPage', () => {
     expect(copyToClipboard).toHaveBeenCalledTimes(1)
     resolveCopy(true)
     await flushPromises()
-    expect(openPlatform).toHaveBeenCalledTimes(1)
+    expect(openPlatform).not.toHaveBeenCalled()
+    expect(publicApi.drawLottery).toHaveBeenCalledTimes(1)
   })
 
   it('returns the sticky action area to document flow while the textarea is focused', async () => {
