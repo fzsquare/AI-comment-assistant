@@ -98,7 +98,7 @@ describe('MerchantConsole effect filters', () => {
     await flushPromises()
     expect(merchantApi.getPublishStats).toHaveBeenLastCalledWith('meituan', '30d')
     expect(wrapper.get('[data-metric="platform_select"]').text()).toContain('91')
-    expect(wrapper.findAll('[data-funnel-stage]')).toHaveLength(4)
+    expect(wrapper.findAll('[data-funnel-stage]')).toHaveLength(3)
     expect(wrapper.get('[data-testid="daily-trend"]').attributes('aria-label')).toContain('贴卡访问 130 次')
   })
 

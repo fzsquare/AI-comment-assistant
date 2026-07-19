@@ -460,8 +460,7 @@ function mockPublishStats(params: Record<string, unknown> = {}) {
   const funnel = [
     { code: 'page_view', label: '贴卡访问', count: funnelCounts.pageViews, conversionRate: 0, conversionAvailable: false },
     { code: 'platform_select', label: selectedSeed ? `选择${platformName(requestedPlatform)}` : '选择平台', count: funnelCounts.platformSelections, conversionRate: Number((funnelCounts.platformSelections / funnelCounts.pageViews * 100).toFixed(1)), conversionAvailable: true, conversionLabel: selectedSeed ? '全部访问中选择该平台' : '上一步转化率' },
-    { code: 'review_copy', label: '复制评价', count: funnelCounts.reviewCopies, conversionRate: Number((funnelCounts.reviewCopies / funnelCounts.platformSelections * 100).toFixed(1)), conversionAvailable: true },
-    { code: 'platform_link_click', label: '平台点击', count: funnelCounts.platformLinkClicks, conversionRate: Number((funnelCounts.platformLinkClicks / funnelCounts.reviewCopies * 100).toFixed(1)), conversionAvailable: true }
+    { code: 'platform_link_click', label: '平台点击', count: funnelCounts.platformLinkClicks, conversionRate: Number((funnelCounts.platformLinkClicks / funnelCounts.platformSelections * 100).toFixed(1)), conversionAvailable: true }
   ]
   const uniqueSessions = selectedSeed ? funnelCounts.platformSelections : funnelCounts.pageViews
   const dataState = uniqueSessions === 0 ? 'empty' : uniqueSessions < 20 ? 'accumulating' : 'ready'
@@ -494,8 +493,8 @@ function mockPublishStats(params: Record<string, unknown> = {}) {
         }
       : {
           code: 'funnel_drop',
-          title: '优先改善“复制评价”',
-          message: '选择平台后到复制评价的流失最多，先检查评价内容是否足够贴近真实体验。',
+          title: '优先改善“打开平台”',
+          message: '选择平台后到打开平台的流失最多，先检查平台入口和评价内容是否便于顾客继续操作。',
           actionLabel: '查看漏斗',
           actionTarget: 'funnel'
         },

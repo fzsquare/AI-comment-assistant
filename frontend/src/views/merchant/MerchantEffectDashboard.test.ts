@@ -22,7 +22,7 @@ function stats(overrides: Partial<PublishStats> = {}): PublishStats {
     ],
     recommendation: {
       code: 'funnel_drop',
-      title: '优先改善“复制评价”',
+      title: '优先改善“打开平台”',
       message: '这一环节是当前范围内最大的顾客流失点。',
       actionLabel: '查看漏斗',
       actionTarget: 'funnel'
@@ -76,16 +76,62 @@ describe('MerchantEffectDashboard', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
-  it('renders numbers, four-stage funnel, trend and backend recommendation from one response', () => {
+  it('keeps copy analytics out of the three-stage merchant funnel and trend', () => {
     const wrapper = mount(MerchantEffectDashboard, {
       props: { stats: stats(), loading: false, error: '', storeName: '巷子里的椒麻鸡', platformOptions }
     })
 
     expect(wrapper.get('[data-metric="page_view"]').text()).toContain('32')
-    expect(wrapper.get('[data-metric="review_copy"]').text()).toContain('19')
-    expect(wrapper.findAll('[data-funnel-stage]')).toHaveLength(4)
-    expect(wrapper.get('[data-testid="daily-trend"]').attributes('aria-label')).toContain('贴卡访问 32 次')
-    expect(wrapper.get('[data-testid="recommendation"]').text()).toContain('优先改善“复制评价”')
+    expect(wrapper.get('[data-metric="platform_select"]').text()).toContain('26')
+    expect(wrapper.get('[data-metric="platform_link_click"]').text()).toContain('15')
+    expect(wrapper.find('[data-metric="review_copy"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-funnel-stage]')).toHaveLength(3)
+    expect(wrapper.get('[data-testid="daily-trend"]').attributes('aria-label')).toContain('选择平台 26 次')
+    expect(wrapper.get('[data-testid="daily-trend"]').attributes('aria-label')).not.toContain('复制评价')
+    expect(wrapper.get('[data-testid="recommendation"]').text()).toContain('优先改善“打开平台”')
+  })
+
+  it('keeps merchant-facing review verification visible when platform crawl data is ready', () => {
+    const wrapper = mount(MerchantEffectDashboard, {
+      props: {
+        stats: stats({
+          crawlDataReady: true,
+          weeklyGuidedShareReady: true,
+          monthlyGuidedShareReady: true,
+          weeklyGuidedSharePercent: 35.8,
+          monthlyGuidedSharePercent: 29.7
+        }),
+        loading: false,
+        error: '',
+        storeName: '测试门店',
+        platformOptions
+      }
+    })
+
+    const verification = wrapper.get('[data-testid="review-verification"]')
+    expect(verification.text()).toContain('评论结果验证')
+    expect(verification.text()).toContain('本周引导评论占比')
+    expect(verification.text()).toContain('35.8%')
+    expect(verification.text()).toContain('本月引导评论占比')
+    expect(verification.text()).toContain('29.7%')
+    expect(verification.text()).toContain('不代表逐条确认发布')
+  })
+
+  it('keeps the review verification section visible while platform data accumulates', () => {
+    const wrapper = mount(MerchantEffectDashboard, {
+      props: {
+        stats: stats({ crawlDataReady: false, crawlDataMessage: '数据积累中' }),
+        loading: false,
+        error: '',
+        storeName: '测试门店',
+        platformOptions
+      }
+    })
+
+    const verification = wrapper.get('[data-testid="review-verification"]')
+    expect(verification.text()).toContain('评论结果验证')
+    expect(verification.text()).toContain('数据积累中')
+    expect(verification.text()).not.toContain('0%')
   })
 
   it('trusts backend accumulating state and hides trend, percentages and drop-off conclusion', () => {

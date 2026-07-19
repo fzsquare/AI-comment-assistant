@@ -34,6 +34,12 @@ var publishStatsActions = []string{
 	ReviewActionPlatformLinkClick,
 }
 
+var publishStatsFunnelActions = []string{
+	ReviewActionPageView,
+	ReviewActionPlatformSelect,
+	ReviewActionPlatformLinkClick,
+}
+
 type PublishStatsRange struct {
 	Code  string
 	Days  int
@@ -264,20 +270,19 @@ func BuildPublishStatsSnapshot(rangeSpec PublishStatsRange, rows []PublishStatsA
 		setDailyActionCount(point, row.ActionType, row.SessionCount)
 	}
 
-	funnel := make([]PublishStatsFunnelStage, 0, len(publishStatsActions))
+	funnel := make([]PublishStatsFunnelStage, 0, len(publishStatsFunnelActions))
 	labels := map[string]string{
 		ReviewActionPageView:          "贴卡访问",
 		ReviewActionPlatformSelect:    "选择平台",
-		ReviewActionReviewCopy:        "复制评价",
 		ReviewActionPlatformLinkClick: "平台点击",
 	}
-	for index, action := range publishStatsActions {
+	for index, action := range publishStatsFunnelActions {
 		stage := PublishStatsFunnelStage{Code: action, Label: labels[action], Count: rangeCounts[action]}
 		if platformCode != "" && action == ReviewActionPlatformSelect {
 			stage.ConversionLabel = "全部访问中选择该平台"
 		}
 		if index > 0 {
-			previous := rangeCounts[publishStatsActions[index-1]]
+			previous := rangeCounts[publishStatsFunnelActions[index-1]]
 			if previous > 0 {
 				stage.ConversionAvailable = true
 				stage.ConversionRate = roundOneDecimal(float64(stage.Count) / float64(previous) * 100)

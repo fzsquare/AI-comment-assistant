@@ -21,8 +21,8 @@ function readyStats(overrides: Partial<PublishStats> = {}): PublishStats {
     ],
     recommendation: {
       code: 'funnel_drop',
-      title: '优先改善“复制评价”',
-      message: '选择平台后到复制评价的流失最多。',
+      title: '优先改善“打开平台”',
+      message: '选择平台后到打开平台的流失最多。',
       actionLabel: '查看转化',
       actionTarget: 'funnel'
     },

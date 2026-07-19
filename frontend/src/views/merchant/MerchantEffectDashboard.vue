@@ -23,19 +23,19 @@ const emit = defineEmits<{
 const isReady = computed(() => props.stats?.dataState === 'ready')
 const isPlatformFiltered = computed(() => Boolean(props.stats?.platformCode))
 const stageByCode = computed(() => new Map((props.stats?.funnel || []).map((stage) => [stage.code, stage])))
+const funnelStages = computed(() => (props.stats?.funnel || []).filter((stage) => stage.code !== 'review_copy'))
 const metricItems = computed(() => [
   { code: 'page_view', label: '贴卡访问', value: stageByCode.value.get('page_view')?.count || 0 },
   { code: 'platform_select', label: '选择平台', value: stageByCode.value.get('platform_select')?.count || 0 },
-  { code: 'review_copy', label: '复制评价', value: stageByCode.value.get('review_copy')?.count || 0 },
   { code: 'platform_link_click', label: '打开平台', value: stageByCode.value.get('platform_link_click')?.count || 0 }
 ])
-const maxFunnelCount = computed(() => Math.max(...(props.stats?.funnel || []).map((stage) => stage.count), 1))
+const maxFunnelCount = computed(() => Math.max(...funnelStages.value.map((stage) => stage.count), 1))
 const chartSvg = ref<SVGSVGElement | null>(null)
 const chartWidth = ref(720)
 const chartHeight = 260
 const plot = computed(() => ({ left: 52, right: Math.max(chartWidth.value - 22, 180), top: 24, bottom: 214 }))
 const chartMax = computed(() => {
-  const values = (props.stats?.dailySeries || []).flatMap((point) => [point.pageViews, point.reviewCopies, point.platformLinkClicks])
+  const values = (props.stats?.dailySeries || []).flatMap((point) => [point.pageViews, point.platformSelections, point.platformLinkClicks])
   return Math.max(...values, 1)
 })
 const chartTicks = computed(() => [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
@@ -43,7 +43,7 @@ const chartTicks = computed(() => [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
   y: plot.value.top + (plot.value.bottom - plot.value.top) * ratio
 })))
 
-function pointsFor(key: keyof Pick<PublishDailyPoint, 'pageViews' | 'reviewCopies' | 'platformLinkClicks'>) {
+function pointsFor(key: keyof Pick<PublishDailyPoint, 'pageViews' | 'platformSelections' | 'platformLinkClicks'>) {
   const series = props.stats?.dailySeries || []
   return series.map((point, index) => {
     const x = series.length === 1 ? (plot.value.left + plot.value.right) / 2 : plot.value.left + ((plot.value.right - plot.value.left) * index) / (series.length - 1)
@@ -53,7 +53,7 @@ function pointsFor(key: keyof Pick<PublishDailyPoint, 'pageViews' | 'reviewCopie
 }
 
 const visitPoints = computed(() => pointsFor('pageViews'))
-const copyPoints = computed(() => pointsFor('reviewCopies'))
+const selectionPoints = computed(() => pointsFor('platformSelections'))
 const clickPoints = computed(() => pointsFor('platformLinkClicks'))
 const dateLabels = computed(() => {
   const series = props.stats?.dailySeries || []
@@ -75,6 +75,9 @@ const stateCopy = computed(() => {
   if (props.stats.dataState === 'accumulating') return '数据积累中，继续引导顾客贴卡即可。'
   return ''
 })
+const verificationReady = computed(() => Boolean(
+  props.stats?.crawlDataReady || props.stats?.weeklyGuidedShareReady || props.stats?.monthlyGuidedShareReady
+))
 
 let chartResizeObserver: ResizeObserver | null = null
 
@@ -99,6 +102,14 @@ onBeforeUnmount(() => chartResizeObserver?.disconnect())
 
 function formatNumber(value: number) {
   return Number(value || 0).toLocaleString('zh-CN')
+}
+
+function formatPercent(value: number) {
+  return `${Number(value || 0).toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%`
+}
+
+function verificationValue(ready: boolean, value: number) {
+  return ready ? formatPercent(value) : '数据积累中'
 }
 
 function funnelWidth(count: number) {
@@ -162,7 +173,7 @@ function focusRecommendationTarget() {
     </header>
 
     <div v-if="loading && !stats" class="effect-loading" aria-busy="true" aria-live="polite">
-      <span></span><span></span><span></span><span></span>
+      <span></span><span></span><span></span>
       <p>正在加载效果数据…</p>
     </div>
 
@@ -187,6 +198,29 @@ function focusRecommendationTarget() {
         </article>
       </div>
 
+      <section class="verification-panel" data-testid="review-verification" aria-labelledby="review-verification-title">
+        <div class="verification-copy">
+          <div class="verification-heading">
+            <h3 id="review-verification-title">评论结果验证</h3>
+            <span :class="verificationReady ? 'is-ready' : 'is-accumulating'">
+              {{ verificationReady ? '平台数据已核对' : (stats.crawlDataMessage || '数据积累中') }}
+            </span>
+          </div>
+          <p>用平台新增评论与顾客打开平台的数据进行核对，帮助你判断碰碰卡是否持续带来评论机会。</p>
+          <small>核验口径：引导打开平台次数 ÷ 同期平台新增评论数；不代表逐条确认发布。</small>
+        </div>
+        <dl class="verification-metrics">
+          <div>
+            <dt>本周引导评论占比</dt>
+            <dd>{{ verificationValue(stats.weeklyGuidedShareReady, stats.weeklyGuidedSharePercent) }}</dd>
+          </div>
+          <div>
+            <dt>本月引导评论占比</dt>
+            <dd>{{ verificationValue(stats.monthlyGuidedShareReady, stats.monthlyGuidedSharePercent) }}</dd>
+          </div>
+        </dl>
+      </section>
+
       <div class="effect-grid">
         <section v-if="isReady" class="trend-panel" data-effect-target="trend" aria-labelledby="daily-trend-title">
           <div class="panel-heading">
@@ -194,7 +228,7 @@ function focusRecommendationTarget() {
               <h3 id="daily-trend-title">每日趋势</h3>
               <p v-if="isPlatformFiltered">访问为全店，其他为{{ stats.platformName }}</p>
             </div>
-            <div class="trend-legend" aria-hidden="true"><span class="visit">访问</span><span class="copy">复制</span><span class="click">打开平台</span></div>
+            <div class="trend-legend" aria-hidden="true"><span class="visit">访问</span><span class="selection">选择平台</span><span class="click">打开平台</span></div>
           </div>
           <svg ref="chartSvg" data-testid="daily-trend" class="daily-chart" :viewBox="`0 0 ${chartWidth} ${chartHeight}`" role="img" :aria-label="chartAriaLabel">
             <g aria-hidden="true">
@@ -205,13 +239,13 @@ function focusRecommendationTarget() {
               <text v-for="label in dateLabels" :key="`${label.x}-${label.label}`" class="axis-label" :x="label.x" :y="242" text-anchor="middle">{{ label.label }}</text>
             </g>
             <polyline class="series-line visits" :points="visitPoints" />
-            <polyline class="series-line copies" :points="copyPoints" />
+            <polyline class="series-line selections" :points="selectionPoints" />
             <polyline class="series-line clicks" :points="clickPoints" />
           </svg>
           <table class="sr-only">
             <caption>{{ chartAriaLabel }}</caption>
-            <thead><tr><th>日期</th><th>访问</th><th>复制</th><th>打开平台</th></tr></thead>
-            <tbody><tr v-for="point in stats.dailySeries" :key="point.date"><th>{{ point.date }}</th><td>{{ point.pageViews }}</td><td>{{ point.reviewCopies }}</td><td>{{ point.platformLinkClicks }}</td></tr></tbody>
+            <thead><tr><th>日期</th><th>访问</th><th>选择平台</th><th>打开平台</th></tr></thead>
+            <tbody><tr v-for="point in stats.dailySeries" :key="point.date"><th>{{ point.date }}</th><td>{{ point.pageViews }}</td><td>{{ point.platformSelections }}</td><td>{{ point.platformLinkClicks }}</td></tr></tbody>
           </table>
         </section>
 
@@ -220,7 +254,7 @@ function focusRecommendationTarget() {
             <div><h3 id="funnel-title">顾客转化</h3></div>
           </div>
           <ol class="funnel-list">
-            <li v-for="(stage, index) in stats.funnel" :key="stage.code" data-funnel-stage>
+            <li v-for="(stage, index) in funnelStages" :key="stage.code" data-funnel-stage>
               <div class="funnel-copy"><span><b>{{ index + 1 }}</b>{{ funnelStageLabel(stage) }}</span><strong>{{ formatNumber(stage.count) }}</strong></div>
               <div class="funnel-track" aria-hidden="true"><span :style="{ width: funnelWidth(stage.count) }"></span></div>
               <p v-if="isReady && stage.conversionAvailable" data-conversion-rate>{{ conversionText(stage) }}</p>
@@ -255,10 +289,22 @@ function focusRecommendationTarget() {
 .effect-state { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 6px; color: #334155; margin: 18px 0 14px; padding: 8px 12px; }
 .effect-state.state-accumulating { background: #fffbeb; border-color: #fde68a; }
 .effect-state.state-empty { background: #f8fafc; border-color: #cbd5e1; }
-.effect-metrics { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.effect-metrics { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .effect-metrics article { border-top: 2px solid #cbd5e1; padding: 12px 4px 10px; }
 .effect-metrics span { color: var(--muted); display: block; font-size: 14px; }
 .effect-metrics strong { display: block; font-size: 32px; line-height: 1.1; margin: 5px 0; }
+.verification-panel { align-items: center; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr) auto; margin-top: 14px; padding: 16px; }
+.verification-heading { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; }
+.verification-heading h3 { margin: 0; }
+.verification-heading span { border-radius: 999px; font-size: 12px; font-weight: 750; padding: 4px 8px; }
+.verification-heading .is-ready { background: #dcfce7; color: #166534; }
+.verification-heading .is-accumulating { background: #fef3c7; color: #92400e; }
+.verification-copy p { color: #334155; margin: 8px 0 4px; }
+.verification-copy small { color: var(--muted); }
+.verification-metrics { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(150px, 1fr)); margin: 0; }
+.verification-metrics div { background: var(--surface); border: 1px solid #dcfce7; border-radius: 7px; padding: 12px; }
+.verification-metrics dt { color: var(--muted); font-size: 13px; }
+.verification-metrics dd { font-size: 22px; font-weight: 800; margin: 5px 0 0; }
 .effect-grid { display: grid; gap: 14px; grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); margin-top: 14px; }
 .trend-panel, .funnel-panel { border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .panel-heading { align-items: start; display: flex; gap: 12px; justify-content: space-between; }
@@ -267,12 +313,12 @@ function focusRecommendationTarget() {
 .trend-legend { display: flex; flex-wrap: wrap; gap: 12px; }
 .trend-legend span { color: var(--muted); font-size: 14px; }
 .trend-legend span::before { border-radius: 999px; content: ''; display: inline-block; height: 3px; margin-right: 5px; vertical-align: middle; width: 18px; }
-.trend-legend .visit::before { background: #2563eb; }.trend-legend .copy::before { background: #d97706; }.trend-legend .click::before { background: #059669; }
+.trend-legend .visit::before { background: #2563eb; }.trend-legend .selection::before { background: #d97706; }.trend-legend .click::before { background: #059669; }
 .daily-chart { display: block; height: 260px; margin-top: 8px; width: 100%; }
 .grid-line { stroke: #e2e8f0; stroke-dasharray: 4 5; vector-effect: non-scaling-stroke; }
 .axis-label { fill: #64748b; font-size: 12px; font-weight: 650; }
 .series-line { fill: none; stroke-linecap: round; stroke-linejoin: round; stroke-width: 3; vector-effect: non-scaling-stroke; }
-.series-line.visits { stroke: #2563eb; }.series-line.copies { stroke: #d97706; }.series-line.clicks { stroke: #059669; }
+.series-line.visits { stroke: #2563eb; }.series-line.selections { stroke: #d97706; }.series-line.clicks { stroke: #059669; }
 .funnel-list { display: grid; gap: 12px; list-style: none; margin: 14px 0 0; padding: 0; }
 .funnel-copy { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
 .funnel-copy span { align-items: center; display: flex; font-size: 16px; font-weight: 750; gap: 8px; }
@@ -291,11 +337,11 @@ function focusRecommendationTarget() {
 @keyframes pulse { 50% { opacity: .45; } }
 @media (prefers-reduced-motion: reduce) { .effect-loading span { animation: none; } }
 @media (max-width: 820px) {
-  .effect-dashboard { padding: 16px; }.effect-header { align-items: stretch; flex-direction: column; }.effect-filters { align-items: stretch; display: grid; grid-template-columns: 1fr 1fr; }.range-switch { grid-column: 1 / -1; }.range-switch button { flex: 1; }.effect-metrics { grid-template-columns: 1fr 1fr; }.effect-grid { display: flex; flex-direction: column; }.funnel-panel { order: 1; }.trend-panel { order: 2; }.recommendation { align-items: stretch; flex-direction: column; }.effect-loading { grid-template-columns: 1fr 1fr; }
+  .effect-dashboard { padding: 16px; }.effect-header { align-items: stretch; flex-direction: column; }.effect-filters { align-items: stretch; display: grid; grid-template-columns: 1fr 1fr; }.range-switch { grid-column: 1 / -1; }.range-switch button { flex: 1; }.effect-metrics { grid-template-columns: 1fr 1fr; }.verification-panel { align-items: stretch; grid-template-columns: 1fr; }.effect-grid { display: flex; flex-direction: column; }.funnel-panel { order: 1; }.trend-panel { order: 2; }.recommendation { align-items: stretch; flex-direction: column; }.effect-loading { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 600px) {
   .effect-dashboard { background: transparent; border: 0; border-radius: 0; padding: 0; }
   .trend-panel, .funnel-panel { background: var(--surface); }
 }
-@media (max-width: 420px) { .effect-metrics { grid-template-columns: 1fr; }.effect-header h2 { font-size: 24px; }.effect-metrics strong { font-size: 28px; } }
+@media (max-width: 420px) { .effect-metrics, .verification-metrics { grid-template-columns: 1fr; }.effect-header h2 { font-size: 24px; }.effect-metrics strong { font-size: 28px; } }
 </style>

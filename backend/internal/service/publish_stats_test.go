@@ -61,8 +61,32 @@ func TestBuildPublishStatsSnapshotFillsEmptyDaysAcrossYearBoundary(t *testing.T)
 	if snapshot.DailySeries[1].PageViews != 0 || snapshot.DailySeries[5].ReviewCopies != 0 {
 		t.Fatalf("empty dates should be zero-filled: %#v", snapshot.DailySeries)
 	}
-	if snapshot.Funnel[0].Count != 4 || snapshot.Funnel[3].Count != 2 {
+	if snapshot.Funnel[0].Count != 4 || snapshot.Funnel[2].Count != 2 {
 		t.Fatalf("range totals should use dedicated distinct-session rows: %#v", snapshot.Funnel)
+	}
+}
+
+func TestBuildPublishStatsSnapshotKeepsReviewCopyOutOfMerchantFunnel(t *testing.T) {
+	rangeSpec, _ := ResolvePublishStatsRange("7d", mustDashboardTime(t, "2026-07-15 12:00"))
+	rows := []PublishStatsAggregateRow{
+		{BucketType: publishStatsBucketRange, ActionType: ReviewActionPageView, SessionCount: 32},
+		{BucketType: publishStatsBucketRange, ActionType: ReviewActionPlatformSelect, SessionCount: 26},
+		{BucketType: publishStatsBucketRange, ActionType: ReviewActionReviewCopy, SessionCount: 19},
+		{BucketType: publishStatsBucketRange, ActionType: ReviewActionPlatformLinkClick, SessionCount: 15},
+	}
+
+	snapshot := BuildPublishStatsSnapshot(rangeSpec, rows, PublishStatsHealth{})
+	want := []string{ReviewActionPageView, ReviewActionPlatformSelect, ReviewActionPlatformLinkClick}
+	if len(snapshot.Funnel) != len(want) {
+		t.Fatalf("merchant funnel length = %d, want %d: %#v", len(snapshot.Funnel), len(want), snapshot.Funnel)
+	}
+	for index, action := range want {
+		if snapshot.Funnel[index].Code != action {
+			t.Fatalf("merchant funnel[%d] = %q, want %q: %#v", index, snapshot.Funnel[index].Code, action, snapshot.Funnel)
+		}
+	}
+	if snapshot.Funnel[2].ConversionRate != 57.7 {
+		t.Fatalf("open-platform conversion = %.1f, want 57.7", snapshot.Funnel[2].ConversionRate)
 	}
 }
 
