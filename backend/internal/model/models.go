@@ -12,6 +12,7 @@ const (
 	ReviewStatusDeleted   = "deleted"
 	ReviewStatusDisabled  = "disabled"
 	ReviewStatusPending   = "pending_review"
+	ReviewStatusUsed      = "used"
 )
 
 const (
@@ -28,9 +29,10 @@ const (
 )
 
 const (
-	TriggerInit       = "init"
-	TriggerManual     = "manual"
-	TriggerAutoRefill = "auto_refill"
+	TriggerInit            = "init"
+	TriggerManual          = "manual"
+	TriggerAdminRegenerate = "admin_regenerate"
+	TriggerAutoRefill      = "auto_refill"
 )
 
 const (
@@ -89,6 +91,40 @@ type Store struct {
 	UpdatedAt            time.Time `json:"updatedAt"`
 }
 
+// StoreLotteryConfig controls whether a store offers an immediate, in-store gift draw.
+// It intentionally has no payment, member, coupon, or redemption fields.
+type StoreLotteryConfig struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	StoreID   uint      `gorm:"uniqueIndex;not null" json:"storeId"`
+	Enabled   bool      `gorm:"default:false;not null" json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type StoreLotteryPrize struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	StoreID   uint      `gorm:"index;not null" json:"storeId"`
+	Name      string    `gorm:"size:64;not null" json:"name"`
+	ImageURL  string    `gorm:"size:500" json:"imageUrl"`
+	Stock     int       `gorm:"not null" json:"stock"`
+	WinRate   int       `gorm:"not null" json:"winRate"`
+	SortNo    int       `gorm:"default:0;not null" json:"sortNo"`
+	Enabled   bool      `gorm:"default:true;not null" json:"enabled"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+type StoreLotteryDraw struct {
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	StoreID       uint      `gorm:"uniqueIndex:uk_lottery_draw_store_session,priority:1;index;not null" json:"storeId"`
+	SessionID     string    `gorm:"size:128;uniqueIndex:uk_lottery_draw_store_session,priority:2;not null" json:"sessionId"`
+	PrizeID       *uint     `gorm:"index" json:"prizeId"`
+	Outcome       string    `gorm:"size:16;not null" json:"outcome"`
+	PrizeName     string    `gorm:"size:64" json:"prizeName"`
+	PrizeImageURL string    `gorm:"size:500" json:"prizeImageUrl"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
 type StoreKeyword struct {
 	ID        uint      `gorm:"primaryKey" json:"id"`
 	StoreID   uint      `gorm:"index;not null" json:"storeId"`
@@ -122,31 +158,33 @@ type StorePlatformLink struct {
 }
 
 type ReviewItem struct {
-	ID                uint       `gorm:"primaryKey" json:"id"`
-	StoreID           uint       `gorm:"index;not null" json:"storeId"`
-	PlatformStyle     string     `gorm:"size:64;not null" json:"platformStyle"`
-	Content           string     `gorm:"type:text;not null" json:"content"`
-	Tags              string     `gorm:"size:255;default:''" json:"tags"`
-	SourceType        string     `gorm:"size:32;not null" json:"sourceType"`
-	GenerationBatchNo string     `gorm:"size:64;not null" json:"generationBatchNo"`
-	IsDispatched      bool       `gorm:"default:false;not null" json:"isDispatched"`
-	Status            string     `gorm:"size:32;default:'available';not null" json:"status"`
-	DispatchedAt      *time.Time `json:"dispatchedAt"`
-	CreatedAt         time.Time  `json:"createdAt"`
-	UpdatedAt         time.Time  `json:"updatedAt"`
+	ID                  uint       `gorm:"primaryKey" json:"id"`
+	StoreID             uint       `gorm:"index;not null" json:"storeId"`
+	PlatformStyle       string     `gorm:"size:64;not null" json:"platformStyle"`
+	Content             string     `gorm:"type:text;not null" json:"content"`
+	Tags                string     `gorm:"size:255;default:''" json:"tags"`
+	SourceType          string     `gorm:"size:32;not null" json:"sourceType"`
+	GenerationBatchNo   string     `gorm:"size:64;not null" json:"generationBatchNo"`
+	IsDispatched        bool       `gorm:"default:false;not null" json:"isDispatched"`
+	Status              string     `gorm:"size:32;default:'available';not null" json:"status"`
+	DispatchedAt        *time.Time `json:"dispatchedAt"`
+	DispatchedSessionID string     `gorm:"size:128;default:'';not null" json:"-"`
+	UsedAt              *time.Time `json:"usedAt"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 type ReviewDisplayLog struct {
 	ID           uint      `gorm:"primaryKey" json:"id"`
-	StoreID      uint      `gorm:"index;not null" json:"storeId"`
+	StoreID      uint      `gorm:"index;index:idx_review_logs_store_action_created,priority:1;index:idx_review_logs_store_action_created_platform_session,priority:1;index:idx_review_logs_store_platform_action_created_session,priority:1;not null" json:"storeId"`
 	ReviewItemID uint      `gorm:"index" json:"reviewItemId"`
 	NFCTagID     uint      `gorm:"index" json:"nfcTagId"`
-	SessionID    string    `gorm:"size:128;index;not null" json:"sessionId"`
-	ActionType   string    `gorm:"size:64;not null" json:"actionType"`
-	PlatformCode string    `gorm:"size:64" json:"platformCode"`
+	SessionID    string    `gorm:"size:128;index;index:idx_review_logs_store_action_created_platform_session,priority:5;index:idx_review_logs_store_platform_action_created_session,priority:5;not null" json:"sessionId"`
+	ActionType   string    `gorm:"size:64;index:idx_review_logs_store_action_created,priority:2;index:idx_review_logs_store_action_created_platform_session,priority:2;index:idx_review_logs_store_platform_action_created_session,priority:3;not null" json:"actionType"`
+	PlatformCode string    `gorm:"size:64;index:idx_review_logs_store_action_created_platform_session,priority:4;index:idx_review_logs_store_platform_action_created_session,priority:2" json:"platformCode"`
 	ClientIP     string    `gorm:"size:64" json:"clientIp"`
 	UserAgent    string    `gorm:"size:255" json:"userAgent"`
-	CreatedAt    time.Time `json:"createdAt"`
+	CreatedAt    time.Time `gorm:"index:idx_review_logs_store_action_created,priority:3;index:idx_review_logs_store_action_created_platform_session,priority:3;index:idx_review_logs_store_platform_action_created_session,priority:4" json:"createdAt"`
 }
 
 type ReviewFeedback struct {
@@ -165,17 +203,154 @@ type ReviewFeedback struct {
 }
 
 type ReviewGenerationTask struct {
-	ID            uint      `gorm:"primaryKey" json:"id"`
-	StoreID       uint      `gorm:"index;not null" json:"storeId"`
-	PlatformStyle string    `gorm:"size:64;not null" json:"platformStyle"`
-	TriggerType   string    `gorm:"size:32;not null" json:"triggerType"`
-	TargetCount   int       `gorm:"not null" json:"targetCount"`
-	SuccessCount  int       `gorm:"default:0;not null" json:"successCount"`
-	FailedCount   int       `gorm:"default:0;not null" json:"failedCount"`
-	Status        string    `gorm:"size:32;default:'pending';not null" json:"status"`
-	ErrorMessage  string    `gorm:"type:text" json:"errorMessage"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID                     uint                       `gorm:"primaryKey" json:"id"`
+	StoreID                uint                       `gorm:"index;not null" json:"storeId"`
+	PlatformStyle          string                     `gorm:"size:64;not null" json:"platformStyle"`
+	TriggerType            string                     `gorm:"size:32;not null" json:"triggerType"`
+	TargetCount            int                        `gorm:"not null" json:"targetCount"`
+	GeneratedRawCount      int                        `gorm:"default:0;not null" json:"generatedRawCount"`
+	InsertedRowCount       int                        `gorm:"default:0;not null" json:"insertedRowCount"`
+	DuplicateFilteredCount int                        `gorm:"default:0;not null" json:"duplicateFilteredCount"`
+	DuplicateCheckVersion  string                     `gorm:"size:64;default:''" json:"duplicateCheckVersion"`
+	SuccessCount           int                        `gorm:"default:0;not null" json:"successCount"`
+	FailedCount            int                        `gorm:"default:0;not null" json:"failedCount"`
+	Status                 string                     `gorm:"size:32;default:'pending';not null" json:"status"`
+	ErrorMessage           string                     `gorm:"type:text" json:"errorMessage"`
+	CreatedAt              time.Time                  `json:"createdAt"`
+	UpdatedAt              time.Time                  `json:"updatedAt"`
+	AuditLogs              []ReviewGenerationAuditLog `gorm:"foreignKey:TaskID" json:"auditLogs,omitempty"`
+}
+
+type ReviewGenerationAuditLog struct {
+	ID                     uint      `gorm:"primaryKey" json:"id"`
+	TaskID                 uint      `gorm:"index;not null" json:"taskId"`
+	StoreID                uint      `gorm:"index;not null" json:"storeId"`
+	PlatformStyle          string    `gorm:"size:64;not null" json:"platformStyle"`
+	TriggerType            string    `gorm:"size:32;not null" json:"triggerType"`
+	Stage                  string    `gorm:"size:64;index;not null" json:"stage"`
+	Level                  string    `gorm:"size:16;not null" json:"level"`
+	Status                 string    `gorm:"size:32;not null" json:"status"`
+	Message                string    `gorm:"size:512;not null" json:"message"`
+	Detail                 string    `gorm:"type:text" json:"detail"`
+	AgentEndpoint          string    `gorm:"size:255" json:"agentEndpoint"`
+	HTTPStatus             int       `gorm:"default:0;not null" json:"httpStatus"`
+	DurationMS             int64     `gorm:"default:0;not null" json:"durationMs"`
+	TargetCount            int       `gorm:"default:0;not null" json:"targetCount"`
+	GeneratedRawCount      int       `gorm:"default:0;not null" json:"generatedRawCount"`
+	InsertedRowCount       int       `gorm:"default:0;not null" json:"insertedRowCount"`
+	DuplicateFilteredCount int       `gorm:"default:0;not null" json:"duplicateFilteredCount"`
+	CreatedAt              time.Time `json:"createdAt"`
+}
+
+const (
+	CrawlStatusNeverRun = "never_run"
+	CrawlStatusRunning  = "running"
+	CrawlStatusSuccess  = "success"
+	CrawlStatusFailed   = "failed"
+)
+
+const (
+	CrawlTriggerScheduled = "scheduled"
+	CrawlTriggerManual    = "manual"
+)
+
+type StoreReviewCrawlConfig struct {
+	ID                  uint       `gorm:"primaryKey" json:"id"`
+	StoreID             uint       `gorm:"uniqueIndex;not null" json:"storeId"`
+	PlatformCode        string     `gorm:"size:64;not null" json:"platformCode"`
+	ExternalShopID      string     `gorm:"size:128;not null" json:"externalShopId"`
+	Enabled             bool       `gorm:"default:false;not null" json:"enabled"`
+	BaselineCompletedAt *time.Time `json:"baselineCompletedAt"`
+	LastCrawledAt       *time.Time `json:"lastCrawledAt"`
+	NextCrawlAt         *time.Time `json:"nextCrawlAt"`
+	LastStatus          string     `gorm:"size:32;default:'never_run';not null" json:"lastStatus"`
+	LastErrorMessage    string     `gorm:"type:text" json:"lastErrorMessage"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
+}
+
+func (StoreReviewCrawlConfig) TableName() string {
+	return "store_review_crawl_configs"
+}
+
+type StoreReviewCrawlBatch struct {
+	ID                     uint       `gorm:"primaryKey" json:"id"`
+	ConfigID               uint       `gorm:"index;not null" json:"configId"`
+	StoreID                uint       `gorm:"index;not null" json:"storeId"`
+	PlatformCode           string     `gorm:"size:64;not null" json:"platformCode"`
+	ExternalShopIDSnapshot string     `gorm:"size:128;not null" json:"externalShopIdSnapshot"`
+	TriggerType            string     `gorm:"size:32;not null" json:"triggerType"`
+	AttemptNo              int        `gorm:"default:1;not null" json:"attemptNo"`
+	IsBaseline             bool       `gorm:"default:false;not null" json:"isBaseline"`
+	WindowDays             int        `gorm:"default:7;not null" json:"windowDays"`
+	WindowStartAt          *time.Time `json:"windowStartAt"`
+	WindowEndAt            *time.Time `json:"windowEndAt"`
+	StartedAt              *time.Time `json:"startedAt"`
+	FinishedAt             *time.Time `json:"finishedAt"`
+	Status                 string     `gorm:"size:32;default:'running';not null" json:"status"`
+	RawRowCount            int        `gorm:"default:0;not null" json:"rawRowCount"`
+	InsertedRowCount       int        `gorm:"default:0;not null" json:"insertedRowCount"`
+	MatchedReviewCount     int        `gorm:"default:0;not null" json:"matchedReviewCount"`
+	FailureCode            string     `gorm:"size:64;default:''" json:"failureCode"`
+	FailureStage           string     `gorm:"size:64;default:''" json:"failureStage"`
+	Retryable              bool       `gorm:"default:false;not null" json:"retryable"`
+	ErrorMessage           string     `gorm:"type:text" json:"errorMessage"`
+	CreatedAt              time.Time  `json:"createdAt"`
+	UpdatedAt              time.Time  `json:"updatedAt"`
+}
+
+func (StoreReviewCrawlBatch) TableName() string {
+	return "store_review_crawl_batches"
+}
+
+type ExternalStoreReview struct {
+	ID                    uint       `gorm:"primaryKey" json:"id"`
+	BatchID               uint       `gorm:"index;not null" json:"batchId"`
+	StoreID               uint       `gorm:"index;not null" json:"storeId"`
+	PlatformCode          string     `gorm:"size:64;not null" json:"platformCode"`
+	SourceReviewRef       string     `gorm:"size:128" json:"sourceReviewRef"`
+	UserName              string     `gorm:"size:255" json:"userName"`
+	RatingRaw             string     `gorm:"size:32" json:"ratingRaw"`
+	RatingNormalized      *float64   `json:"ratingNormalized"`
+	ReviewTime            *time.Time `gorm:"index" json:"reviewTime"`
+	Content               string     `gorm:"type:text" json:"content"`
+	IsBaseline            bool       `gorm:"default:false;not null" json:"isBaseline"`
+	MatchedFeedbackID     *uint      `gorm:"index" json:"matchedFeedbackId"`
+	MatchedReviewItemID   *uint      `gorm:"index" json:"matchedReviewItemId"`
+	MatchScore            float64    `gorm:"default:0;not null" json:"matchScore"`
+	MatchReason           string     `gorm:"size:64;default:''" json:"matchReason"`
+	MatchSource           string     `gorm:"size:64;default:''" json:"matchSource"`
+	MatchAlgorithmVersion string     `gorm:"size:64;default:''" json:"matchAlgorithmVersion"`
+	CreatedAt             time.Time  `json:"createdAt"`
+}
+
+func (ExternalStoreReview) TableName() string {
+	return "external_store_reviews"
+}
+
+type PlatformReviewFewShot struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	ExternalReviewID uint      `gorm:"uniqueIndex;not null" json:"externalReviewId"`
+	StoreID          uint      `gorm:"index;not null" json:"storeId"`
+	PlatformCode     string    `gorm:"size:64;not null" json:"platformCode"`
+	SelectedAt       time.Time `gorm:"autoCreateTime" json:"selectedAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
+}
+
+func (PlatformReviewFewShot) TableName() string {
+	return "platform_review_few_shots"
+}
+
+type StoreGenerationPreference struct {
+	ID                  uint      `gorm:"primaryKey" json:"id"`
+	StoreID             uint      `gorm:"uniqueIndex;not null" json:"storeId"`
+	FocusKeywords       string    `gorm:"type:json;not null" json:"-"`
+	StyleCodes          string    `gorm:"type:json;not null" json:"-"`
+	DiversityDimensions string    `gorm:"type:json;not null" json:"-"`
+	ReferenceReviews    string    `gorm:"type:json;not null" json:"-"`
+	LengthVariance      string    `gorm:"size:32;not null;default:'wide'" json:"lengthVariance"`
+	CreatedAt           time.Time `json:"createdAt"`
+	UpdatedAt           time.Time `json:"updatedAt"`
 }
 
 type NFCTag struct {

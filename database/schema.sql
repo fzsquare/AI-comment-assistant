@@ -113,6 +113,8 @@ CREATE TABLE IF NOT EXISTS review_items (
   is_dispatched TINYINT(1) NOT NULL DEFAULT 0,
   status VARCHAR(32) NOT NULL DEFAULT 'available',
   dispatched_at DATETIME NULL,
+  dispatched_session_id VARCHAR(128) NOT NULL DEFAULT '',
+  used_at DATETIME NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_review_items_store_id (store_id),
@@ -134,6 +136,9 @@ CREATE TABLE IF NOT EXISTS review_display_logs (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   INDEX idx_review_logs_store_id (store_id),
   INDEX idx_review_logs_session_id (session_id),
+  INDEX idx_review_logs_store_action_created (store_id, action_type, created_at),
+  INDEX idx_review_logs_store_action_created_platform_session (store_id, action_type, created_at, platform_code, session_id),
+  INDEX idx_review_logs_store_platform_action_created_session (store_id, platform_code, action_type, created_at, session_id),
   CONSTRAINT fk_log_store FOREIGN KEY (store_id) REFERENCES stores(id)
 );
 
@@ -163,6 +168,10 @@ CREATE TABLE IF NOT EXISTS review_generation_tasks (
   platform_style VARCHAR(64) NOT NULL,
   trigger_type VARCHAR(32) NOT NULL,
   target_count INT NOT NULL,
+  generated_raw_count INT NOT NULL DEFAULT 0,
+  inserted_row_count INT NOT NULL DEFAULT 0,
+  duplicate_filtered_count INT NOT NULL DEFAULT 0,
+  duplicate_check_version VARCHAR(64) NOT NULL DEFAULT '',
   success_count INT NOT NULL DEFAULT 0,
   failed_count INT NOT NULL DEFAULT 0,
   status VARCHAR(32) NOT NULL DEFAULT 'pending',
@@ -171,6 +180,174 @@ CREATE TABLE IF NOT EXISTS review_generation_tasks (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_generation_tasks_store_id (store_id),
   CONSTRAINT fk_task_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS review_generation_audit_logs (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  task_id BIGINT UNSIGNED NOT NULL,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_style VARCHAR(64) NOT NULL,
+  trigger_type VARCHAR(32) NOT NULL,
+  stage VARCHAR(64) NOT NULL,
+  level VARCHAR(16) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  message VARCHAR(512) NOT NULL,
+  detail TEXT,
+  agent_endpoint VARCHAR(255) DEFAULT '',
+  http_status INT NOT NULL DEFAULT 0,
+  duration_ms BIGINT NOT NULL DEFAULT 0,
+  target_count INT NOT NULL DEFAULT 0,
+  generated_raw_count INT NOT NULL DEFAULT 0,
+  inserted_row_count INT NOT NULL DEFAULT 0,
+  duplicate_filtered_count INT NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_generation_audit_task_id (task_id),
+  INDEX idx_generation_audit_store_id (store_id),
+  INDEX idx_generation_audit_stage (stage),
+  CONSTRAINT fk_generation_audit_task FOREIGN KEY (task_id) REFERENCES review_generation_tasks(id),
+  CONSTRAINT fk_generation_audit_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_review_crawl_configs (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_code VARCHAR(64) NOT NULL,
+  external_shop_id VARCHAR(128) NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  baseline_completed_at DATETIME NULL,
+  last_crawled_at DATETIME NULL,
+  next_crawl_at DATETIME NULL,
+  last_status VARCHAR(32) NOT NULL DEFAULT 'never_run',
+  last_error_message TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_review_crawl_configs_store_id (store_id),
+  INDEX idx_review_crawl_configs_enabled_next (enabled, next_crawl_at),
+  CONSTRAINT fk_review_crawl_config_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_review_crawl_batches (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  config_id BIGINT UNSIGNED NOT NULL,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_code VARCHAR(64) NOT NULL,
+  external_shop_id_snapshot VARCHAR(128) NOT NULL,
+  trigger_type VARCHAR(32) NOT NULL,
+  attempt_no INT NOT NULL DEFAULT 1,
+  is_baseline TINYINT(1) NOT NULL DEFAULT 0,
+  window_days INT NOT NULL DEFAULT 7,
+  window_start_at DATETIME NULL,
+  window_end_at DATETIME NULL,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'running',
+  raw_row_count INT NOT NULL DEFAULT 0,
+  inserted_row_count INT NOT NULL DEFAULT 0,
+  matched_review_count INT NOT NULL DEFAULT 0,
+  failure_code VARCHAR(64) NOT NULL DEFAULT '',
+  failure_stage VARCHAR(64) NOT NULL DEFAULT '',
+  retryable TINYINT(1) NOT NULL DEFAULT 0,
+  error_message TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_review_crawl_batches_config_status (config_id, status),
+  INDEX idx_review_crawl_batches_store_window (store_id, platform_code, is_baseline, window_start_at, window_end_at),
+  CONSTRAINT fk_review_crawl_batch_config FOREIGN KEY (config_id) REFERENCES store_review_crawl_configs(id),
+  CONSTRAINT fk_review_crawl_batch_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS external_store_reviews (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  batch_id BIGINT UNSIGNED NOT NULL,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_code VARCHAR(64) NOT NULL,
+  source_review_ref VARCHAR(128) DEFAULT '',
+  user_name VARCHAR(255) DEFAULT '',
+  rating_raw VARCHAR(32) DEFAULT '',
+  rating_normalized DECIMAL(4,2) NULL,
+  review_time DATETIME NULL,
+  content TEXT,
+  is_baseline TINYINT(1) NOT NULL DEFAULT 0,
+  matched_feedback_id BIGINT UNSIGNED NULL,
+  matched_review_item_id BIGINT UNSIGNED NULL,
+  match_score DECIMAL(5,4) NOT NULL DEFAULT 0,
+  match_reason VARCHAR(64) NOT NULL DEFAULT '',
+  match_source VARCHAR(64) NOT NULL DEFAULT '',
+  match_algorithm_version VARCHAR(64) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_external_reviews_store_time (store_id, platform_code, is_baseline, review_time),
+  INDEX idx_external_reviews_batch (batch_id),
+  INDEX idx_external_reviews_match_feedback (matched_feedback_id),
+  CONSTRAINT fk_external_review_batch FOREIGN KEY (batch_id) REFERENCES store_review_crawl_batches(id),
+  CONSTRAINT fk_external_review_store FOREIGN KEY (store_id) REFERENCES stores(id),
+  CONSTRAINT fk_external_review_feedback FOREIGN KEY (matched_feedback_id) REFERENCES review_feedbacks(id),
+  CONSTRAINT fk_external_review_item FOREIGN KEY (matched_review_item_id) REFERENCES review_items(id)
+);
+
+CREATE TABLE IF NOT EXISTS platform_review_few_shots (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  external_review_id BIGINT UNSIGNED NOT NULL,
+  store_id BIGINT UNSIGNED NOT NULL,
+  platform_code VARCHAR(64) NOT NULL,
+  selected_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_platform_review_few_shots_external (external_review_id),
+  INDEX idx_platform_review_few_shots_store_platform (store_id, platform_code, selected_at),
+  CONSTRAINT fk_platform_review_few_shot_external_review FOREIGN KEY (external_review_id) REFERENCES external_store_reviews(id),
+  CONSTRAINT fk_platform_review_few_shot_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_generation_preferences (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  focus_keywords JSON NOT NULL,
+  style_codes JSON NOT NULL,
+  diversity_dimensions JSON NOT NULL,
+  reference_reviews JSON NOT NULL,
+  length_variance VARCHAR(32) NOT NULL DEFAULT 'wide',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_store_generation_preferences_store_id (store_id),
+  CONSTRAINT fk_generation_preferences_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_lottery_configs (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_store_lottery_config_store_id (store_id),
+  CONSTRAINT fk_lottery_config_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_lottery_prizes (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  name VARCHAR(64) NOT NULL,
+  image_url VARCHAR(500) NOT NULL DEFAULT '',
+  stock INT NOT NULL,
+  win_rate INT NOT NULL,
+  sort_no INT NOT NULL DEFAULT 0,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY idx_lottery_prizes_store (store_id),
+  CONSTRAINT fk_lottery_prize_store FOREIGN KEY (store_id) REFERENCES stores(id)
+);
+
+CREATE TABLE IF NOT EXISTS store_lottery_draws (
+  id BIGINT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+  store_id BIGINT UNSIGNED NOT NULL,
+  session_id VARCHAR(128) NOT NULL,
+  prize_id BIGINT UNSIGNED NULL,
+  outcome VARCHAR(16) NOT NULL,
+  prize_name VARCHAR(64) NOT NULL DEFAULT '',
+  prize_image_url VARCHAR(500) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_lottery_draw_store_session (store_id, session_id),
+  KEY idx_lottery_draws_prize (prize_id),
+  CONSTRAINT fk_lottery_draw_store FOREIGN KEY (store_id) REFERENCES stores(id)
 );
 
 -- 卡片库存：一店可多卡。落地访问改用 store.uuid，landing_token 仅历史保留（可空、不唯一）。

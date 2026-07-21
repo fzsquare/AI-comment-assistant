@@ -22,6 +22,9 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 	{
 		merchant.GET("/store/detail", h.getStoreDetail)
 		merchant.PUT("/store/detail", h.updateStoreDetail)
+		merchant.GET("/dashboard/publish-stats", h.getPublishStats)
+		merchant.GET("/lottery/config", h.getLotteryConfig)
+		merchant.PUT("/lottery/config", h.saveLotteryConfig)
 
 		merchant.GET("/store/keyword-suggestions", h.keywordSuggestions) // 按行业推荐标签
 		merchant.GET("/store/keywords", h.listKeywords)
@@ -44,6 +47,8 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		merchant.POST("/reviews", h.createReview)
 		merchant.PUT("/reviews/:id", h.updateReview)
 		merchant.DELETE("/reviews/:id", h.deleteReview)
+		merchant.GET("/review-generation-preferences", h.getGenerationPreferences)
+		merchant.PUT("/review-generation-preferences", h.saveGenerationPreferences)
 		merchant.POST("/reviews/generate", h.generateReviews)
 		merchant.GET("/review-generation-tasks", h.listGenerationTasks)
 	}

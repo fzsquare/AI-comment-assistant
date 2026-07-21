@@ -362,6 +362,17 @@ PUBLIC_ORIGIN=https://your-domain.com
 
 脚本会让前端资源、API、上传资源和落地页链接统一走 `/ppk/...`。
 
+已有数据库在执行 `database/migrations/0007_publish_stats_index.sql` 前，如果
+`review_display_logs` 已有历史数据，必须先确认旧 backend 主机写入无时区
+`DATETIME` 时采用的时区，并按需修正历史记录。审计完成后再在部署配置中设置：
+
+```bash
+HISTORICAL_DATETIME_TIMEZONE_AUDITED=true
+```
+
+脚本生成的生产 MySQL DSN 使用 `loc=Asia%2FShanghai`；不要把开发机的
+`loc=Local` 复制为生产数据库时区配置。
+
 ### 手动生产部署
 
 手动部署时保持同样边界：

@@ -15,7 +15,16 @@ func storeDeletionPlan(includeMerchant bool) []string {
 		"unbind_nfc_tags",
 		"delete_review_feedbacks",
 		"delete_review_display_logs",
+		"delete_review_generation_audit_logs",
 		"delete_review_generation_tasks",
+		"delete_platform_review_few_shots",
+		"delete_external_store_reviews",
+		"delete_review_crawl_batches",
+		"delete_review_crawl_configs",
+		"delete_store_generation_preferences",
+		"delete_store_lottery_draws",
+		"delete_store_lottery_prizes",
+		"delete_store_lottery_config",
 		"delete_review_items",
 		"delete_store_platform_links",
 		"delete_store_images",
@@ -46,6 +55,24 @@ func executeStoreDeletionPlan(tx *gorm.DB, store model.Store, includeMerchant bo
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewFeedback{}).Error
 		case "delete_review_generation_tasks":
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewGenerationTask{}).Error
+		case "delete_review_generation_audit_logs":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewGenerationAuditLog{}).Error
+		case "delete_platform_review_few_shots":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.PlatformReviewFewShot{}).Error
+		case "delete_external_store_reviews":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.ExternalStoreReview{}).Error
+		case "delete_review_crawl_batches":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.StoreReviewCrawlBatch{}).Error
+		case "delete_review_crawl_configs":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.StoreReviewCrawlConfig{}).Error
+		case "delete_store_generation_preferences":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.StoreGenerationPreference{}).Error
+		case "delete_store_lottery_draws":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.StoreLotteryDraw{}).Error
+		case "delete_store_lottery_prizes":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.StoreLotteryPrize{}).Error
+		case "delete_store_lottery_config":
+			err = tx.Where("store_id = ?", store.ID).Delete(&model.StoreLotteryConfig{}).Error
 		case "delete_review_items":
 			err = tx.Where("store_id = ?", store.ID).Delete(&model.ReviewItem{}).Error
 		case "delete_store_platform_links":

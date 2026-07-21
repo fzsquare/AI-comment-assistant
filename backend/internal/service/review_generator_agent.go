@@ -14,6 +14,8 @@ import (
 
 // 文案服务响应体上限，防止异常/被劫持的端点流式返回超大 body 耗尽内存
 const maxAgentRespBytes = 8 << 20 // 8MB
+const defaultAgentHTTPTimeout = 300 * time.Second
+const defaultAgentGenerationBatchSize = 2
 
 // AgentReviewGenerator 通过 HTTP 调用 Python 文案 agent 服务生成评价，
 // 实现 ReviewGenerator 接口。只把达到入池等级（默认 B 及以上）的文案返回。
@@ -22,19 +24,48 @@ type AgentReviewGenerator struct {
 	MinGrade      string
 	InternalToken string
 	Client        *http.Client
+	BatchSize     int
+}
+
+type AgentHTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *AgentHTTPError) Error() string {
+	body := strings.TrimSpace(e.Body)
+	if body == "" {
+		return fmt.Sprintf("文案服务返回状态 %d", e.StatusCode)
+	}
+	return fmt.Sprintf("文案服务返回状态 %d: %s", e.StatusCode, body)
 }
 
 func NewAgentReviewGenerator(baseURL, minGrade, internalToken string) *AgentReviewGenerator {
+	return NewAgentReviewGeneratorWithOptions(baseURL, minGrade, internalToken, defaultAgentHTTPTimeout, defaultAgentGenerationBatchSize)
+}
+
+func NewAgentReviewGeneratorWithOptions(baseURL, minGrade, internalToken string, httpTimeout time.Duration, batchSize int) *AgentReviewGenerator {
 	if minGrade == "" {
 		minGrade = "B"
+	}
+	if httpTimeout <= 0 {
+		httpTimeout = defaultAgentHTTPTimeout
+	}
+	if batchSize <= 0 {
+		batchSize = defaultAgentGenerationBatchSize
 	}
 	return &AgentReviewGenerator{
 		BaseURL:       strings.TrimRight(baseURL, "/"),
 		MinGrade:      minGrade,
 		InternalToken: internalToken,
-		// 自评循环 + 批量，单次可能较慢，给足超时
-		Client: &http.Client{Timeout: 180 * time.Second},
+		// 自评循环 + 小批量，单批可能较慢，给足超时
+		Client:    &http.Client{Timeout: httpTimeout},
+		BatchSize: batchSize,
 	}
+}
+
+func (g *AgentReviewGenerator) AuditEndpoint() string {
+	return g.BaseURL
 }
 
 type agentStore struct {
@@ -46,17 +77,26 @@ type agentStore struct {
 }
 
 type agentRequest struct {
-	Store        agentStore     `json:"store"`
-	Keywords     []string       `json:"keywords"`
-	Platform     string         `json:"platform"`
-	Count        int            `json:"count"`
-	Satisfaction string         `json:"satisfaction"`
-	Feedback     *agentFeedback `json:"feedback,omitempty"`
+	Store                 agentStore                  `json:"store"`
+	Keywords              []string                    `json:"keywords"`
+	Platform              string                      `json:"platform"`
+	Count                 int                         `json:"count"`
+	Satisfaction          string                      `json:"satisfaction"`
+	Feedback              *agentFeedback              `json:"feedback,omitempty"`
+	GenerationPreferences *agentGenerationPreferences `json:"generation_preferences,omitempty"`
 }
 
 type agentFeedback struct {
 	Accepted []string `json:"accepted,omitempty"`
 	Rejected []string `json:"rejected,omitempty"`
+}
+
+type agentGenerationPreferences struct {
+	FocusKeywords       []string `json:"focus_keywords,omitempty"`
+	StyleCodes          []string `json:"style_codes,omitempty"`
+	DiversityDimensions []string `json:"diversity_dimensions,omitempty"`
+	ReferenceReviews    []string `json:"reference_reviews,omitempty"`
+	LengthVariance      string   `json:"length_variance,omitempty"`
 }
 
 type agentItem struct {
@@ -80,6 +120,13 @@ func (g *AgentReviewGenerator) Generate(store model.Store, keywords []model.Stor
 }
 
 func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords []model.StoreKeyword, feedback ReviewGenerationFeedback, targetCount int) ([]model.ReviewItem, error) {
+	return g.GenerateWithContext(store, keywords, ReviewGenerationContext{Feedback: feedback}, targetCount)
+}
+
+func (g *AgentReviewGenerator) GenerateWithContext(store model.Store, keywords []model.StoreKeyword, context ReviewGenerationContext, targetCount int) ([]model.ReviewItem, error) {
+	if targetCount <= 0 {
+		return nil, fmt.Errorf("非法的生成数量: %d", targetCount)
+	}
 	if !strings.HasPrefix(g.BaseURL, "http://") && !strings.HasPrefix(g.BaseURL, "https://") {
 		return nil, fmt.Errorf("非法的文案服务地址: %q", g.BaseURL)
 	}
@@ -94,6 +141,28 @@ func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords 
 		kw = append(kw, k.Keyword)
 	}
 
+	batchSize := g.BatchSize
+	if batchSize <= 0 || batchSize > targetCount {
+		batchSize = targetCount
+	}
+	totalBatches := (targetCount + batchSize - 1) / batchSize
+	items := make([]model.ReviewItem, 0, targetCount)
+	for batchIndex, remaining := 1, targetCount; remaining > 0; batchIndex++ {
+		batchCount := batchSize
+		if remaining < batchSize {
+			batchCount = remaining
+		}
+		batchItems, err := g.generateBatch(store, kw, platform, context, batchCount)
+		if err != nil {
+			return items, fmt.Errorf("agent-service 第 %d/%d 批生成失败: %w", batchIndex, totalBatches, err)
+		}
+		items = append(items, batchItems...)
+		remaining -= batchCount
+	}
+	return items, nil
+}
+
+func (g *AgentReviewGenerator) generateBatch(store model.Store, keywords []string, platform string, context ReviewGenerationContext, targetCount int) ([]model.ReviewItem, error) {
 	payload, err := json.Marshal(agentRequest{
 		Store: agentStore{
 			StoreName:    store.StoreName,
@@ -102,11 +171,14 @@ func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords 
 			BrandTone:    store.BrandTone,
 			Address:      store.Address,
 		},
-		Keywords:     kw,
+		Keywords:     keywords,
 		Platform:     platform,
 		Count:        targetCount,
 		Satisfaction: "比较满意",
-		Feedback:     agentFeedbackFrom(feedback),
+		Feedback:     agentFeedbackFrom(context.Feedback),
+		GenerationPreferences: agentPreferencesFrom(
+			context.Preferences.WithDefaults(),
+		),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("构造文案请求失败: %w", err)
@@ -120,6 +192,9 @@ func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords 
 	if g.InternalToken != "" {
 		req.Header.Set("X-Agent-Internal-Token", g.InternalToken)
 	}
+	if context.TaskID > 0 {
+		req.Header.Set("X-Generation-Task-ID", fmt.Sprintf("%d", context.TaskID))
+	}
 
 	resp, err := g.Client.Do(req)
 	if err != nil {
@@ -127,7 +202,8 @@ func (g *AgentReviewGenerator) GenerateWithFeedback(store model.Store, keywords 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("文案服务返回状态 %d", resp.StatusCode)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, &AgentHTTPError{StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var out agentResponse
@@ -163,5 +239,18 @@ func agentFeedbackFrom(feedback ReviewGenerationFeedback) *agentFeedback {
 	return &agentFeedback{
 		Accepted: feedback.Accepted,
 		Rejected: feedback.Rejected,
+	}
+}
+
+func agentPreferencesFrom(preferences GenerationPreferences) *agentGenerationPreferences {
+	if !preferences.HasAnyInput() {
+		return nil
+	}
+	return &agentGenerationPreferences{
+		FocusKeywords:       preferences.FocusKeywords,
+		StyleCodes:          preferences.StyleCodes,
+		DiversityDimensions: preferences.DiversityDimensions,
+		ReferenceReviews:    preferences.ReferenceReviews,
+		LengthVariance:      preferences.LengthVariance,
 	}
 }

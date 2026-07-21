@@ -3,9 +3,11 @@ html {
 }
 
 :root {
-  --bg: #f6f8fb;
+  --bg: #f4f7fb;
   --surface: #fff;
+  --surface-subtle: #f8fafc;
   --text: #0f172a;
+  --text-secondary: #334155;
   --muted: #64748b;
   --border: #dbe4f0;
   --border-soft: #edf2f7;
@@ -14,8 +16,13 @@ html {
   --primary-soft: #eff6ff;
   --danger: #dc2626;
   --danger-strong: #b91c1c;
+  --danger-soft: #fef2f2;
+  --warning-soft: #fffbeb;
+  --warning-text: #92400e;
   --success-bg: #ecfdf3;
   --success-text: #027a48;
+  --chart-surface: #f8fbff;
+  --shadow-popover: 0 8px 18px rgba(15, 23, 42, 0.1);
 }
 
 body {
@@ -48,10 +55,10 @@ img, svg, video, canvas {
 
 .card {
   background: var(--surface);
-  border-radius: 16px;
+  border-radius: 8px;
   padding: 20px;
-  border: 1px solid rgba(219, 228, 240, 0.72);
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  border: 1px solid var(--border);
+  box-shadow: none;
   margin-bottom: 16px;
   min-width: 0;
 }
@@ -77,7 +84,7 @@ input, textarea, select, button {
 input, textarea, select {
   width: 100%;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 10px 12px;
   background: var(--surface);
   color: var(--text);
@@ -98,7 +105,7 @@ textarea::placeholder {
 
 button {
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 10px 16px;
   cursor: pointer;
   background: var(--primary);
@@ -171,8 +178,15 @@ th, td {
   white-space: nowrap;
 }
 
+th {
+  background: var(--surface-subtle);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
 td {
-  color: #334155;
+  color: var(--text-secondary);
 }
 
 h1, h2, h3 {
@@ -209,7 +223,7 @@ h2 {
 
 .alert,
 .notice {
-  border-radius: 10px;
+  border-radius: 8px;
   margin: 0 0 16px;
   padding: 10px 12px;
 }
@@ -251,7 +265,7 @@ h2 {
 }
 
 .image-item img {
-  border-radius: 10px;
+  border-radius: 8px;
   height: 80px;
   object-fit: cover;
   width: 120px;
@@ -274,7 +288,7 @@ h2 {
   }
   .card {
     padding: 16px;
-    border-radius: 14px;
+    border-radius: 8px;
     margin-bottom: 12px;
   }
   .row {
@@ -310,7 +324,7 @@ h2 {
   .list-action {
     align-items: stretch;
     border: 1px solid var(--border-soft);
-    border-radius: 12px;
+    border-radius: 8px;
     flex-direction: column;
     gap: 10px;
     padding: 10px;

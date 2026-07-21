@@ -12,7 +12,7 @@ from agents import Agent, Runner
 
 from .agents_setup import make_reviewer_agent, make_writer_agent
 from .config import settings
-from .content_normalizer import normalize_generated_content
+from .content_normalizer import find_natural_review_violations, normalize_generated_content
 from .constraints.banned_words import find_hard_violations
 from .constraints.humanizer import find_ai_tells
 from .constraints.industries import IndustrySpec, find_cross_industry_leak, match_industry
@@ -85,7 +85,16 @@ async def _generate_one(
     index: int,
     industry: IndustrySpec,
 ) -> ReviewItem:
-    user = build_writer_user(spec, req.store, req.keywords, req.satisfaction, index, industry, feedback=req.feedback)
+    user = build_writer_user(
+        spec,
+        req.store,
+        req.keywords,
+        req.satisfaction,
+        index,
+        industry,
+        feedback=req.feedback,
+        generation_preferences=req.generation_preferences,
+    )
     best: ReviewItem | None = None
     best_clean = False  # best 是否无硬违规
 
@@ -122,6 +131,14 @@ async def _generate_one(
                 f"{'、'.join(leak)}"
             ] + issues
 
+        # 自然评论兜底：普通用户评价通常不会自报店名或人均花费，命中后强制重写。
+        natural_violations = find_natural_review_violations(content, req.store.store_name)
+        if natural_violations:
+            passed = False
+            score = min(score, 59)
+            grade = "D"
+            issues = natural_violations + issues
+
         item = ReviewItem(
             content=content, tags=tags, score=score, grade=grade, revisions=round_
         )
@@ -129,7 +146,7 @@ async def _generate_one(
             return item
 
         # 选 best：优先无违规，其次高分（避免兜底返回一条带禁用词的文案）
-        clean = not hits
+        clean = not hits and not leak and not natural_violations
         if best is None or (clean, item.score) > (best_clean, best.score):
             best = item
             best_clean = clean
@@ -153,8 +170,22 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
         async with sem:
             return await _generate_one(writer, reviewer, spec, req, i, industry)
 
+    tasks = [asyncio.create_task(worker(i)) for i in range(req.count)]
+    soft_timeout = max(1, settings.generation_timeout_seconds - 5)
+    done, pending = await asyncio.wait(tasks, timeout=soft_timeout)
+    for task in pending:
+        task.cancel()
+    if pending:
+        logging.warning(
+            "本批次有 %d/%d 条超过 %d 秒未完成，取消后返回已完成结果",
+            len(pending),
+            req.count,
+            soft_timeout,
+        )
+        await asyncio.gather(*pending, return_exceptions=True)
+
     results = await asyncio.gather(
-        *[worker(i) for i in range(req.count)], return_exceptions=True
+        *done, return_exceptions=True
     )
     items: List[ReviewItem] = []
     for i, r in enumerate(results):

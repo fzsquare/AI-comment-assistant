@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"ppk/backend/internal/model"
 )
@@ -114,5 +116,190 @@ func TestAgentReviewGeneratorSendsFeedbackExamples(t *testing.T) {
 	}
 	if len(gotPayload.Feedback.Rejected) != 1 || gotPayload.Feedback.Rejected[0] != "不喜欢样本：太像广告，夸得太满。" {
 		t.Fatalf("rejected feedback got %#v", gotPayload.Feedback.Rejected)
+	}
+}
+
+func TestAgentReviewGeneratorSendsGenerationPreferences(t *testing.T) {
+	var gotPayload agentRequest
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request failed: %v", err)
+		}
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: "dianping",
+			Produced: 1,
+			Items:    []agentItem{{Content: "蟹很入味，服务也自然。", Grade: "B"}},
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGenerator(srv.URL, "B", "agent-token")
+	_, err := generator.GenerateWithContext(
+		model.Store{PrimaryPlatformStyle: "dianping"},
+		nil,
+		ReviewGenerationContext{
+			Feedback: ReviewGenerationFeedback{
+				Accepted: []string{"接受样本：服务员会主动换盘。"},
+			},
+			Preferences: GenerationPreferences{
+				FocusKeywords:       []string{"香辣蟹", "服务热情"},
+				StyleCodes:          []string{"natural", "detail_rich"},
+				DiversityDimensions: []string{"customer_identity", "content_angle"},
+				ReferenceReviews:    []string{"蟹很入味，服务员会主动帮忙换盘。"},
+				LengthVariance:      "wide",
+			},
+		},
+		1,
+	)
+	if err != nil {
+		t.Fatalf("GenerateWithContext returned error: %v", err)
+	}
+	if gotPayload.GenerationPreferences == nil {
+		t.Fatal("expected generation_preferences payload")
+	}
+	if got := gotPayload.GenerationPreferences.FocusKeywords; len(got) != 2 || got[0] != "香辣蟹" || got[1] != "服务热情" {
+		t.Fatalf("focus keywords got %#v", got)
+	}
+	if got := gotPayload.GenerationPreferences.StyleCodes; len(got) != 2 || got[0] != "natural" || got[1] != "detail_rich" {
+		t.Fatalf("style codes got %#v", got)
+	}
+	if got := gotPayload.GenerationPreferences.DiversityDimensions; len(got) != 2 || got[0] != "customer_identity" || got[1] != "content_angle" {
+		t.Fatalf("diversity dimensions got %#v", got)
+	}
+	if gotPayload.GenerationPreferences.LengthVariance != "wide" {
+		t.Fatalf("length variance got %q, want wide", gotPayload.GenerationPreferences.LengthVariance)
+	}
+	if gotPayload.Feedback == nil || len(gotPayload.Feedback.Accepted) != 1 {
+		t.Fatalf("feedback should still be sent with preferences, got %#v", gotPayload.Feedback)
+	}
+}
+
+func TestAgentReviewGeneratorIncludesTaskIDHeader(t *testing.T) {
+	var gotTaskID string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotTaskID = r.Header.Get("X-Generation-Task-ID")
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: "dianping",
+			Produced: 1,
+			Items:    []agentItem{{Content: "服务挺自然，整体体验不错。", Grade: "B"}},
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGenerator(srv.URL, "B", "agent-token")
+	_, err := generator.GenerateWithContext(
+		model.Store{PrimaryPlatformStyle: "dianping"},
+		nil,
+		ReviewGenerationContext{TaskID: 42},
+		1,
+	)
+	if err != nil {
+		t.Fatalf("GenerateWithContext returned error: %v", err)
+	}
+	if gotTaskID != "42" {
+		t.Fatalf("task id header got %q, want 42", gotTaskID)
+	}
+}
+
+func TestAgentReviewGeneratorIncludesErrorBodyForNonOK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"detail":"LLM_API_KEY is required"}`))
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGenerator(srv.URL, "B", "agent-token")
+	_, err := generator.Generate(model.Store{PrimaryPlatformStyle: "dianping"}, nil, 1)
+	if err == nil {
+		t.Fatal("expected non-OK response to return an error")
+	}
+	if !strings.Contains(err.Error(), "503") || !strings.Contains(err.Error(), "LLM_API_KEY is required") {
+		t.Fatalf("error got %q, want status and response body", err.Error())
+	}
+}
+
+func TestAgentReviewGeneratorUsesConfiguredTimeoutAndBatchSize(t *testing.T) {
+	generator := NewAgentReviewGeneratorWithOptions("http://127.0.0.1:8090", "B", "agent-token", 7*time.Second, 3)
+
+	if got, want := generator.Client.Timeout, 7*time.Second; got != want {
+		t.Fatalf("timeout got %s, want %s", got, want)
+	}
+	if got, want := generator.BatchSize, 3; got != want {
+		t.Fatalf("batch size got %d, want %d", got, want)
+	}
+}
+
+func TestAgentReviewGeneratorSplitsLargeTargetIntoConfiguredBatches(t *testing.T) {
+	var gotCounts []int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var gotPayload agentRequest
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request failed: %v", err)
+		}
+		gotCounts = append(gotCounts, gotPayload.Count)
+		items := make([]agentItem, 0, gotPayload.Count)
+		for i := 0; i < gotPayload.Count; i++ {
+			items = append(items, agentItem{Content: "服务自然，菜也稳定。", Grade: "B"})
+		}
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: gotPayload.Platform,
+			Produced: gotPayload.Count,
+			Items:    items,
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGeneratorWithOptions(srv.URL, "B", "agent-token", 5*time.Second, 3)
+	items, err := generator.Generate(model.Store{PrimaryPlatformStyle: "dianping"}, nil, 8)
+	if err != nil {
+		t.Fatalf("Generate returned error: %v", err)
+	}
+	if !reflect.DeepEqual(gotCounts, []int{3, 3, 2}) {
+		t.Fatalf("batch counts got %#v, want [3 3 2]", gotCounts)
+	}
+	if len(items) != 8 {
+		t.Fatalf("got %d items, want 8", len(items))
+	}
+}
+
+func TestAgentReviewGeneratorReturnsPartialItemsWhenLaterBatchFails(t *testing.T) {
+	callNo := 0
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callNo++
+		if callNo == 2 {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			_, _ = w.Write([]byte(`{"detail":"agent-service 生成超时"}`))
+			return
+		}
+		var gotPayload agentRequest
+		if err := json.NewDecoder(r.Body).Decode(&gotPayload); err != nil {
+			t.Fatalf("Decode request failed: %v", err)
+		}
+		items := make([]agentItem, 0, gotPayload.Count)
+		for i := 0; i < gotPayload.Count; i++ {
+			items = append(items, agentItem{Content: "第一批已经生成的评价。", Grade: "B"})
+		}
+		_ = json.NewEncoder(w).Encode(agentResponse{
+			Platform: gotPayload.Platform,
+			Produced: gotPayload.Count,
+			Items:    items,
+		})
+	}))
+	defer srv.Close()
+
+	generator := NewAgentReviewGeneratorWithOptions(srv.URL, "B", "agent-token", 5*time.Second, 2)
+	items, err := generator.Generate(model.Store{PrimaryPlatformStyle: "dianping"}, nil, 5)
+	if err == nil {
+		t.Fatal("expected later batch failure to return an error")
+	}
+	if !strings.Contains(err.Error(), "第 2/3 批") || !strings.Contains(err.Error(), "504") {
+		t.Fatalf("error got %q, want batch index and HTTP status", err.Error())
+	}
+	if len(items) != 2 {
+		t.Fatalf("got %d partial items, want 2", len(items))
 	}
 }

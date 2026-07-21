@@ -1,11 +1,46 @@
-// 顾客点「去发布」：直接跳转商家分享链接本身。
-// 平台分享短链（如 dpurl.cn）已配 universal link / app link：在手机浏览器打开会被
-// 系统直接接管、拉起对应 App 到店铺；未装 App 则回退展示网页。
-// 因此不自造 scheme —— 自造 scheme 反而可能拉错 App、唤不起或引入延迟。
-// 行为等同于把链接粘到浏览器地址栏打开。
-export function openPlatform(_platformCode: string, webUrl: string, fallbackUrl?: string): void {
-  const url = (webUrl || fallbackUrl || '').trim()
-  if (url) {
-    window.location.href = url
+const APP_LAUNCH_TIMEOUT_MS = 1800
+
+function isAppScheme(url: string): boolean {
+  return /^[a-z][a-z\d+.-]*:\/\//i.test(url) && !/^https?:\/\//i.test(url)
+}
+
+// 已验证的 Scheme 优先唤起 App；页面未进入后台时，回退后台配置的官方 URL。
+export function openPlatform(_platformCode: string, openUrl: string, fallbackUrl?: string): void {
+  const primaryUrl = openUrl.trim()
+  const officialUrl = (fallbackUrl || '').trim()
+
+  if (!primaryUrl) {
+    if (officialUrl) window.location.href = officialUrl
+    return
   }
+
+  if (!isAppScheme(primaryUrl) || !officialUrl || primaryUrl === officialUrl) {
+    window.location.href = primaryUrl
+    return
+  }
+
+  let appLaunchDetected = false
+  let fallbackTimer: number | undefined
+
+  const cleanup = () => {
+    document.removeEventListener('visibilitychange', onVisibilityChange)
+    window.removeEventListener('pagehide', onPageHide)
+    if (fallbackTimer !== undefined) window.clearTimeout(fallbackTimer)
+  }
+  const markAppLaunch = () => {
+    appLaunchDetected = true
+    cleanup()
+  }
+  const onVisibilityChange = () => {
+    if (document.visibilityState === 'hidden') markAppLaunch()
+  }
+  const onPageHide = () => markAppLaunch()
+
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('pagehide', onPageHide)
+  fallbackTimer = window.setTimeout(() => {
+    cleanup()
+    if (!appLaunchDetected) window.location.href = officialUrl
+  }, APP_LAUNCH_TIMEOUT_MS)
+  window.location.href = primaryUrl
 }

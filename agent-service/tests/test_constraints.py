@@ -6,8 +6,10 @@
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
+import types
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -22,16 +24,18 @@ from app.content_normalizer import normalize_generated_content  # noqa: E402
 from app.config import Settings, load_settings  # noqa: E402
 from app.internal_auth import check_internal_token  # noqa: E402
 from app.jsonutil import extract_json  # noqa: E402
-from app.prompts.writer import build_writer_user  # noqa: E402
+from app.prompts.reviewer import REVIEWER_SYSTEM, build_reviewer_user  # noqa: E402
+from app.prompts.writer import build_writer_system, build_writer_user  # noqa: E402
 from app.reviewer_logic import reviewer_passes  # noqa: E402
 
 try:
-    from app.schemas import FeedbackExamples, GenerateRequest, ReviewItem, StoreContext  # noqa: E402
+    from app.schemas import FeedbackExamples, GenerateRequest, GenerationPreferences, ReviewItem, StoreContext  # noqa: E402
 except ModuleNotFoundError as exc:
     if exc.name != "pydantic":
         raise
     FeedbackExamples = None
     GenerateRequest = None
+    GenerationPreferences = None
     ReviewItem = None
     StoreContext = None
 
@@ -115,6 +119,19 @@ def test_meituan_platform_uses_dianping_constraints():
     assert get_spec("meituan").display_name == "大众点评"
 
 
+def test_dianping_prompt_allows_brief_natural_reviews_without_forced_three_part_structure():
+    spec = get_spec("meituan")
+    writer_prompt = build_writer_system(spec, "比较满意")
+    reviewer_prompt = REVIEWER_SYSTEM
+
+    assert spec.total_min_chars <= 60
+    assert "三段式结构（强制）" not in writer_prompt
+    assert "不强制三段式" in writer_prompt
+    assert "简约短评" in writer_prompt
+    assert "流水账" in writer_prompt
+    assert "不得因为不是三段式" in reviewer_prompt
+
+
 def test_non_xiaohongshu_generated_content_strips_explicit_title():
     content = "标题：适合朋友聚餐的小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
     assert normalize_generated_content("dianping", content) == "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
@@ -126,8 +143,8 @@ def test_non_xiaohongshu_generated_content_keeps_normal_sentence_with_title_word
 
 
 def test_xiaohongshu_generated_content_keeps_title_without_label():
-    content = "标题：人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
-    assert normalize_generated_content("xiaohongshu", content) == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    content = "标题：周末挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+    assert normalize_generated_content("xiaohongshu", content) == "周末挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
 
 
 def test_xiaohongshu_generated_content_can_prepend_json_title():
@@ -135,10 +152,56 @@ def test_xiaohongshu_generated_content_can_prepend_json_title():
         normalize_generated_content(
             "xiaohongshu",
             "上周和朋友过去吃饭，环境挺舒服，服务也比较自然。",
-            title="人均70挖到宝藏小店",
+            title="周末挖到宝藏小店",
         )
-        == "人均70挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
+        == "周末挖到宝藏小店\n\n上周和朋友过去吃饭，环境挺舒服，服务也比较自然。"
     )
+
+
+def test_natural_review_violations_flag_store_name_and_per_capita_spend():
+    from app import content_normalizer as normalizer
+
+    violations = normalizer.find_natural_review_violations(
+        "七欣天香辣蟹这家店味道不错，人均80左右，朋友聚餐挺方便。",
+        "七欣天香辣蟹",
+    )
+
+    joined = "；".join(violations)
+    assert "店名" in joined
+    assert "人均" in joined
+    assert normalizer.find_natural_review_violations(
+        "上周和朋友过去吃饭，蟹肉挺入味，服务员换盘也主动。",
+        "七欣天香辣蟹",
+    ) == []
+
+
+def test_writer_and_reviewer_prompts_do_not_request_store_name_or_spend():
+    if StoreContext is None:
+        print("SKIP  pydantic 未安装，跳过自然评论 prompt 测试")
+        return
+
+    spec = get_spec("meituan")
+    writer_prompt = build_writer_system(spec, "比较满意") + "\n" + build_writer_user(
+        spec,
+        StoreContext(store_name="七欣天香辣蟹", industry_type="餐饮"),
+        ["香辣蟹", "服务热情"],
+        "比较满意",
+        0,
+    )
+    reviewer_prompt = REVIEWER_SYSTEM + "\n" + build_reviewer_user(
+        spec,
+        "比较满意",
+        "上周和朋友过去吃饭，蟹肉挺入味，服务员换盘也主动。",
+        "七欣天香辣蟹",
+        ["香辣蟹", "服务热情"],
+    )
+
+    assert "正文不要出现店名" in writer_prompt
+    assert "不要写人均" in writer_prompt
+    assert "必须原样使用给定店名" not in writer_prompt
+    assert "价格参考" not in writer_prompt
+    assert "缺少具体价格" not in reviewer_prompt
+    assert "不得因为正文未出现店名或人均花费扣分" in reviewer_prompt
 
 
 def test_extract_json_plain():
@@ -196,6 +259,7 @@ def test_load_settings_rejects_invalid_ranges_with_context():
         "MIN_PASS_SCORE": "101",
         "MAX_REVISE_ROUNDS": "-1",
         "MAX_CONCURRENCY": "0",
+        "AGENT_GENERATION_TIMEOUT_SECONDS": "0",
     }
     try:
         load_settings(bad_env)
@@ -204,8 +268,116 @@ def test_load_settings_rejects_invalid_ranges_with_context():
         assert "MIN_PASS_SCORE" in msg
         assert "MAX_REVISE_ROUNDS" in msg
         assert "MAX_CONCURRENCY" in msg
+        assert "AGENT_GENERATION_TIMEOUT_SECONDS" in msg
         return
     raise AssertionError("应抛 RuntimeError")
+
+
+def test_load_settings_accepts_generation_timeout():
+    settings = load_settings({"AGENT_GENERATION_TIMEOUT_SECONDS": "240"})
+    assert settings.generation_timeout_seconds == 240
+
+
+def test_load_settings_defaults_to_conservative_concurrency():
+    settings = load_settings({})
+    assert settings.max_concurrency == 2
+
+
+def test_pipeline_returns_completed_items_before_soft_timeout():
+    if ReviewItem is None:
+        print("SKIP  pydantic 未安装，跳过 pipeline partial timeout 测试")
+        return
+    try:
+        import app.pipeline as pipeline
+    except ModuleNotFoundError as exc:
+        if exc.name in {"agents", "openai"}:
+            print("SKIP  openai-agents 未安装，跳过 pipeline partial timeout 测试")
+            return
+        raise
+
+    req = GenerateRequest(
+        store={"store_name": "测试店"},
+        keywords=[],
+        platform="dianping",
+        count=2,
+    )
+    previous_settings = pipeline.settings
+    previous_make_writer = pipeline.make_writer_agent
+    previous_make_reviewer = pipeline.make_reviewer_agent
+    previous_generate_one = pipeline._generate_one
+
+    class FakeSettings:
+        max_concurrency = 2
+        generation_timeout_seconds = 1
+
+        def require_key(self):
+            return None
+
+    async def fake_generate_one(_writer, _reviewer, _spec, _req, index, _industry):
+        if index == 0:
+            return ReviewItem(content="服务自然，菜也稳定。", tags=[], score=80, grade="A")
+        await asyncio.sleep(5)
+
+    pipeline.settings = FakeSettings()
+    pipeline.make_writer_agent = lambda *_args, **_kwargs: object()
+    pipeline.make_reviewer_agent = lambda *_args, **_kwargs: object()
+    pipeline._generate_one = fake_generate_one
+    try:
+        result = asyncio.run(pipeline.generate(req))
+        assert result.produced == 1
+        assert result.items[0].content == "服务自然，菜也稳定。"
+    finally:
+        pipeline.settings = previous_settings
+        pipeline.make_writer_agent = previous_make_writer
+        pipeline.make_reviewer_agent = previous_make_reviewer
+        pipeline._generate_one = previous_generate_one
+
+
+def test_generate_reviews_returns_504_when_generation_times_out():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 agent timeout 路由测试")
+        return
+    try:
+        from fastapi.testclient import TestClient
+        from app.main import app, settings as app_settings
+    except ModuleNotFoundError as exc:
+        if exc.name in {"fastapi", "httpx", "starlette"}:
+            print("SKIP  FastAPI 测试依赖未安装，跳过 agent timeout 路由测试")
+            return
+        raise
+
+    async def slow_generate(_req):
+        await asyncio.sleep(0.05)
+
+    fake_pipeline = types.ModuleType("app.pipeline")
+    fake_pipeline.generate = slow_generate
+    previous_pipeline = sys.modules.get("app.pipeline")
+    previous_token = app_settings.internal_token
+    previous_timeout = app_settings.generation_timeout_seconds
+    sys.modules["app.pipeline"] = fake_pipeline
+    app_settings.internal_token = "expected-token"
+    app_settings.generation_timeout_seconds = 0.001
+    try:
+        client = TestClient(app)
+        resp = client.post(
+            "/generate-reviews",
+            headers={"X-Agent-Internal-Token": "expected-token"},
+            json={
+                "store": {"store_name": "测试店"},
+                "keywords": [],
+                "platform": "dianping",
+                "count": 1,
+            },
+        )
+        assert resp.status_code == 504
+        assert "生成超时" in resp.text
+    finally:
+        app_settings.internal_token = previous_token
+        app_settings.generation_timeout_seconds = previous_timeout
+        if previous_pipeline is None:
+            sys.modules.pop("app.pipeline", None)
+        else:
+            sys.modules["app.pipeline"] = previous_pipeline
 
 
 def test_reviewer_pass_string_false_is_false_even_with_good_score():
@@ -256,6 +428,56 @@ def test_writer_prompt_uses_feedback_examples():
     assert "蟹肉饱满，服务员会主动换盘。" in user
     assert "用户不喜欢的评论样本" in user
     assert "太像广告，夸得太满。" in user
+
+
+def test_generate_request_accepts_generation_preferences():
+    if GenerateRequest is None:
+        print("SKIP  pydantic 未安装，跳过 generation_preferences schema 测试")
+        return
+    req = GenerateRequest(
+        store={"store_name": "七欣天香辣蟹"},
+        keywords=["香辣蟹"],
+        platform="meituan",
+        generation_preferences={
+            "focus_keywords": ["香辣蟹", "服务热情"],
+            "style_codes": ["natural", "detail_rich"],
+            "diversity_dimensions": ["customer_identity", "content_angle"],
+            "reference_reviews": ["蟹很入味，服务员会主动帮忙换盘。"],
+            "length_variance": "wide",
+        },
+    )
+    assert req.generation_preferences.focus_keywords == ["香辣蟹", "服务热情"]
+    assert req.generation_preferences.style_codes == ["natural", "detail_rich"]
+    assert req.generation_preferences.diversity_dimensions == ["customer_identity", "content_angle"]
+    assert req.generation_preferences.length_variance == "wide"
+
+
+def test_writer_prompt_uses_generation_preferences():
+    if GenerationPreferences is None:
+        print("SKIP  pydantic 未安装，跳过 generation_preferences prompt 测试")
+        return
+    spec = get_spec("meituan")
+    user = build_writer_user(
+        spec,
+        StoreContext(store_name="七欣天香辣蟹"),
+        ["香辣蟹", "聚餐"],
+        "比较满意",
+        2,
+        generation_preferences=GenerationPreferences(
+            focus_keywords=["香辣蟹", "服务热情"],
+            style_codes=["natural", "detail_rich"],
+            diversity_dimensions=["customer_identity"],
+            reference_reviews=["蟹很入味，服务员会主动帮忙换盘。"],
+            length_variance="wide",
+        ),
+    )
+    assert "商家生成方向" in user
+    assert "香辣蟹、服务热情" in user
+    assert "自然随手写、细节丰富" in user
+    assert "本条多样化视角" in user
+    assert "顾客身份：附近上班族" in user
+    assert "蟹很入味，服务员会主动帮忙换盘。" in user
+    assert "本条字数目标" in user
 
 
 def test_generate_request_rejects_long_store_name():

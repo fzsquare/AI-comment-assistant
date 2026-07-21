@@ -1,4 +1,172 @@
 import http from './http'
+import type { DeviceStats, ReviewGenerationTask } from './merchant'
+
+export type AdminStats = {
+  merchantCount: number
+  enabledMerchantCount: number
+  disabledMerchantCount: number
+  currentWeekNewMerchants: number
+  currentMonthNewMerchants: number
+  storeCount: number
+  enabledStoreCount: number
+  disabledStoreCount: number
+  tagCount: number
+  taskCount: number
+  crawlEnabledStoreCount: number
+  crawlFailedStoreCount: number
+  crawlDataAccumulatingCount: number
+  totalCustomerVisits: number
+  currentWeekCustomerVisits: number
+  currentMonthCustomerVisits: number
+  totalPublishClicks: number
+  currentWeekPublishClicks: number
+  currentMonthPublishClicks: number
+  deviceStats: DeviceStats
+  dataSource: string
+  dataSourceLabel: string
+  updatedAt: string
+}
+
+export type AdminStoreAnalytics = {
+  totalCustomerVisits: number
+  currentWeekCustomerVisits: number
+  currentMonthCustomerVisits: number
+  totalPublishClicks: number
+  currentWeekPublishClicks: number
+  currentMonthPublishClicks: number
+  activePlatformLinkCount: number
+  deviceStats: DeviceStats
+  dataSource: string
+  dataSourceLabel: string
+}
+
+export type AdminStoreReviewCrawl = {
+  platformCode: string
+  externalShopId: string
+  enabled: boolean
+  baselineCompletedAt?: string
+  lastCrawledAt?: string
+  nextCrawlAt?: string
+  lastStatus: string
+  lastErrorMessage?: string
+}
+
+export type AdminStoreNFCCardStatus = {
+  totalCount: number
+  writtenCount: number
+  disabledCount: number
+  primaryStatus: 'usable' | 'unwritten' | 'unusable' | string
+  routeStatus: string
+}
+
+export type AdminStore = {
+  id: number
+  merchantUserId: number
+  uuid: string
+  typeId?: number
+  storeName: string
+  industryType?: string
+  storeIntro?: string
+  address?: string
+  primaryPlatformStyle: string
+  brandTone?: string
+  status: number
+  createdAt?: string
+  updatedAt?: string
+  merchantAccount?: string
+  merchantName?: string
+  contactName?: string
+  platformUrl?: string
+  landingUrl?: string
+  analytics?: AdminStoreAnalytics
+  nfcCardStatus?: AdminStoreNFCCardStatus
+  reviewCrawl?: AdminStoreReviewCrawl
+}
+
+export type AdminStorePayload = {
+  account: string
+  password?: string
+  merchantName?: string
+  contactName?: string
+  typeId: number
+  storeName: string
+  storeIntro?: string
+  address?: string
+  primaryPlatformStyle?: string
+  brandTone?: string
+  platformUrl?: string
+  reviewCrawlPlatformCode?: string
+  reviewCrawlExternalShopId?: string
+  reviewCrawlEnabled?: boolean
+}
+
+export type ReviewCrawlBatch = {
+  id: number
+  configId: number
+  storeId: number
+  platformCode: string
+  externalShopIdSnapshot: string
+  triggerType: string
+  attemptNo: number
+  isBaseline: boolean
+  windowDays: number
+  startedAt?: string
+  finishedAt?: string
+  status: string
+  rawRowCount: number
+  insertedRowCount: number
+  matchedReviewCount: number
+  errorMessage?: string
+}
+
+export type ExternalStoreReviewMatch = {
+  id: number
+  batchId: number
+  storeId: number
+  platformCode: string
+  sourceReviewRef?: string
+  userName?: string
+  ratingRaw?: string
+  reviewTime?: string
+  content?: string
+  matchedFeedbackId?: number
+  matchedReviewItemId?: number
+  matchScore: number
+  matchReason: string
+  matchSource: string
+}
+
+export type PlatformReviewLibraryItem = {
+  id: number
+  batchId: number
+  storeId: number
+  storeName: string
+  platformCode: string
+  sourceReviewRef?: string
+  userName?: string
+  ratingRaw?: string
+  ratingNormalized?: number
+  reviewTime?: string
+  content: string
+  isBaseline: boolean
+  isFewShot: boolean
+  selectedAt?: string
+  createdAt: string
+}
+
+export type PlatformReviewLibraryResponse = {
+  items: PlatformReviewLibraryItem[]
+  total: number
+  selectedCount: number
+  limit: number
+  offset: number
+}
+
+export type RegenerateReviewsResult = {
+  cleared: number
+  generated: number
+  platformCode: string
+}
 
 export const adminApi = {
   login(payload: { account: string; password: string }) {
@@ -20,36 +188,12 @@ export const adminApi = {
     return http.post('/admin/store-types', payload)
   },
   listStores() {
-    return http.get('/admin/stores')
+    return http.get<{ code: number; message: string; data: AdminStore[] }>('/admin/stores')
   },
-  createStore(payload: {
-    account: string
-    password: string
-    merchantName?: string
-    contactName?: string
-    typeId: number
-    storeName: string
-    storeIntro?: string
-    address?: string
-    primaryPlatformStyle?: string
-    brandTone?: string
-    platformUrl?: string
-  }) {
+  createStore(payload: AdminStorePayload & { password: string }) {
     return http.post('/admin/stores', payload)
   },
-  updateStore(id: number, payload: {
-    account: string
-    password?: string
-    merchantName?: string
-    contactName?: string
-    typeId: number
-    storeName: string
-    storeIntro?: string
-    address?: string
-    primaryPlatformStyle?: string
-    brandTone?: string
-    platformUrl?: string
-  }) {
+  updateStore(id: number, payload: AdminStorePayload) {
     return http.put(`/admin/stores/${id}`, payload)
   },
   updateStoreStatus(id: number, status: number) {
@@ -57,6 +201,28 @@ export const adminApi = {
   },
   deleteStore(id: number) {
     return http.delete(`/admin/stores/${id}`)
+  },
+  regenerateStoreReviews(id: number, platformCode: string, targetCount = 10) {
+    return http.post<{ code: number; message: string; data: RegenerateReviewsResult }>(
+      `/admin/stores/${id}/reviews/regenerate`,
+      { platformCode, targetCount },
+      { timeout: 180000 }
+    )
+  },
+  runStoreReviewCrawl(id: number) {
+    return http.post(`/admin/stores/${id}/review-crawl/run`)
+  },
+  listStoreReviewCrawlBatches(id: number) {
+    return http.get<{ code: number; message: string; data: ReviewCrawlBatch[] }>(`/admin/stores/${id}/review-crawl/batches`)
+  },
+  listStoreReviewCrawlMatches(id: number) {
+    return http.get<{ code: number; message: string; data: ExternalStoreReviewMatch[] }>(`/admin/stores/${id}/review-crawl/matches`)
+  },
+  listPlatformReviews(params?: { storeId?: number; platformCode?: string; q?: string; selectedOnly?: boolean; limit?: number; offset?: number }) {
+    return http.get<{ code: number; message: string; data: PlatformReviewLibraryResponse }>('/admin/platform-reviews', { params })
+  },
+  updatePlatformReviewFewShot(id: number, selected: boolean) {
+    return http.put(`/admin/platform-reviews/${id}/few-shot`, { selected })
   },
   listTags(storeId?: number) {
     return http.get('/admin/nfc-tags', storeId ? { params: { storeId } } : undefined)
@@ -71,9 +237,9 @@ export const adminApi = {
     return http.put(`/admin/nfc-tags/${id}/status`, { status })
   },
   listTasks() {
-    return http.get('/admin/review-generation-tasks')
+    return http.get<{ code: number; message: string; data: ReviewGenerationTask[] }>('/admin/review-generation-tasks')
   },
   getStats() {
-    return http.get('/admin/stats')
+    return http.get<{ code: number; message: string; data: AdminStats }>('/admin/stats')
   }
 }

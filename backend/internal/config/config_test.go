@@ -3,6 +3,8 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 func TestValidateRejectsProductionWithMissingRequiredSecrets(t *testing.T) {
@@ -23,17 +25,23 @@ func TestValidateRejectsProductionWithMissingRequiredSecrets(t *testing.T) {
 
 func TestValidateAllowsDevelopmentDefaults(t *testing.T) {
 	cfg := Config{
-		AppEnv:                   "development",
-		AppHost:                  "127.0.0.1",
-		AppPort:                  "8080",
-		MySQLDSN:                 "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
-		JWTSecret:                "dev-jwt-secret-change-me-32-bytes",
-		AgentServiceURL:          "http://127.0.0.1:8090",
-		AgentInternalToken:       "dev-agent-internal-token-change-me",
-		AllowedOrigins:           []string{"http://localhost:5173"},
-		MaxReviewGenerateCount:   50,
-		DefaultReviewTargetCount: 10,
-		UploadDir:                "./uploads",
+		AppEnv:                         "development",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "dev-jwt-secret-change-me-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "dev-agent-internal-token-change-me",
+		AgentHTTPTimeoutSeconds:        300,
+		AgentGenerationBatchSize:       2,
+		AllowedOrigins:                 []string{"http://localhost:5173"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -43,17 +51,21 @@ func TestValidateAllowsDevelopmentDefaults(t *testing.T) {
 
 func TestValidateRejectsAllowedOriginWithPath(t *testing.T) {
 	cfg := Config{
-		AppEnv:                   "production",
-		AppHost:                  "127.0.0.1",
-		AppPort:                  "8080",
-		MySQLDSN:                 "ppk_user:secret@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
-		JWTSecret:                "prod-jwt-secret-with-at-least-32-bytes",
-		AgentServiceURL:          "http://127.0.0.1:8090",
-		AgentInternalToken:       "prod-agent-token-with-at-least-32-bytes",
-		AllowedOrigins:           []string{"https://frontend.example.com/app"},
-		MaxReviewGenerateCount:   50,
-		DefaultReviewTargetCount: 10,
-		UploadDir:                "./uploads",
+		AppEnv:                         "production",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_user:secret@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "prod-jwt-secret-with-at-least-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "prod-agent-token-with-at-least-32-bytes",
+		AllowedOrigins:                 []string{"https://frontend.example.com/app"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
 	}
 
 	err := cfg.Validate()
@@ -79,6 +91,56 @@ func TestLoadInvalidIntegerEnvFailsValidation(t *testing.T) {
 	}
 }
 
+func TestLoadAgentGenerationRuntimeConfig(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("AGENT_HTTP_TIMEOUT_SECONDS", "600")
+	t.Setenv("AGENT_GENERATION_BATCH_SIZE", "3")
+
+	cfg := Load()
+	if got, want := cfg.AgentHTTPTimeoutSeconds, 600; got != want {
+		t.Fatalf("agent HTTP timeout got %d, want %d", got, want)
+	}
+	if got, want := cfg.AgentGenerationBatchSize, 3; got != want {
+		t.Fatalf("agent batch size got %d, want %d", got, want)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected agent generation runtime config to validate, got %v", err)
+	}
+}
+
+func TestValidateRejectsInvalidAgentGenerationRuntimeConfig(t *testing.T) {
+	cfg := Config{
+		AppEnv:                         "development",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "dev-jwt-secret-change-me-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "dev-agent-internal-token-change-me",
+		AgentHTTPTimeoutSeconds:        0,
+		AgentGenerationBatchSize:       0,
+		AllowedOrigins:                 []string{"http://localhost:5173"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
+	}
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"AGENT_HTTP_TIMEOUT_SECONDS", "AGENT_GENERATION_BATCH_SIZE"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("expected error to mention %s, got %q", want, msg)
+		}
+	}
+}
+
 func TestLoadNormalizesPublicBasePath(t *testing.T) {
 	t.Setenv("PUBLIC_BASE_PATH", "ppk/")
 	t.Setenv("APP_ENV", "development")
@@ -94,18 +156,22 @@ func TestLoadNormalizesPublicBasePath(t *testing.T) {
 
 func TestValidateRejectsInvalidPublicBasePath(t *testing.T) {
 	cfg := Config{
-		AppEnv:                   "development",
-		AppHost:                  "127.0.0.1",
-		AppPort:                  "8080",
-		MySQLDSN:                 "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
-		JWTSecret:                "dev-jwt-secret-change-me-32-bytes",
-		AgentServiceURL:          "http://127.0.0.1:8090",
-		AgentInternalToken:       "dev-agent-internal-token-change-me",
-		AllowedOrigins:           []string{"http://localhost:5173"},
-		MaxReviewGenerateCount:   50,
-		DefaultReviewTargetCount: 10,
-		UploadDir:                "./uploads",
-		PublicBasePath:           "/bad path",
+		AppEnv:                         "development",
+		AppHost:                        "127.0.0.1",
+		AppPort:                        "8080",
+		MySQLDSN:                       "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local",
+		JWTSecret:                      "dev-jwt-secret-change-me-32-bytes",
+		AgentServiceURL:                "http://127.0.0.1:8090",
+		AgentInternalToken:             "dev-agent-internal-token-change-me",
+		AllowedOrigins:                 []string{"http://localhost:5173"},
+		MaxReviewGenerateCount:         50,
+		DefaultReviewTargetCount:       10,
+		UploadDir:                      "./uploads",
+		PublicBasePath:                 "/bad path",
+		ReviewCrawlPollIntervalSeconds: 3,
+		ReviewCrawlPollMaxAttempts:     40,
+		ReviewCrawlHTTPTimeoutSeconds:  20,
+		ReviewCrawlMaxDownloadBytes:    5 * 1024 * 1024,
 	}
 
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "PUBLIC_BASE_PATH") {
@@ -118,5 +184,22 @@ func TestListenAddressUsesConfiguredHostAndPort(t *testing.T) {
 
 	if got, want := cfg.ListenAddress(), "127.0.0.1:18989"; got != want {
 		t.Fatalf("got listen address %q, want %q", got, want)
+	}
+}
+
+func TestLoadPinsMySQLConnectionsToShanghaiTimezone(t *testing.T) {
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("MYSQL_DSN", "user:password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local")
+
+	cfg := Load()
+	parsed, err := mysql.ParseDSN(cfg.MySQLDSN)
+	if err != nil {
+		t.Fatalf("parse normalized DSN: %v", err)
+	}
+	if got := parsed.Loc.String(); got != "Asia/Shanghai" {
+		t.Fatalf("mysql loc got %q, want Asia/Shanghai", got)
+	}
+	if got := parsed.Params["time_zone"]; got != "'+08:00'" {
+		t.Fatalf("mysql session time_zone got %q, want '+08:00'", got)
 	}
 }

@@ -8,22 +8,31 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/go-sql-driver/mysql"
 )
 
 const (
-	defaultAppEnv                 = "development"
-	defaultAppHost                = "127.0.0.1"
-	defaultAppPort                = "8080"
-	defaultMySQLDSN               = "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
-	defaultJWTSecret              = "dev-jwt-secret-change-me-32-bytes"
-	defaultAgentServiceURL        = "http://127.0.0.1:8090"
-	defaultAgentMinGrade          = "B"
-	defaultAgentInternalToken     = "dev-agent-internal-token-change-me"
-	defaultAllowedOrigins         = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
-	defaultMaxReviewGenerateCount = 50
-	defaultReviewTargetCount      = 10
-	defaultUploadDir              = "./uploads"
-	minSecretLength               = 32
+	defaultAppEnv                         = "development"
+	defaultAppHost                        = "127.0.0.1"
+	defaultAppPort                        = "8080"
+	defaultMySQLDSN                       = "ppk_dev:ppk_dev_password@tcp(127.0.0.1:3306)/ppk?charset=utf8mb4&parseTime=True&loc=Local"
+	defaultJWTSecret                      = "dev-jwt-secret-change-me-32-bytes"
+	defaultAgentServiceURL                = "http://127.0.0.1:8090"
+	defaultAgentMinGrade                  = "B"
+	defaultAgentInternalToken             = "dev-agent-internal-token-change-me"
+	defaultAgentHTTPTimeoutSeconds        = 300
+	defaultAgentGenerationBatchSize       = 2
+	defaultAllowedOrigins                 = "http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173"
+	defaultMaxReviewGenerateCount         = 50
+	defaultReviewTargetCount              = 10
+	defaultUploadDir                      = "./uploads"
+	defaultReviewCrawlPollIntervalSeconds = 3
+	defaultReviewCrawlPollMaxAttempts     = 40
+	defaultReviewCrawlHTTPTimeoutSeconds  = 20
+	defaultReviewCrawlMaxDownloadBytes    = 5 * 1024 * 1024
+	minSecretLength                       = 32
 )
 
 type Config struct {
@@ -40,6 +49,10 @@ type Config struct {
 	AgentInternalToken string
 	// 入池最低质量等级（S/A/B/C/D，对应约束手册 6.1），默认 B
 	AgentMinGrade string
+	// Go 后端等待 agent-service 单批生成响应的 HTTP 超时秒数
+	AgentHTTPTimeoutSeconds int
+	// Go 后端调用 agent-service 时每批请求的评价数量
+	AgentGenerationBatchSize int
 	// 单次人工生成评价数量上限
 	MaxReviewGenerateCount int
 	// targetCount 缺省值
@@ -50,6 +63,12 @@ type Config struct {
 	PublicBaseURL string
 	// 部署在子路径时的公开路径前缀，例如 /ppk；用于生成相对落地页和上传资源地址
 	PublicBasePath string
+	// 外部真实评论采集服务，仅后端访问；为空时采集功能不可用
+	ReviewCrawlServiceURL          string
+	ReviewCrawlPollIntervalSeconds int
+	ReviewCrawlPollMaxAttempts     int
+	ReviewCrawlHTTPTimeoutSeconds  int
+	ReviewCrawlMaxDownloadBytes    int
 }
 
 func Load() Config {
@@ -68,21 +87,48 @@ func Load() Config {
 	}
 
 	return Config{
-		AppEnv:                   appEnv,
-		AppHost:                  getEnv("APP_HOST", defaultAppHost),
-		AppPort:                  getEnv("APP_PORT", defaultAppPort),
-		MySQLDSN:                 getEnv("MYSQL_DSN", mysqlFallback),
-		JWTSecret:                getEnv("JWT_SECRET", jwtFallback),
-		AllowedOrigins:           parseCSV(getEnv("ALLOWED_ORIGINS", allowedOriginsFallback)),
-		AgentServiceURL:          strings.TrimRight(getEnv("AGENT_SERVICE_URL", defaultAgentServiceURL), "/"),
-		AgentInternalToken:       getEnv("AGENT_INTERNAL_TOKEN", agentTokenFallback),
-		AgentMinGrade:            getEnv("AGENT_MIN_GRADE", defaultAgentMinGrade),
-		MaxReviewGenerateCount:   getEnvInt("MAX_REVIEW_GENERATE_COUNT", defaultMaxReviewGenerateCount),
-		DefaultReviewTargetCount: getEnvInt("DEFAULT_REVIEW_TARGET_COUNT", defaultReviewTargetCount),
-		UploadDir:                getEnv("UPLOAD_DIR", defaultUploadDir),
-		PublicBaseURL:            strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
-		PublicBasePath:           normalizeBasePath(getEnv("PUBLIC_BASE_PATH", "")),
+		AppEnv:                         appEnv,
+		AppHost:                        getEnv("APP_HOST", defaultAppHost),
+		AppPort:                        getEnv("APP_PORT", defaultAppPort),
+		MySQLDSN:                       normalizeMySQLDSN(getEnv("MYSQL_DSN", mysqlFallback)),
+		JWTSecret:                      getEnv("JWT_SECRET", jwtFallback),
+		AllowedOrigins:                 parseCSV(getEnv("ALLOWED_ORIGINS", allowedOriginsFallback)),
+		AgentServiceURL:                strings.TrimRight(getEnv("AGENT_SERVICE_URL", defaultAgentServiceURL), "/"),
+		AgentInternalToken:             getEnv("AGENT_INTERNAL_TOKEN", agentTokenFallback),
+		AgentMinGrade:                  getEnv("AGENT_MIN_GRADE", defaultAgentMinGrade),
+		AgentHTTPTimeoutSeconds:        getEnvInt("AGENT_HTTP_TIMEOUT_SECONDS", defaultAgentHTTPTimeoutSeconds),
+		AgentGenerationBatchSize:       getEnvInt("AGENT_GENERATION_BATCH_SIZE", defaultAgentGenerationBatchSize),
+		MaxReviewGenerateCount:         getEnvInt("MAX_REVIEW_GENERATE_COUNT", defaultMaxReviewGenerateCount),
+		DefaultReviewTargetCount:       getEnvInt("DEFAULT_REVIEW_TARGET_COUNT", defaultReviewTargetCount),
+		UploadDir:                      getEnv("UPLOAD_DIR", defaultUploadDir),
+		PublicBaseURL:                  strings.TrimRight(getEnv("PUBLIC_BASE_URL", ""), "/"),
+		PublicBasePath:                 normalizeBasePath(getEnv("PUBLIC_BASE_PATH", "")),
+		ReviewCrawlServiceURL:          strings.TrimRight(getEnv("REVIEW_CRAWL_SERVICE_URL", ""), "/"),
+		ReviewCrawlPollIntervalSeconds: getEnvInt("REVIEW_CRAWL_POLL_INTERVAL_SECONDS", defaultReviewCrawlPollIntervalSeconds),
+		ReviewCrawlPollMaxAttempts:     getEnvInt("REVIEW_CRAWL_POLL_MAX_ATTEMPTS", defaultReviewCrawlPollMaxAttempts),
+		ReviewCrawlHTTPTimeoutSeconds:  getEnvInt("REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS", defaultReviewCrawlHTTPTimeoutSeconds),
+		ReviewCrawlMaxDownloadBytes:    getEnvInt("REVIEW_CRAWL_MAX_DOWNLOAD_BYTES", defaultReviewCrawlMaxDownloadBytes),
 	}
+}
+
+func normalizeMySQLDSN(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return raw
+	}
+	parsed, err := mysql.ParseDSN(raw)
+	if err != nil {
+		return raw
+	}
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		loc = time.FixedZone("Asia/Shanghai", 8*60*60)
+	}
+	parsed.Loc = loc
+	if parsed.Params == nil {
+		parsed.Params = map[string]string{}
+	}
+	parsed.Params["time_zone"] = "'+08:00'"
+	return parsed.FormatDSN()
 }
 
 func (c Config) Validate() error {
@@ -111,6 +157,12 @@ func (c Config) Validate() error {
 			problems = append(problems, fmt.Sprintf("AGENT_INTERNAL_TOKEN must be at least %d characters", minSecretLength))
 		}
 	}
+	if c.AgentHTTPTimeoutSeconds <= 0 {
+		problems = append(problems, "AGENT_HTTP_TIMEOUT_SECONDS must be greater than 0")
+	}
+	if c.AgentGenerationBatchSize <= 0 {
+		problems = append(problems, "AGENT_GENERATION_BATCH_SIZE must be greater than 0")
+	}
 	if c.MaxReviewGenerateCount <= 0 {
 		problems = append(problems, "MAX_REVIEW_GENERATE_COUNT must be greater than 0")
 	}
@@ -129,6 +181,23 @@ func (c Config) Validate() error {
 		if err := validateBasePath(c.PublicBasePath); err != nil {
 			problems = append(problems, "PUBLIC_BASE_PATH must be a URL path prefix like /ppk")
 		}
+	}
+	if c.ReviewCrawlServiceURL != "" {
+		if err := validateHTTPURL(c.ReviewCrawlServiceURL); err != nil {
+			problems = append(problems, "REVIEW_CRAWL_SERVICE_URL must be an http(s) URL")
+		}
+	}
+	if c.ReviewCrawlPollIntervalSeconds <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_POLL_INTERVAL_SECONDS must be greater than 0")
+	}
+	if c.ReviewCrawlPollMaxAttempts <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_POLL_MAX_ATTEMPTS must be greater than 0")
+	}
+	if c.ReviewCrawlHTTPTimeoutSeconds <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS must be greater than 0")
+	}
+	if c.ReviewCrawlMaxDownloadBytes <= 0 {
+		problems = append(problems, "REVIEW_CRAWL_MAX_DOWNLOAD_BYTES must be greater than 0")
 	}
 
 	for _, origin := range c.AllowedOrigins {

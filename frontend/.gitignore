@@ -7,3 +7,7 @@ src/**/*.js
 src/**/*.vue.js
 src/*.js
 src/*.vue.js
+
+# 浏览器测试产物
+test-results/
+playwright-report/

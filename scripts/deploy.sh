@@ -8,6 +8,7 @@ LOG_DIR="$STATE_DIR/logs"
 PID_DIR="$STATE_DIR/pids"
 BIN_DIR="$STATE_DIR/bin"
 RUNTIME_ENV="$STATE_DIR/runtime.env"
+BACKUP_DIR="$STATE_DIR/backups"
 
 COMMAND="${1:-start}"
 
@@ -27,6 +28,7 @@ Usage: scripts/deploy.sh [command]
 Commands:
   start     Install dependencies, build, and start all services (default)
   restart   Same as start
+  upgrade   Back up and safely upgrade an existing deployment
   stop      Stop services started by this script
   status    Show service status
   logs      Tail logs for all services
@@ -40,10 +42,18 @@ Useful env:
   BACKEND_PORT=18989          Local-only Go backend port
   ALLOW_EMPTY_LLM_KEY=true    Allow UI/API startup without AI generation
   INIT_DB=true                Optionally create/import MySQL schema
-  MIGRATE_DB=true             Run database/migrations/*.sql once (as root) for an existing DB
+  MIGRATE_DB=true             Run database/migrations/*.sql once (default; requires root)
+  MIGRATE_DB=false            Skip DB migrations only when applied manually
+  HISTORICAL_DATETIME_TIMEZONE_AUDITED=true
+                              Confirm old DATETIME timezone before migration 0007
+  AUTO_BACKUP_DB=false        Skip the automatic DB backup in upgrade mode
   LOAD_SEED=true              Import demo seed data when INIT_DB=true
+  REVIEW_CRAWL_SERVICE_URL=   Optional backend-only real review crawl service URL
   SMOKE_TEST=true             Check frontend gateway and management APIs after start
   SMOKE_TEST_AUTH=true        Force default/custom admin and merchant login checks
+  SMOKE_SPA_ROUTES="..."      Space-separated SPA routes to verify after gateway start
+  VERIFY_ADMIN_CONSOLE_BUILD=true
+                              Check rebuilt AdminConsole lazy chunk and key UI strings
   SKIP_INSTALL=true           Reuse installed dependencies
 EOF
 }
@@ -129,6 +139,20 @@ configure_defaults() {
   DB_APP_PASSWORD="${DB_APP_PASSWORD:-}"
   MYSQL_ROOT_USER="${MYSQL_ROOT_USER:-root}"
   MYSQL_ROOT_PASSWORD="${MYSQL_ROOT_PASSWORD:-}"
+  if [[ "$COMMAND" == "upgrade" ]]; then
+    # Upgrade owns these values so an old .env.deploy cannot accidentally
+    # initialize the database or import demo users and stores.
+    INIT_DB="false"
+    LOAD_SEED="false"
+    MIGRATE_DB="true"
+    AUTO_BACKUP_DB="${AUTO_BACKUP_DB:-true}"
+  else
+    INIT_DB="${INIT_DB:-false}"
+    LOAD_SEED="${LOAD_SEED:-false}"
+    MIGRATE_DB="${MIGRATE_DB:-true}"
+    AUTO_BACKUP_DB="${AUTO_BACKUP_DB:-false}"
+  fi
+  HISTORICAL_DATETIME_TIMEZONE_AUDITED="${HISTORICAL_DATETIME_TIMEZONE_AUDITED:-false}"
 
   case "${MYSQL_DSN:-}" in
     *replace-with*|*CHANGE_ME*|*change-me*)
@@ -139,7 +163,7 @@ configure_defaults() {
   esac
   if [[ -z "${MYSQL_DSN:-}" ]]; then
     if [[ -n "$DB_APP_PASSWORD" ]]; then
-      MYSQL_DSN="$DB_APP_USER:$DB_APP_PASSWORD@tcp($MYSQL_HOST:$MYSQL_PORT)/$DB_NAME?charset=utf8mb4&parseTime=True&loc=Local"
+      MYSQL_DSN="$DB_APP_USER:$DB_APP_PASSWORD@tcp($MYSQL_HOST:$MYSQL_PORT)/$DB_NAME?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai"
     fi
   fi
 
@@ -185,12 +209,22 @@ configure_defaults() {
   LLM_MODEL="${LLM_MODEL:-gpt-5.4}"
   MIN_PASS_SCORE="${MIN_PASS_SCORE:-80}"
   MAX_REVISE_ROUNDS="${MAX_REVISE_ROUNDS:-2}"
-  MAX_CONCURRENCY="${MAX_CONCURRENCY:-5}"
+  MAX_CONCURRENCY="${MAX_CONCURRENCY:-2}"
+  AGENT_GENERATION_TIMEOUT_SECONDS="${AGENT_GENERATION_TIMEOUT_SECONDS:-240}"
   AGENT_MIN_GRADE="${AGENT_MIN_GRADE:-B}"
+  AGENT_HTTP_TIMEOUT_SECONDS="${AGENT_HTTP_TIMEOUT_SECONDS:-300}"
+  AGENT_GENERATION_BATCH_SIZE="${AGENT_GENERATION_BATCH_SIZE:-2}"
   MAX_REVIEW_GENERATE_COUNT="${MAX_REVIEW_GENERATE_COUNT:-50}"
   DEFAULT_REVIEW_TARGET_COUNT="${DEFAULT_REVIEW_TARGET_COUNT:-10}"
+  REVIEW_CRAWL_SERVICE_URL="${REVIEW_CRAWL_SERVICE_URL:-}"
+  REVIEW_CRAWL_POLL_INTERVAL_SECONDS="${REVIEW_CRAWL_POLL_INTERVAL_SECONDS:-3}"
+  REVIEW_CRAWL_POLL_MAX_ATTEMPTS="${REVIEW_CRAWL_POLL_MAX_ATTEMPTS:-40}"
+  REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS="${REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS:-20}"
+  REVIEW_CRAWL_MAX_DOWNLOAD_BYTES="${REVIEW_CRAWL_MAX_DOWNLOAD_BYTES:-5242880}"
   SMOKE_TEST="${SMOKE_TEST:-true}"
   SMOKE_TEST_AUTH="${SMOKE_TEST_AUTH:-auto}"
+  SMOKE_SPA_ROUTES="${SMOKE_SPA_ROUTES:-/admin/console /merchant/console /landing/11111111-1111-4111-8111-111111111111 /landing/11111111-1111-4111-8111-111111111111/review/meituan /scheme-test}"
+  VERIFY_ADMIN_CONSOLE_BUILD="${VERIFY_ADMIN_CONSOLE_BUILD:-true}"
   SMOKE_ADMIN_ACCOUNT="${SMOKE_ADMIN_ACCOUNT:-admin}"
   SMOKE_ADMIN_PASSWORD="${SMOKE_ADMIN_PASSWORD:-123456}"
   SMOKE_MERCHANT_ACCOUNT="${SMOKE_MERCHANT_ACCOUNT:-merchant}"
@@ -223,6 +257,42 @@ mysql_cmd() {
   fi
 }
 
+backup_database() {
+  [[ "$COMMAND" == "upgrade" ]] || return 0
+  if ! truthy "$AUTO_BACKUP_DB"; then
+    log "AUTO_BACKUP_DB=false; pre-upgrade database backup skipped"
+    return
+  fi
+
+  require_command mysqldump
+  mkdir -p "$BACKUP_DIR"
+
+  local timestamp backup_file
+  local args=(
+    --protocol=tcp
+    -h "$MYSQL_HOST"
+    -P "$MYSQL_PORT"
+    -u "$MYSQL_ROOT_USER"
+    --single-transaction
+    --quick
+    --routines
+    --triggers
+    --default-character-set=utf8mb4
+  )
+  timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+  backup_file="$BACKUP_DIR/${DB_NAME}-${timestamp}.sql"
+
+  log "backing up database $DB_NAME before upgrade"
+  if [[ -n "$MYSQL_ROOT_PASSWORD" ]]; then
+    MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqldump "${args[@]}" --result-file="$backup_file" "$DB_NAME"
+  else
+    mysqldump "${args[@]}" --result-file="$backup_file" "$DB_NAME"
+  fi
+  [[ -s "$backup_file" ]] || die "database backup is empty: $backup_file"
+  chmod 600 "$backup_file"
+  log "database backup saved to $backup_file"
+}
+
 validate_mysql_identifier() {
   local label="$1"
   local value="$2"
@@ -245,6 +315,12 @@ validate_config() {
       die "MYSQL_DSN still contains a placeholder; edit $ENV_FILE, leave MYSQL_DSN empty, or set DB_APP_PASSWORD for generated DSN"
       ;;
   esac
+}
+
+validate_positive_integer() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[1-9][0-9]*$ ]] || die "$name must be a positive integer, got: $value"
 }
 
 mysql_dsn_endpoint() {
@@ -348,6 +424,18 @@ EOF
 validate_runtime_config() {
   local failed=0
 
+  validate_positive_integer REVIEW_CRAWL_POLL_INTERVAL_SECONDS "$REVIEW_CRAWL_POLL_INTERVAL_SECONDS"
+  validate_positive_integer REVIEW_CRAWL_POLL_MAX_ATTEMPTS "$REVIEW_CRAWL_POLL_MAX_ATTEMPTS"
+  validate_positive_integer REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS "$REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS"
+  validate_positive_integer REVIEW_CRAWL_MAX_DOWNLOAD_BYTES "$REVIEW_CRAWL_MAX_DOWNLOAD_BYTES"
+
+  if [[ -n "$REVIEW_CRAWL_SERVICE_URL" ]]; then
+    case "$REVIEW_CRAWL_SERVICE_URL" in
+      http://*|https://*) ;;
+      *) die "REVIEW_CRAWL_SERVICE_URL must start with http:// or https://, got: $REVIEW_CRAWL_SERVICE_URL" ;;
+    esac
+  fi
+
   if [[ -z "$LLM_API_KEY" ]] && ! truthy "$ALLOW_EMPTY_LLM_KEY"; then
     cat >&2 <<EOF
 [deploy] ERROR: LLM_API_KEY is empty.
@@ -370,11 +458,31 @@ ensure_migrations_table() {
   mysql_cmd "$DB_NAME" -e "CREATE TABLE IF NOT EXISTS schema_migrations (filename VARCHAR(255) PRIMARY KEY, applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP);"
 }
 
+require_historical_datetime_timezone_audit() {
+  local migration="0007_publish_stats_index.sql"
+  local has_logs_table has_logs has_migrations_table already_applied=0
+
+  has_logs_table="$(mysql_cmd -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME' AND table_name = 'review_display_logs';")"
+  [[ "$has_logs_table" == "1" ]] || return 0
+
+  has_logs="$(mysql_cmd "$DB_NAME" -N -B -e "SELECT EXISTS(SELECT 1 FROM review_display_logs LIMIT 1);")"
+  [[ "$has_logs" == "1" ]] || return 0
+
+  has_migrations_table="$(mysql_cmd -N -B -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '$DB_NAME' AND table_name = 'schema_migrations';")"
+  if [[ "$has_migrations_table" == "1" ]]; then
+    already_applied="$(mysql_cmd "$DB_NAME" -N -B -e "SELECT COUNT(*) FROM schema_migrations WHERE filename = '$migration';")"
+  fi
+  [[ "$already_applied" == "0" ]] || return 0
+  if ! truthy "$HISTORICAL_DATETIME_TIMEZONE_AUDITED"; then
+    die "existing review_display_logs use timezone-less DATETIME values; audit the old backend host's Local timezone, migrate historical rows if needed, then set HISTORICAL_DATETIME_TIMEZONE_AUDITED=true before applying $migration"
+  fi
+}
+
 # 以 root 运行 database/migrations/*.sql，每个文件经 schema_migrations 去重只跑一次。
 # 迁移本身用 information_schema 守卫，幂等，全新库/旧库均可安全运行。
 apply_migrations() {
   local dir="$ROOT_DIR/database/migrations"
-  [[ -d "$dir" ]] || return
+  [[ -d "$dir" ]] || return 0
   ensure_migrations_table
   local f base applied
   for f in "$dir"/*.sql; do
@@ -403,6 +511,8 @@ prepare_database() {
   require_command mysql
   validate_mysql_identifier DB_NAME "$DB_NAME"
 
+  backup_database
+
   if [[ "$do_init" == "true" ]]; then
     [[ -n "$DB_APP_PASSWORD" ]] || die "INIT_DB=true requires DB_APP_PASSWORD"
     [[ "$DB_APP_PASSWORD" != *"'"* ]] || die "DB_APP_PASSWORD must not contain a single quote when INIT_DB=true"
@@ -417,6 +527,7 @@ prepare_database() {
   fi
 
   # 迁移在 schema 之后、seed 之前；旧库在此补齐 uuid/type_id 等列
+  require_historical_datetime_timezone_audit
   apply_migrations
 
   if [[ "$do_init" == "true" ]]; then
@@ -454,9 +565,51 @@ build_project() {
   require_base_commands
   log "building frontend with base $FRONTEND_BASE_PATH and API $FRONTEND_API_BASE_URL"
   (cd "$ROOT_DIR/frontend" && VITE_BASE_PATH="$FRONTEND_BASE_PATH" VITE_API_BASE_URL="$FRONTEND_API_BASE_URL" npm run build)
+  verify_frontend_build_artifacts
 
   log "building backend"
   (cd "$ROOT_DIR/backend" && go build -o "$BIN_DIR/ppk-server" ./cmd/server)
+}
+
+verify_frontend_build_artifacts() {
+  if ! truthy "$VERIFY_ADMIN_CONSOLE_BUILD"; then
+    log "VERIFY_ADMIN_CONSOLE_BUILD=false; AdminConsole build artifact check skipped"
+    return
+  fi
+
+  local dist="$ROOT_DIR/frontend/dist"
+  [[ -f "$dist/index.html" ]] || die "frontend build is missing dist/index.html"
+
+  local admin_js=("$dist"/assets/AdminConsole-*.js)
+  local admin_css=("$dist"/assets/AdminConsole-*.css)
+  [[ -e "${admin_js[0]}" ]] || die "frontend build is missing AdminConsole lazy JS chunk"
+  [[ -e "${admin_css[0]}" ]] || die "frontend build is missing AdminConsole CSS chunk"
+
+  python3 - "$dist" <<'PY'
+from pathlib import Path
+import sys
+
+dist = Path(sys.argv[1])
+assets = dist / "assets"
+needles = [
+    "评价助手",
+    "运营总览",
+    "商家与门店",
+    "商家 ID 配置",
+    "保存商家 ID",
+    "服务器落地链接 / NFC 写入链接",
+]
+
+bundle_text = "\n".join(
+    path.read_text("utf-8", errors="ignore")
+    for path in assets.glob("AdminConsole-*.js")
+)
+
+missing = [needle for needle in needles if needle not in bundle_text]
+if missing:
+    raise SystemExit("AdminConsole build is missing key UI text: " + ", ".join(missing))
+PY
+  log "verified AdminConsole build artifacts"
 }
 
 pid_file_for() {
@@ -562,6 +715,38 @@ run_smoke_tests() {
 
   log "running smoke tests against $base_url"
   python3 "$ROOT_DIR/scripts/check_frontend_flows.py" "${args[@]}"
+  check_spa_routes "$base_url"
+}
+
+check_spa_routes() {
+  local base_url="$1"
+  if [[ -z "${SMOKE_SPA_ROUTES:-}" ]]; then
+    log "SMOKE_SPA_ROUTES is empty; SPA route checks skipped"
+    return
+  fi
+
+  log "checking SPA routes under $base_url: $SMOKE_SPA_ROUTES"
+  python3 - "$base_url" "$SMOKE_SPA_ROUTES" <<'PY'
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+base_url = sys.argv[1].rstrip("/") + "/"
+routes = [route for route in sys.argv[2].split() if route]
+
+for route in routes:
+    url = urllib.parse.urljoin(base_url, route.lstrip("/"))
+    req = urllib.request.Request(url, method="GET", headers={"Accept": "text/html"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode("utf-8", errors="replace")
+            if resp.status != 200 or "<html" not in body.lower() or 'id="app"' not in body:
+                raise SystemExit(f"SPA route {route} returned unexpected response")
+    except urllib.error.URLError as exc:
+        raise SystemExit(f"SPA route {route} failed: {exc.reason}") from exc
+    print(f"[smoke] ok SPA route {route}", flush=True)
+PY
 }
 
 ensure_port_free() {
@@ -596,6 +781,7 @@ start_services() {
       MIN_PASS_SCORE="$MIN_PASS_SCORE" \
       MAX_REVISE_ROUNDS="$MAX_REVISE_ROUNDS" \
       MAX_CONCURRENCY="$MAX_CONCURRENCY" \
+      AGENT_GENERATION_TIMEOUT_SECONDS="$AGENT_GENERATION_TIMEOUT_SECONDS" \
       AGENT_HOST="$AGENT_HOST" \
       AGENT_PORT="$AGENT_PORT" \
       AGENT_INTERNAL_TOKEN="$AGENT_INTERNAL_TOKEN" \
@@ -620,8 +806,15 @@ start_services() {
       AGENT_SERVICE_URL="$AGENT_SERVICE_URL" \
       AGENT_INTERNAL_TOKEN="$AGENT_INTERNAL_TOKEN" \
       AGENT_MIN_GRADE="$AGENT_MIN_GRADE" \
+      AGENT_HTTP_TIMEOUT_SECONDS="$AGENT_HTTP_TIMEOUT_SECONDS" \
+      AGENT_GENERATION_BATCH_SIZE="$AGENT_GENERATION_BATCH_SIZE" \
       MAX_REVIEW_GENERATE_COUNT="$MAX_REVIEW_GENERATE_COUNT" \
       DEFAULT_REVIEW_TARGET_COUNT="$DEFAULT_REVIEW_TARGET_COUNT" \
+      REVIEW_CRAWL_SERVICE_URL="$REVIEW_CRAWL_SERVICE_URL" \
+      REVIEW_CRAWL_POLL_INTERVAL_SECONDS="$REVIEW_CRAWL_POLL_INTERVAL_SECONDS" \
+      REVIEW_CRAWL_POLL_MAX_ATTEMPTS="$REVIEW_CRAWL_POLL_MAX_ATTEMPTS" \
+      REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS="$REVIEW_CRAWL_HTTP_TIMEOUT_SECONDS" \
+      REVIEW_CRAWL_MAX_DOWNLOAD_BYTES="$REVIEW_CRAWL_MAX_DOWNLOAD_BYTES" \
       "$BIN_DIR/ppk-server"
   ) >> "$LOG_DIR/backend.log" 2>&1 &
   echo $! > "$(pid_file_for backend)"
@@ -680,7 +873,7 @@ esac
 load_env_files
 
 case "$COMMAND" in
-  start|restart)
+  start|restart|upgrade)
     require_base_commands
     configure_defaults
     validate_config

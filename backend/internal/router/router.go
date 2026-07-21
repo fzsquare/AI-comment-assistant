@@ -1,8 +1,10 @@
 package router
 
 import (
+	"context"
 	"os"
 	"strings"
+	"time"
 
 	"ppk/backend/internal/config"
 	adminHandler "ppk/backend/internal/handler/admin"
@@ -25,9 +27,12 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 
 	authService := &service.AuthService{DB: db, Config: cfg}
 	reviewPoolService := buildReviewPoolService(cfg, db)
+	reviewPoolService.ResumePendingInitTasksAsync()
+	reviewCrawlService := service.NewReviewCrawlService(db, cfg)
+	reviewCrawlService.StartScheduler(context.Background())
 
-	merchant := merchantHandler.NewHandler(db, cfg, authService, reviewPoolService)
-	admin := adminHandler.NewHandler(db, cfg, authService, reviewPoolService)
+	merchant := merchantHandler.NewHandler(db, cfg, authService, reviewPoolService, reviewCrawlService)
+	admin := adminHandler.NewHandler(db, cfg, authService, reviewPoolService, reviewCrawlService)
 	public := publicHandler.NewHandler(db, reviewPoolService)
 
 	api := r.Group("/api")
@@ -43,10 +48,17 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 func buildReviewPoolService(cfg config.Config, db *gorm.DB) *service.ReviewPoolService {
 	var generator service.ReviewGenerator = service.NewUnavailableReviewGenerator("AGENT_SERVICE_URL is required")
 	if strings.TrimSpace(cfg.AgentServiceURL) != "" {
-		generator = service.NewAgentReviewGenerator(cfg.AgentServiceURL, cfg.AgentMinGrade, cfg.AgentInternalToken)
+		generator = service.NewAgentReviewGeneratorWithOptions(
+			cfg.AgentServiceURL,
+			cfg.AgentMinGrade,
+			cfg.AgentInternalToken,
+			time.Duration(cfg.AgentHTTPTimeoutSeconds)*time.Second,
+			cfg.AgentGenerationBatchSize,
+		)
 	}
 	return &service.ReviewPoolService{
-		DB:        db,
-		Generator: generator,
+		DB:            db,
+		Generator:     generator,
+		SessionSecret: cfg.JWTSecret,
 	}
 }

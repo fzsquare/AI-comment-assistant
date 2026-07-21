@@ -1,16 +1,60 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
 	"ppk/backend/internal/model"
 	"ppk/backend/internal/pkg/response"
 	"ppk/backend/internal/pkg/utils"
+	"ppk/backend/internal/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 	"ppk/backend/internal/middleware"
 )
+
+type adminStatsResponse struct {
+	MerchantCount              int64               `json:"merchantCount"`
+	EnabledMerchantCount       int64               `json:"enabledMerchantCount"`
+	DisabledMerchantCount      int64               `json:"disabledMerchantCount"`
+	CurrentWeekNewMerchants    int64               `json:"currentWeekNewMerchants"`
+	CurrentMonthNewMerchants   int64               `json:"currentMonthNewMerchants"`
+	StoreCount                 int64               `json:"storeCount"`
+	EnabledStoreCount          int64               `json:"enabledStoreCount"`
+	DisabledStoreCount         int64               `json:"disabledStoreCount"`
+	TagCount                   int64               `json:"tagCount"`
+	TaskCount                  int64               `json:"taskCount"`
+	CrawlEnabledStoreCount     int64               `json:"crawlEnabledStoreCount"`
+	CrawlFailedStoreCount      int64               `json:"crawlFailedStoreCount"`
+	CrawlDataAccumulatingCount int64               `json:"crawlDataAccumulatingCount"`
+	TotalCustomerVisits        int64               `json:"totalCustomerVisits"`
+	CurrentWeekCustomerVisits  int64               `json:"currentWeekCustomerVisits"`
+	CurrentMonthCustomerVisits int64               `json:"currentMonthCustomerVisits"`
+	TotalPublishClicks         int64               `json:"totalPublishClicks"`
+	CurrentWeekPublishClicks   int64               `json:"currentWeekPublishClicks"`
+	CurrentMonthPublishClicks  int64               `json:"currentMonthPublishClicks"`
+	DeviceStats                service.DeviceStats `json:"deviceStats"`
+	DataSource                 string              `json:"dataSource"`
+	DataSourceLabel            string              `json:"dataSourceLabel"`
+	UpdatedAt                  string              `json:"updatedAt"`
+}
+
+type adminStoreAnalytics struct {
+	TotalCustomerVisits        int64               `json:"totalCustomerVisits"`
+	CurrentWeekCustomerVisits  int64               `json:"currentWeekCustomerVisits"`
+	CurrentMonthCustomerVisits int64               `json:"currentMonthCustomerVisits"`
+	TotalPublishClicks         int64               `json:"totalPublishClicks"`
+	CurrentWeekPublishClicks   int64               `json:"currentWeekPublishClicks"`
+	CurrentMonthPublishClicks  int64               `json:"currentMonthPublishClicks"`
+	ActivePlatformLinkCount    int64               `json:"activePlatformLinkCount"`
+	DeviceStats                service.DeviceStats `json:"deviceStats"`
+	DataSource                 string              `json:"dataSource"`
+	DataSourceLabel            string              `json:"dataSourceLabel"`
+}
 
 func (h *Handler) Register(api *gin.RouterGroup) {
 	api.POST("/admin/auth/login", h.login)
@@ -28,6 +72,12 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		admin.PUT("/stores/:id", h.updateStore)
 		admin.PUT("/stores/:id/status", h.updateStoreStatus)
 		admin.DELETE("/stores/:id", h.deleteStore)
+		admin.POST("/stores/:id/reviews/regenerate", h.regenerateStoreReviews)
+		admin.POST("/stores/:id/review-crawl/run", h.runStoreReviewCrawl)
+		admin.GET("/stores/:id/review-crawl/batches", h.listStoreReviewCrawlBatches)
+		admin.GET("/stores/:id/review-crawl/matches", h.listStoreReviewCrawlMatches)
+		admin.GET("/platform-reviews", h.listPlatformReviews)
+		admin.PUT("/platform-reviews/:id/few-shot", h.updatePlatformReviewFewShot)
 		admin.GET("/nfc-tags", h.listTags)
 		admin.POST("/nfc-tags", h.createTag)
 		admin.PUT("/nfc-tags/:id/bind", h.bindTag)
@@ -35,6 +85,113 @@ func (h *Handler) Register(api *gin.RouterGroup) {
 		admin.GET("/review-generation-tasks", h.listTasks)
 		admin.GET("/stats", h.stats)
 	}
+}
+
+func (h *Handler) regenerateStoreReviews(c *gin.Context) {
+	if h.ReviewPool == nil {
+		response.Error(c, http.StatusServiceUnavailable, "评论生成服务未配置")
+		return
+	}
+
+	var store model.Store
+	if err := h.DB.First(&store, uintParam(c)).Error; err != nil {
+		response.Error(c, http.StatusNotFound, "门店不存在")
+		return
+	}
+
+	var req struct {
+		TargetCount  int    `json:"targetCount"`
+		PlatformCode string `json:"platformCode"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Error(c, http.StatusBadRequest, "参数错误")
+		return
+	}
+
+	targetCount, err := normalizeAdminTargetCount(req.TargetCount, h.Config.DefaultReviewTargetCount, h.Config.MaxReviewGenerateCount)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, "targetCount 超出允许范围")
+		return
+	}
+	platformCode, err := h.activeStorePlatformCode(store.ID, req.PlatformCode, store.PrimaryPlatformStyle)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	cleared, err := h.ReviewPool.RegenerateForStorePlatform(store.ID, platformCode, targetCount)
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, err.Error())
+		return
+	}
+	response.Success(c, gin.H{
+		"cleared":      cleared,
+		"generated":    targetCount,
+		"platformCode": platformCode,
+	})
+}
+
+func normalizeAdminTargetCount(value, defaultValue, maxValue int) (int, error) {
+	if value == 0 {
+		value = defaultValue
+	}
+	if value <= 0 {
+		return 0, errors.New("targetCount must be greater than 0")
+	}
+	if value > maxValue {
+		return 0, errors.New("targetCount exceeds maximum")
+	}
+	return value, nil
+}
+
+func (h *Handler) activeStorePlatformCode(storeID uint, requested string, fallback string) (string, error) {
+	platformCode := strings.TrimSpace(requested)
+	if platformCode == "" {
+		platformCode = strings.TrimSpace(fallback)
+	}
+	if platformCode == "" {
+		return "", errors.New("请选择评价平台")
+	}
+	var link model.StorePlatformLink
+	if err := h.DB.Where("store_id = ? AND platform_code = ? AND status = ?", storeID, platformCode, model.StatusEnabled).First(&link).Error; err != nil {
+		return "", errors.New("评价平台不可用")
+	}
+	return platformCode, nil
+}
+
+func (h *Handler) runStoreReviewCrawl(c *gin.Context) {
+	if h.ReviewCrawl == nil {
+		response.Error(c, http.StatusServiceUnavailable, "评论采集服务未配置")
+		return
+	}
+	result, err := h.ReviewCrawl.RunForStore(c.Request.Context(), uintParam(c), model.CrawlTriggerManual)
+	if err != nil {
+		response.Error(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *Handler) listStoreReviewCrawlBatches(c *gin.Context) {
+	var items []model.StoreReviewCrawlBatch
+	if err := h.DB.Where("store_id = ?", uintParam(c)).Order("id desc").Limit(20).Find(&items).Error; err != nil {
+		response.Error(c, http.StatusInternalServerError, "采集批次加载失败")
+		return
+	}
+	response.Success(c, items)
+}
+
+func (h *Handler) listStoreReviewCrawlMatches(c *gin.Context) {
+	var items []model.ExternalStoreReview
+	if err := h.DB.
+		Where("store_id = ? AND matched_feedback_id IS NOT NULL", uintParam(c)).
+		Order("review_time desc, id desc").
+		Limit(50).
+		Find(&items).Error; err != nil {
+		response.Error(c, http.StatusInternalServerError, "验证明细加载失败")
+		return
+	}
+	response.Success(c, items)
 }
 
 func uintParam(c *gin.Context) uint {
@@ -97,7 +254,14 @@ func (h *Handler) listStores(c *gin.Context) {
 	for _, item := range items {
 		var merchant model.MerchantUser
 		_ = h.DB.First(&merchant, item.MerchantUserID).Error
-		views = append(views, h.storeView(h.DB, item, merchant))
+		view := h.storeView(h.DB, item, merchant)
+		analytics, err := h.storeAnalytics(item.ID)
+		if err != nil {
+			response.Error(c, http.StatusInternalServerError, "门店数据加载失败")
+			return
+		}
+		view.Analytics = analytics
+		views = append(views, view)
 	}
 	response.Success(c, views)
 }
@@ -213,20 +377,177 @@ func (h *Handler) updateTagStatus(c *gin.Context) {
 
 func (h *Handler) listTasks(c *gin.Context) {
 	var items []model.ReviewGenerationTask
-	h.DB.Order("id desc").Find(&items)
+	h.DB.Preload("AuditLogs", func(db *gorm.DB) *gorm.DB {
+		return db.Order("id desc")
+	}).Order("id desc").Find(&items)
 	response.Success(c, items)
 }
 
 func (h *Handler) stats(c *gin.Context) {
-	var merchantCount, storeCount, tagCount, taskCount int64
+	loc := adminDashboardLocation()
+	now := time.Now().In(loc)
+	weekStart := adminStartOfWeek(now)
+	monthStart := adminStartOfMonth(now)
+
+	var merchantCount, enabledMerchantCount, disabledMerchantCount, currentWeekNewMerchants, currentMonthNewMerchants int64
 	h.DB.Model(&model.MerchantUser{}).Count(&merchantCount)
+	h.DB.Model(&model.MerchantUser{}).Where("status = ?", model.StatusEnabled).Count(&enabledMerchantCount)
+	h.DB.Model(&model.MerchantUser{}).Where("status <> ?", model.StatusEnabled).Count(&disabledMerchantCount)
+	h.DB.Model(&model.MerchantUser{}).Where("created_at >= ?", weekStart).Count(&currentWeekNewMerchants)
+	h.DB.Model(&model.MerchantUser{}).Where("created_at >= ?", monthStart).Count(&currentMonthNewMerchants)
+
+	var storeCount, enabledStoreCount, disabledStoreCount int64
 	h.DB.Model(&model.Store{}).Count(&storeCount)
+	h.DB.Model(&model.Store{}).Where("status = ?", model.StatusEnabled).Count(&enabledStoreCount)
+	h.DB.Model(&model.Store{}).Where("status <> ?", model.StatusEnabled).Count(&disabledStoreCount)
+
+	var tagCount, taskCount int64
 	h.DB.Model(&model.NFCTag{}).Count(&tagCount)
 	h.DB.Model(&model.ReviewGenerationTask{}).Count(&taskCount)
-	response.Success(c, gin.H{
-		"merchantCount": merchantCount,
-		"storeCount":    storeCount,
-		"tagCount":      tagCount,
-		"taskCount":     taskCount,
+
+	var crawlEnabledStoreCount, crawlFailedStoreCount, crawlDataAccumulatingCount int64
+	h.DB.Model(&model.StoreReviewCrawlConfig{}).Where("enabled = ?", true).Count(&crawlEnabledStoreCount)
+	h.DB.Model(&model.StoreReviewCrawlConfig{}).Where("enabled = ? AND last_status = ?", true, model.CrawlStatusFailed).Count(&crawlFailedStoreCount)
+	h.DB.Model(&model.StoreReviewCrawlConfig{}).Where("enabled = ? AND baseline_completed_at IS NULL", true).Count(&crawlDataAccumulatingCount)
+
+	totalVisits, err := service.CountReviewLogAction(h.DB, 0, service.ReviewActionPageView, time.Time{}, time.Time{})
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "访问次数加载失败")
+		return
+	}
+	currentWeekVisits, err := service.CountReviewLogAction(h.DB, 0, service.ReviewActionPageView, weekStart, weekStart.AddDate(0, 0, 7))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "本周访问次数加载失败")
+		return
+	}
+	currentMonthVisits, err := service.CountReviewLogAction(h.DB, 0, service.ReviewActionPageView, monthStart, monthStart.AddDate(0, 1, 0))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "本月访问次数加载失败")
+		return
+	}
+	totalPublishClicks, err := service.CountReviewLogAction(h.DB, 0, service.ReviewActionPlatformLinkClick, time.Time{}, time.Time{})
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "发布次数加载失败")
+		return
+	}
+	currentWeekPublishClicks, err := service.CountReviewLogAction(h.DB, 0, service.ReviewActionPlatformLinkClick, weekStart, weekStart.AddDate(0, 0, 7))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "本周发布次数加载失败")
+		return
+	}
+	currentMonthPublishClicks, err := service.CountReviewLogAction(h.DB, 0, service.ReviewActionPlatformLinkClick, monthStart, monthStart.AddDate(0, 1, 0))
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "本月发布次数加载失败")
+		return
+	}
+	deviceStats, err := service.DeviceStatsForReviewLogs(h.DB, 0, service.ReviewActionPageView, time.Time{}, time.Time{})
+	if err != nil {
+		response.Error(c, http.StatusInternalServerError, "设备占比加载失败")
+		return
+	}
+
+	response.Success(c, adminStatsResponse{
+		MerchantCount:              merchantCount,
+		EnabledMerchantCount:       enabledMerchantCount,
+		DisabledMerchantCount:      disabledMerchantCount,
+		CurrentWeekNewMerchants:    currentWeekNewMerchants,
+		CurrentMonthNewMerchants:   currentMonthNewMerchants,
+		StoreCount:                 storeCount,
+		EnabledStoreCount:          enabledStoreCount,
+		DisabledStoreCount:         disabledStoreCount,
+		TagCount:                   tagCount,
+		TaskCount:                  taskCount,
+		CrawlEnabledStoreCount:     crawlEnabledStoreCount,
+		CrawlFailedStoreCount:      crawlFailedStoreCount,
+		CrawlDataAccumulatingCount: crawlDataAccumulatingCount,
+		TotalCustomerVisits:        totalVisits,
+		CurrentWeekCustomerVisits:  currentWeekVisits,
+		CurrentMonthCustomerVisits: currentMonthVisits,
+		TotalPublishClicks:         totalPublishClicks,
+		CurrentWeekPublishClicks:   currentWeekPublishClicks,
+		CurrentMonthPublishClicks:  currentMonthPublishClicks,
+		DeviceStats:                deviceStats,
+		DataSource:                 service.ReviewAnalyticsDataSource,
+		DataSourceLabel:            service.ReviewAnalyticsDataSourceLabel,
+		UpdatedAt:                  now.Format(time.RFC3339),
 	})
+}
+
+func (h *Handler) storeAnalytics(storeID uint) (adminStoreAnalytics, error) {
+	loc := adminDashboardLocation()
+	now := time.Now().In(loc)
+	weekStart := adminStartOfWeek(now)
+	monthStart := adminStartOfMonth(now)
+
+	totalVisits, err := service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPageView, time.Time{}, time.Time{})
+	if err != nil {
+		return adminStoreAnalytics{}, err
+	}
+	currentWeekVisits, err := service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPageView, weekStart, weekStart.AddDate(0, 0, 7))
+	if err != nil {
+		return adminStoreAnalytics{}, err
+	}
+	currentMonthVisits, err := service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPageView, monthStart, monthStart.AddDate(0, 1, 0))
+	if err != nil {
+		return adminStoreAnalytics{}, err
+	}
+	totalPublishClicks, err := service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPlatformLinkClick, time.Time{}, time.Time{})
+	if err != nil {
+		return adminStoreAnalytics{}, err
+	}
+	currentWeekPublishClicks, err := service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPlatformLinkClick, weekStart, weekStart.AddDate(0, 0, 7))
+	if err != nil {
+		return adminStoreAnalytics{}, err
+	}
+	currentMonthPublishClicks, err := service.CountReviewLogAction(h.DB, storeID, service.ReviewActionPlatformLinkClick, monthStart, monthStart.AddDate(0, 1, 0))
+	if err != nil {
+		return adminStoreAnalytics{}, err
+	}
+	deviceStats, err := service.DeviceStatsForReviewLogs(h.DB, storeID, service.ReviewActionPageView, time.Time{}, time.Time{})
+	if err != nil {
+		return adminStoreAnalytics{}, err
+	}
+
+	var activeLinks int64
+	if err := h.DB.Model(&model.StorePlatformLink{}).
+		Where("store_id = ? AND status = ?", storeID, model.StatusEnabled).
+		Count(&activeLinks).Error; err != nil {
+		return adminStoreAnalytics{}, err
+	}
+
+	return adminStoreAnalytics{
+		TotalCustomerVisits:        totalVisits,
+		CurrentWeekCustomerVisits:  currentWeekVisits,
+		CurrentMonthCustomerVisits: currentMonthVisits,
+		TotalPublishClicks:         totalPublishClicks,
+		CurrentWeekPublishClicks:   currentWeekPublishClicks,
+		CurrentMonthPublishClicks:  currentMonthPublishClicks,
+		ActivePlatformLinkCount:    activeLinks,
+		DeviceStats:                deviceStats,
+		DataSource:                 service.ReviewAnalyticsDataSource,
+		DataSourceLabel:            service.ReviewAnalyticsDataSourceLabel,
+	}, nil
+}
+
+func adminDashboardLocation() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.Local
+	}
+	return loc
+}
+
+func adminStartOfWeek(t time.Time) time.Time {
+	t = t.In(adminDashboardLocation())
+	weekday := int(t.Weekday())
+	if weekday == 0 {
+		weekday = 7
+	}
+	day := t.AddDate(0, 0, -(weekday - 1))
+	return time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
+}
+
+func adminStartOfMonth(t time.Time) time.Time {
+	t = t.In(adminDashboardLocation())
+	return time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, t.Location())
 }

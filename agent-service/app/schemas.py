@@ -8,8 +8,12 @@ from pydantic import BaseModel, Field
 PlatformCode = Literal["dianping", "meituan", "xiaohongshu", "douyin"]
 SatisfactionLevel = Literal["非常满意", "比较满意", "一般", "有点失望", "非常失望"]
 Grade = Literal["", "S", "A", "B", "C", "D"]
+StyleCode = Literal["natural", "detail_rich", "young_casual", "restrained", "regular_customer"]
+DiversityDimension = Literal["customer_identity", "dining_scene", "content_angle", "expression_structure"]
+LengthVariance = Literal["default", "wide"]
 Keyword = Annotated[str, Field(min_length=1, max_length=40)]
 Tag = Annotated[str, Field(min_length=1, max_length=40)]
+ReferenceReview = Annotated[str, Field(min_length=1, max_length=300)]
 
 
 class StoreContext(BaseModel):
@@ -25,6 +29,14 @@ class FeedbackExamples(BaseModel):
     rejected: List[str] = Field(default_factory=list, max_length=12)
 
 
+class GenerationPreferences(BaseModel):
+    focus_keywords: List[Keyword] = Field(default_factory=list, max_length=8)
+    style_codes: List[StyleCode] = Field(default_factory=list, max_length=3)
+    diversity_dimensions: List[DiversityDimension] = Field(default_factory=lambda: ["customer_identity"], max_length=4)
+    reference_reviews: List[ReferenceReview] = Field(default_factory=list, max_length=5)
+    length_variance: LengthVariance = "wide"
+
+
 class GenerateRequest(BaseModel):
     store: StoreContext
     # 菜品/场景标签来源（复用 Go 侧的 StoreKeyword）。生成时据此打 tag，
@@ -37,6 +49,8 @@ class GenerateRequest(BaseModel):
     # 历史反馈：accepted 来自复制/发布，rejected 来自“换一换”前的文案。
     # writer 只能学习风格和细节方向，不能照抄样本。
     feedback: FeedbackExamples = Field(default_factory=FeedbackExamples)
+    # 商家主动偏好：重点、语气、参考评论、字数波动。只影响生成方向，不覆盖平台硬约束。
+    generation_preferences: GenerationPreferences = Field(default_factory=GenerationPreferences)
 
 
 class ReviewItem(BaseModel):
