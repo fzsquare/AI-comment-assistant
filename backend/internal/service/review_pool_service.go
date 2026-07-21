@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,87 @@ func (s *ReviewPoolService) GenerateForStore(storeID uint, triggerType string, t
 	return s.GenerateForStorePlatform(storeID, "", triggerType, targetCount)
 }
 
+func NewPendingReviewGenerationTask(storeID uint, platformCode string, triggerType string, targetCount int) model.ReviewGenerationTask {
+	return model.ReviewGenerationTask{
+		StoreID:               storeID,
+		PlatformStyle:         platformCode,
+		TriggerType:           triggerType,
+		TargetCount:           targetCount,
+		Status:                model.TaskStatusPending,
+		DuplicateCheckVersion: ReviewMatchAlgorithmVersion,
+	}
+}
+
+func pendingInitTaskScope(db *gorm.DB) *gorm.DB {
+	return db.Where("trigger_type = ? AND status = ?", model.TriggerInit, model.TaskStatusPending)
+}
+
+func claimPendingGenerationTask(db *gorm.DB, taskID uint) *gorm.DB {
+	return db.Model(&model.ReviewGenerationTask{}).
+		Where("id = ? AND status = ?", taskID, model.TaskStatusPending).
+		Updates(map[string]interface{}{
+			"status":        model.TaskStatusRunning,
+			"error_message": "",
+		})
+}
+
+func (s *ReviewPoolService) RunPendingGenerationTask(taskID uint) error {
+	if s == nil || s.DB == nil {
+		return errors.New("review pool database is required")
+	}
+
+	var task model.ReviewGenerationTask
+	if err := s.DB.Where("id = ? AND status = ?", taskID, model.TaskStatusPending).First(&task).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+
+	claim := claimPendingGenerationTask(s.DB, task.ID)
+	if claim.Error != nil {
+		return claim.Error
+	}
+	if claim.RowsAffected != 1 {
+		return nil
+	}
+
+	task.Status = model.TaskStatusRunning
+	task.ErrorMessage = ""
+	return s.processGenerationTask(&task)
+}
+
+func (s *ReviewPoolService) RunPendingGenerationTaskAsync(taskID uint) {
+	if s == nil || taskID == 0 {
+		return
+	}
+	go func() {
+		if err := s.RunPendingGenerationTask(taskID); err != nil {
+			log.Printf("review_generation_async_failed task_id=%d err=%v", taskID, err)
+		}
+	}()
+}
+
+func (s *ReviewPoolService) ResumePendingInitTasksAsync() {
+	if s == nil || s.DB == nil {
+		return
+	}
+	go func() {
+		var taskIDs []uint
+		if err := pendingInitTaskScope(s.DB.Model(&model.ReviewGenerationTask{})).
+			Order("id asc").
+			Pluck("id", &taskIDs).Error; err != nil {
+			log.Printf("review_generation_resume_query_failed err=%v", err)
+			return
+		}
+		for _, taskID := range taskIDs {
+			if err := s.RunPendingGenerationTask(taskID); err != nil {
+				log.Printf("review_generation_resume_failed task_id=%d err=%v", taskID, err)
+			}
+		}
+	}()
+}
+
 func (s *ReviewPoolService) RegenerateForStorePlatform(storeID uint, platformCode string, targetCount int) (int64, error) {
 	var store model.Store
 	if err := s.DB.First(&store, storeID).Error; err != nil {
@@ -72,30 +154,44 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 		return err
 	}
 	platformCode = normalizePlatformCode(platformCode, store.PrimaryPlatformStyle)
-	store.PrimaryPlatformStyle = platformCode
-
-	var keywords []model.StoreKeyword
-	s.DB.Where("store_id = ?", storeID).Order("sort_no asc, id asc").Find(&keywords)
-	feedback := s.feedbackExamples(storeID, platformCode)
-	preferences := s.generationPreferences(storeID, platformCode)
-
-	task := model.ReviewGenerationTask{
-		StoreID:               storeID,
-		PlatformStyle:         platformCode,
-		TriggerType:           triggerType,
-		TargetCount:           targetCount,
-		Status:                model.TaskStatusRunning,
-		DuplicateCheckVersion: ReviewMatchAlgorithmVersion,
-	}
+	task := NewPendingReviewGenerationTask(storeID, platformCode, triggerType, targetCount)
 	if err := s.DB.Create(&task).Error; err != nil {
 		return err
 	}
+	return s.RunPendingGenerationTask(task.ID)
+}
+
+func (s *ReviewPoolService) processGenerationTask(task *model.ReviewGenerationTask) error {
+	var store model.Store
+	if err := s.DB.First(&store, task.StoreID).Error; err != nil {
+		task.Status = model.TaskStatusFailed
+		task.ErrorMessage = err.Error()
+		_ = s.DB.Save(task).Error
+		return err
+	}
+
+	platformCode := normalizePlatformCode(task.PlatformStyle, store.PrimaryPlatformStyle)
+	if platformCode == "" {
+		err := errors.New("platformCode is required")
+		task.Status = model.TaskStatusFailed
+		task.ErrorMessage = err.Error()
+		_ = s.DB.Save(task).Error
+		return err
+	}
+	task.PlatformStyle = platformCode
+	store.PrimaryPlatformStyle = platformCode
+
+	var keywords []model.StoreKeyword
+	s.DB.Where("store_id = ?", task.StoreID).Order("sort_no asc, id asc").Find(&keywords)
+	feedback := s.feedbackExamples(task.StoreID, platformCode)
+	preferences := s.generationPreferences(task.StoreID, platformCode)
+
 	s.recordGenerationAudit(generationAuditInput{
-		Task:    task,
+		Task:    *task,
 		Stage:   "task_started",
 		Level:   "info",
 		Status:  model.TaskStatusRunning,
-		Message: "生成任务已创建",
+		Message: "生成任务开始执行",
 		Detail: map[string]interface{}{
 			"keywordCount":          len(keywords),
 			"acceptedFeedbackCount": len(feedback.Accepted),
@@ -103,12 +199,19 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 			"referenceReviewCount":  len(preferences.ReferenceReviews),
 		},
 	})
+	if s.Generator == nil {
+		err := errors.New("review generator is required")
+		task.Status = model.TaskStatusFailed
+		task.ErrorMessage = err.Error()
+		_ = s.DB.Save(task).Error
+		return err
+	}
 
 	var reviews []model.ReviewItem
 	var err error
 	agentStartedAt := time.Now()
 	s.recordGenerationAudit(generationAuditInput{
-		Task:    task,
+		Task:    *task,
 		Stage:   "agent_request",
 		Level:   "info",
 		Status:  model.TaskStatusRunning,
@@ -119,11 +222,11 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 			TaskID:      task.ID,
 			Feedback:    feedback,
 			Preferences: preferences,
-		}, targetCount)
+		}, task.TargetCount)
 	} else if generator, ok := s.Generator.(FeedbackAwareReviewGenerator); ok {
-		reviews, err = generator.GenerateWithFeedback(store, keywords, feedback, targetCount)
+		reviews, err = generator.GenerateWithFeedback(store, keywords, feedback, task.TargetCount)
 	} else {
-		reviews, err = s.Generator.Generate(store, keywords, targetCount)
+		reviews, err = s.Generator.Generate(store, keywords, task.TargetCount)
 	}
 	agentErr := err
 	if err != nil {
@@ -133,9 +236,9 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 			task.Status = model.TaskStatusFailed
 		}
 		task.ErrorMessage = err.Error()
-		s.DB.Save(&task)
+		s.DB.Save(task)
 		s.recordGenerationAudit(generationAuditInput{
-			Task:       task,
+			Task:       *task,
 			Stage:      "agent_error",
 			Level:      "error",
 			Status:     task.Status,
@@ -153,7 +256,7 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	task.GeneratedRawCount = len(reviews)
 	if agentErr == nil {
 		s.recordGenerationAudit(generationAuditInput{
-			Task:     task,
+			Task:     *task,
 			Stage:    "agent_response",
 			Level:    "info",
 			Status:   model.TaskStatusRunning,
@@ -168,9 +271,9 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	if len(reviews) == 0 {
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = "no reviews generated"
-		s.DB.Save(&task)
+		s.DB.Save(task)
 		s.recordGenerationAudit(generationAuditInput{
-			Task:    task,
+			Task:    *task,
 			Stage:   "pool_empty",
 			Level:   "error",
 			Status:  model.TaskStatusFailed,
@@ -178,12 +281,12 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 		})
 		return errors.New("no reviews generated")
 	}
-	existingContents := s.duplicateCheckContents(storeID, platformCode)
+	existingContents := s.duplicateCheckContents(task.StoreID, platformCode)
 	filteredReviews, duplicateCount := filterDuplicateGeneratedReviews(reviews, existingContents)
 	task.DuplicateFilteredCount = duplicateCount
 	reviews = filteredReviews
 	s.recordGenerationAudit(generationAuditInput{
-		Task:    task,
+		Task:    *task,
 		Stage:   "duplicate_filter",
 		Level:   "info",
 		Status:  model.TaskStatusRunning,
@@ -197,9 +300,9 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = "all generated reviews were duplicates"
 		task.FailedCount = duplicateCount
-		s.DB.Save(&task)
+		s.DB.Save(task)
 		s.recordGenerationAudit(generationAuditInput{
-			Task:    task,
+			Task:    *task,
 			Stage:   "duplicate_filter",
 			Level:   "error",
 			Status:  model.TaskStatusFailed,
@@ -209,7 +312,7 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	}
 
 	for i := range reviews {
-		reviews[i].StoreID = storeID
+		reviews[i].StoreID = task.StoreID
 		reviews[i].PlatformStyle = platformCode
 		if reviews[i].GenerationBatchNo == "" {
 			reviews[i].GenerationBatchNo = fmt.Sprintf("batch_%s", utils.RandomString(12))
@@ -222,9 +325,9 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 	if err := s.DB.Create(&reviews).Error; err != nil {
 		task.Status = model.TaskStatusFailed
 		task.ErrorMessage = err.Error()
-		s.DB.Save(&task)
+		s.DB.Save(task)
 		s.recordGenerationAudit(generationAuditInput{
-			Task:    task,
+			Task:    *task,
 			Stage:   "db_insert_error",
 			Level:   "error",
 			Status:  model.TaskStatusFailed,
@@ -235,14 +338,14 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 
 	task.SuccessCount = len(reviews)
 	task.InsertedRowCount = len(reviews)
-	task.FailedCount = duplicateCount + generationFailureCount(targetCount, task.GeneratedRawCount, agentErr)
+	task.FailedCount = duplicateCount + generationFailureCount(task.TargetCount, task.GeneratedRawCount, agentErr)
 	if duplicateCount > 0 || agentErr != nil {
 		task.Status = model.TaskStatusPartialFailed
 	} else {
 		task.Status = model.TaskStatusSuccess
 	}
 	s.recordGenerationAudit(generationAuditInput{
-		Task:    task,
+		Task:    *task,
 		Stage:   "task_completed",
 		Level:   "info",
 		Status:  task.Status,
@@ -253,7 +356,7 @@ func (s *ReviewPoolService) GenerateForStorePlatform(storeID uint, platformCode 
 			"insertedRowCount": task.InsertedRowCount,
 		},
 	})
-	return s.DB.Save(&task).Error
+	return s.DB.Save(task).Error
 }
 
 func (s *ReviewPoolService) duplicateCheckContents(storeID uint, platformCode string) []string {

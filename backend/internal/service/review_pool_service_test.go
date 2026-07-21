@@ -1,10 +1,55 @@
 package service
 
 import (
+	"strings"
 	"testing"
 
 	"ppk/backend/internal/model"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
+
+func TestPendingInitTaskScopeOnlyRecoversQueuedInitialGeneration(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("open dry-run database: %v", err)
+	}
+
+	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		var taskIDs []uint
+		return pendingInitTaskScope(tx.Model(&model.ReviewGenerationTask{})).Pluck("id", &taskIDs)
+	})
+
+	for _, required := range []string{"trigger_type", model.TriggerInit, "status", model.TaskStatusPending} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("recovery SQL %q missing %q", sql, required)
+		}
+	}
+}
+
+func TestClaimPendingGenerationTaskRequiresPendingStatus(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		DSN:                       "gorm:gorm@tcp(localhost:9910)/gorm?charset=utf8&parseTime=True&loc=Local",
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("open dry-run database: %v", err)
+	}
+
+	sql := db.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		return claimPendingGenerationTask(tx, 42)
+	})
+
+	for _, required := range []string{"42", "status", model.TaskStatusPending, model.TaskStatusRunning} {
+		if !strings.Contains(sql, required) {
+			t.Fatalf("claim SQL %q missing %q", sql, required)
+		}
+	}
+}
 
 func TestGenerationPreferencesFromRowIncludesDiversityDimensions(t *testing.T) {
 	prefs := generationPreferencesFromRow(model.StoreGenerationPreference{

@@ -146,6 +146,15 @@ func industryNameForType(stype model.StoreType) string {
 	return industryName
 }
 
+func initialReviewGenerationTask(store model.Store, targetCount int) model.ReviewGenerationTask {
+	return service.NewPendingReviewGenerationTask(
+		store.ID,
+		store.PrimaryPlatformStyle,
+		model.TriggerInit,
+		targetCount,
+	)
+}
+
 func (h *Handler) listStoreTypes(c *gin.Context) {
 	var items []model.StoreType
 	h.DB.Order("is_preset desc, id asc").Find(&items)
@@ -232,6 +241,7 @@ func (h *Handler) createStore(c *gin.Context) {
 		BrandTone:            req.BrandTone,
 		Status:               model.StatusEnabled,
 	}
+	var initialTask model.ReviewGenerationTask
 
 	if err := h.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&merchant).Error; err != nil {
@@ -250,10 +260,17 @@ func (h *Handler) createStore(c *gin.Context) {
 		if err := saveReviewCrawlConfig(tx, store.ID, req); err != nil {
 			return err
 		}
+		initialTask = initialReviewGenerationTask(store, h.Config.DefaultReviewTargetCount)
+		if err := tx.Create(&initialTask).Error; err != nil {
+			return err
+		}
 		return nil
 	}); err != nil {
 		response.Error(c, http.StatusBadRequest, "创建失败：登录账号可能已存在")
 		return
+	}
+	if h.ReviewPool != nil {
+		h.ReviewPool.RunPendingGenerationTaskAsync(initialTask.ID)
 	}
 
 	response.Success(c, gin.H{

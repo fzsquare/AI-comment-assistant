@@ -27,6 +27,7 @@ func SetupRouter(cfg config.Config, db *gorm.DB) *gin.Engine {
 
 	authService := &service.AuthService{DB: db, Config: cfg}
 	reviewPoolService := buildReviewPoolService(cfg, db)
+	reviewPoolService.ResumePendingInitTasksAsync()
 	reviewCrawlService := service.NewReviewCrawlService(db, cfg)
 	reviewCrawlService.StartScheduler(context.Background())
 
